@@ -1,0 +1,14 @@
+# আপলোড করা ফাইল (ছবি/মার্কশিট) এই ফোল্ডারে PHP হিসেবে এক্সিকিউট হওয়া বন্ধ করা হচ্ছে।
+# কেউ যদি .php এক্সটেনশনের কোনো ফাইল bypass করে আপলোড করেও ফেলে,
+# এই কনফিগ থাকলে সেটা কোড হিসেবে রান হবে না, শুধু স্ট্যাটিক ফাইল হিসেবে সার্ভ হবে।
+
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>
+
+<FilesMatch "\.(php|php3|php4|php5|php7|phtml|pht)$">
+    Require all denied
+</FilesMatch>

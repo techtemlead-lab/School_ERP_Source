@@ -1,0 +1,362 @@
+<?php
+// admin/academic_class_import.php - Academic Module > Class > Import Class (Excel/CSV/TXT)
+//
+// hr_employee_import.php / student_import.php এর একই প্যাটার্ন: (১) আপলোড -> পার্স -> ভ্যালিডেট -> প্রিভিউ
+// (২) Confirm করলে শুধু ভ্যালিড রো গুলো academic_classes টেবিলে insert হয়।
+// CSV/TXT/XLSX পার্সিং লজিক config/import_helpers.php তে শেয়ার্ড।
+
+require_once __DIR__ . '/../config/import_helpers.php';
+
+// academic_classes / academic_mediums টেবিল এখনো তৈরি না হলে (একদম নতুন tenant) নিশ্চিত করে নেওয়া
+$pdo->exec(
+    "CREATE TABLE IF NOT EXISTS academic_mediums (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        medium_name VARCHAR(100) NOT NULL,
+        medium_code VARCHAR(20) NULL,
+        status ENUM('Active','Inactive') NOT NULL DEFAULT 'Active'
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+);
+$pdo->exec(
+    "CREATE TABLE IF NOT EXISTS academic_classes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        medium_id INT NULL,
+        class_name VARCHAR(100) NOT NULL,
+        rank INT NOT NULL DEFAULT 0,
+        class_code VARCHAR(5) NULL,
+        has_group TINYINT(1) NOT NULL DEFAULT 0,
+        status ENUM('Active','Inactive') NOT NULL DEFAULT 'Active'
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+);
+
+$imp_msg = $_SESSION['cls_imp_msg'] ?? '';
+$imp_err = $_SESSION['cls_imp_err'] ?? '';
+unset($_SESSION['cls_imp_msg'], $_SESSION['cls_imp_err']);
+
+function civ($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
+
+$cls_import_field_aliases = [
+    'medium'     => ['medium', 'medium name', 'মিডিয়াম'],
+    'class_name' => ['class name', 'class', 'নাম', 'ক্লাস'],
+    'rank'       => ['rank', 'র‍্যাংক', 'র‌্যাংক'],
+    'class_code' => ['class code', 'code', 'ক্লাস কোড'],
+    'has_group'  => ['has group', 'has group/4th subject', 'group', '4th subject', 'গ্রুপ'],
+    'status'     => ['status', 'স্ট্যাটাস'],
+];
+
+$import_tmp_dir = tenant_upload_abs(__DIR__ . '/..', 'tmp');
+if (!is_dir($import_tmp_dir)) { mkdir($import_tmp_dir, 0755, true); }
+import_cleanup_old_temp($import_tmp_dir);
+
+// -----------------------------------------------------------
+// স্যাম্পল CSV টেমপ্লেট ডাউনলোড
+// -----------------------------------------------------------
+if (isset($_GET['sample'])) {
+    while (ob_get_level() > 0) { ob_end_clean(); } // sidebar/header ইতিমধ্যে যা buffer-এ জমেছে তা ফেলে দাও
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="class_import_sample.csv"');
+    echo "\xEF\xBB\xBF";
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['Medium', 'Class Name', 'Rank', 'Class Code', 'Has Group/4th Subject', 'Status']);
+    fputcsv($out, ['Bangla Medium', 'Class Six', '6', '06', 'No', 'Active']);
+    fputcsv($out, ['Bangla Medium', 'Class Nine', '9', '09', 'Yes', 'Active']);
+    fclose($out);
+    exit();
+}
+
+// -----------------------------------------------------------
+// STEP 1: আপলোড -> পার্স -> ভ্যালিডেট -> প্রিভিউ
+// -----------------------------------------------------------
+$preview_rows = null;
+$preview_token = null;
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['upload_file'])) {
+    if (!csrf_verify($_POST['csrf_token'] ?? null)) {
+        $_SESSION['cls_imp_err'] = 'ফর্মের মেয়াদ শেষ হয়ে গেছে, আবার চেষ্টা করুন।';
+        header('Location: index.php?page=academic_class_import');
+        exit();
+    }
+    if (!isset($_FILES['import_file']) || $_FILES['import_file']['error'] !== UPLOAD_ERR_OK) {
+        $_SESSION['cls_imp_err'] = 'ফাইল আপলোড করা যায়নি, আবার চেষ্টা করুন।';
+        header('Location: index.php?page=academic_class_import');
+        exit();
+    }
+
+    $file = $_FILES['import_file'];
+    if ($file['size'] > 5 * 1024 * 1024) {
+        $_SESSION['cls_imp_err'] = 'ফাইলের সাইজ সর্বোচ্চ 5MB হতে হবে।';
+        header('Location: index.php?page=academic_class_import');
+        exit();
+    }
+
+    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    if (!in_array($ext, ['csv', 'txt', 'xlsx'], true)) {
+        $_SESSION['cls_imp_err'] = 'শুধু .csv, .txt অথবা .xlsx ফাইল আপলোড করা যাবে। (পুরনো .xls হলে Excel থেকে .xlsx/.csv তে "Save As" করে আবার চেষ্টা করুন।)';
+        header('Location: index.php?page=academic_class_import');
+        exit();
+    }
+
+    try {
+        $rawRows = import_parse_file($file['tmp_name'], $ext);
+    } catch (Exception $e) {
+        $_SESSION['cls_imp_err'] = $e->getMessage();
+        header('Location: index.php?page=academic_class_import');
+        exit();
+    }
+
+    if (count($rawRows) < 2) {
+        $_SESSION['cls_imp_err'] = 'ফাইলে হেডার সারি বাদে অন্তত ১টা ডাটা সারি থাকতে হবে।';
+        header('Location: index.php?page=academic_class_import');
+        exit();
+    }
+
+    $headerRow = array_shift($rawRows);
+    $colMap = import_map_headers($headerRow, $cls_import_field_aliases);
+
+    if (!in_array('class_name', $colMap, true)) {
+        $_SESSION['cls_imp_err'] = 'ফাইলে অন্তত Class Name কলাম থাকা আবশ্যক (কলামের নাম মিলছে না — স্যাম্পল টেমপ্লেট দেখে ঠিক করুন)।';
+        header('Location: index.php?page=academic_class_import');
+        exit();
+    }
+
+    $mediums_lk = [];
+    foreach ($pdo->query("SELECT id, medium_name FROM academic_mediums WHERE status='Active'") as $r) {
+        $mediums_lk[mb_strtolower(trim($r['medium_name']))] = $r['id'];
+    }
+
+    // ডুপ্লিকেট চেক: class_name ও class_code — সব Medium মিলিয়ে গ্লোবালি ইউনিক
+    // (Student ID জেনারেশনে শুধু Class Code ব্যবহার হয়, Medium ধরে না — তাই
+    // দুই Medium-এ একই Code/Name থাকলে Student ID কলাইড করবে/কনফিউশন হবে —
+    // academic_class.php-র ম্যানুয়াল Add/Edit ফর্মের সাথে সামঞ্জস্যপূর্ণ রাখা হয়েছে)
+    $existing_codes = [];
+    foreach ($pdo->query("SELECT class_code FROM academic_classes WHERE class_code IS NOT NULL AND class_code <> ''") as $r) {
+        $existing_codes[$r['class_code']] = true;
+    }
+    $existing_names = [];
+    foreach ($pdo->query("SELECT class_name FROM academic_classes") as $r) {
+        $existing_names[mb_strtolower(trim($r['class_name']))] = true;
+    }
+    $seen_codes_in_file = [];
+    $seen_names_in_file = [];
+
+    $validated = [];
+    foreach ($rawRows as $rowIdx => $raw) {
+        if (!array_filter($raw, fn($v) => trim((string) $v) !== '')) continue;
+
+        $row = [];
+        foreach ($colMap as $idx => $field) { $row[$field] = trim((string) ($raw[$idx] ?? '')); }
+
+        $errors = [];
+
+        $class_name = $row['class_name'] ?? '';
+        if ($class_name === '') {
+            $errors[] = 'ক্লাসের নাম নেই';
+        } else {
+            $name_key = mb_strtolower(trim($class_name));
+            if (isset($existing_names[$name_key]) || isset($seen_names_in_file[$name_key])) {
+                $errors[] = "Class Name '{$class_name}' আগে থেকেই আছে (ডুপ্লিকেট)";
+            }
+        }
+
+        $mediumRaw = $row['medium'] ?? '';
+        $medium_id = null;
+        if ($mediumRaw !== '') {
+            $medium_id = $mediums_lk[mb_strtolower($mediumRaw)] ?? null;
+            if (!$medium_id) $errors[] = "Medium '{$mediumRaw}' খুঁজে পাওয়া যায়নি (Academic Module > All Medium এ আগে থেকে যোগ করে নিন)";
+        } elseif (count($mediums_lk) === 1) {
+            $medium_id = array_values($mediums_lk)[0]; // একটাই Medium থাকলে সেটা অটো-সিলেক্ট
+        } else {
+            $errors[] = 'Medium কলাম খালি (একাধিক Medium থাকায় নির্দিষ্ট করে দিতে হবে)';
+        }
+
+        $rank = (int) ($row['rank'] ?? 0);
+
+        $class_code = trim($row['class_code'] ?? '');
+        if ($class_code !== '' && !preg_match('/^\d{1,2}$/', $class_code)) {
+            $errors[] = 'Class Code সংখ্যা হতে হবে (সর্বোচ্চ ২ ডিজিট)';
+        } elseif ($class_code !== '' && strlen($class_code) === 1) {
+            $class_code = '0' . $class_code; // এক ডিজিট হলে সামনে 0 বসানো, যেমন: 6 -> 06
+        }
+
+        if ($class_code !== '' && (isset($existing_codes[$class_code]) || isset($seen_codes_in_file[$class_code]))) {
+            $errors[] = "Class Code '{$class_code}' আগে থেকেই আছে (ডুপ্লিকেট)";
+        }
+
+        $hasGroupRaw = mb_strtolower($row['has_group'] ?? '');
+        $has_group = in_array($hasGroupRaw, ['yes', 'y', 'হ্যাঁ', '1', 'true'], true) ? 1 : 0;
+
+        $statusRaw = mb_strtolower($row['status'] ?? '');
+        $status = $statusRaw === 'inactive' ? 'Inactive' : 'Active';
+
+        $resolved = [
+            'medium_id' => $medium_id, 'medium_label' => $mediumRaw ?: ($medium_id ? array_search($medium_id, $mediums_lk) : ''),
+            'class_name' => $class_name, 'rank' => $rank, 'class_code' => $class_code,
+            'has_group' => $has_group, 'status' => $status,
+        ];
+
+        if ($class_code !== '') { $seen_codes_in_file[$class_code] = true; }
+        if ($class_name !== '') { $seen_names_in_file[mb_strtolower(trim($class_name))] = true; }
+
+        $validated[] = ['row_no' => $rowIdx + 2, 'data' => $resolved, 'errors' => $errors, 'ok' => empty($errors)];
+    }
+
+    if (!$validated) {
+        $_SESSION['cls_imp_err'] = 'ফাইলে কোনো বৈধ ডাটা সারি পাওয়া যায়নি।';
+        header('Location: index.php?page=academic_class_import');
+        exit();
+    }
+
+    $token = bin2hex(random_bytes(12));
+    file_put_contents($import_tmp_dir . 'import_cls_' . $token . '.json', json_encode($validated, JSON_UNESCAPED_UNICODE));
+
+    $preview_rows = $validated;
+    $preview_token = $token;
+}
+
+// -----------------------------------------------------------
+// STEP 2: Confirm — শুধু ভ্যালিড রো insert
+// -----------------------------------------------------------
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_import'])) {
+    if (!csrf_verify($_POST['csrf_token'] ?? null)) {
+        $_SESSION['cls_imp_err'] = 'ফর্মের মেয়াদ শেষ হয়ে গেছে, আবার চেষ্টা করুন।';
+        header('Location: index.php?page=academic_class_import');
+        exit();
+    }
+
+    $token = preg_replace('/[^a-f0-9]/', '', $_POST['token'] ?? '');
+    $tmpFile = $import_tmp_dir . 'import_cls_' . $token . '.json';
+    if ($token === '' || !is_file($tmpFile)) {
+        $_SESSION['cls_imp_err'] = 'প্রিভিউ ডাটার মেয়াদ শেষ হয়ে গেছে (১ ঘন্টা), আবার ফাইল আপলোড করুন।';
+        header('Location: index.php?page=academic_class_import');
+        exit();
+    }
+
+    $rows = json_decode(file_get_contents($tmpFile), true) ?: [];
+    $imported = 0;
+    $skipped = 0;
+
+    $stmt = $pdo->prepare(
+        "INSERT INTO academic_classes (medium_id, class_name, rank, class_code, has_group, status) VALUES (?, ?, ?, ?, ?, ?)"
+    );
+
+    $pdo->beginTransaction();
+    try {
+        foreach ($rows as $r) {
+            if (empty($r['ok'])) { $skipped++; continue; }
+            $d = $r['data'];
+
+            $stmt->execute([
+                $d['medium_id'], $d['class_name'], $d['rank'], $d['class_code'] ?: null, $d['has_group'], $d['status'],
+            ]);
+            $imported++;
+        }
+        $pdo->commit();
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        $_SESSION['cls_imp_err'] = 'Import করার সময় সমস্যা হয়েছে: ' . $e->getMessage();
+        header('Location: index.php?page=academic_class_import');
+        exit();
+    }
+
+    @unlink($tmpFile);
+    if ($imported > 0) {
+        sec_log_activity($pdo, 'Academic', 'Import', "Class Import করা হয়েছে: {$imported} টি (skipped: {$skipped})");
+    }
+    $_SESSION['cls_imp_msg'] = "{$imported} টি Class সফলভাবে import করা হয়েছে।" . ($skipped ? " {$skipped} টি সারি এরর থাকায় বাদ দেওয়া হয়েছে।" : '');
+    header('Location: index.php?page=academic_class_import');
+    exit();
+}
+
+$ok_count = $preview_rows ? count(array_filter($preview_rows, fn($r) => $r['ok'])) : 0;
+$err_count = $preview_rows ? count($preview_rows) - $ok_count : 0;
+?>
+
+<div class="card-custom">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h4 class="fw-bold mb-0 text-dark"><i class="fa-solid fa-file-import"></i> Academic Module &gt; Class &gt; Import Class</h4>
+        <a href="index.php?page=academic_class" class="btn btn-outline-secondary btn-sm"><i class="fa-solid fa-arrow-left"></i> Class লিস্টে ফিরে যান</a>
+    </div>
+
+    <?php if ($imp_msg): ?><div class="alert alert-success py-2"><?php echo htmlspecialchars($imp_msg); ?></div><?php endif; ?>
+    <?php if ($imp_err): ?><div class="alert alert-danger py-2"><?php echo htmlspecialchars($imp_err); ?></div><?php endif; ?>
+
+    <?php if (!$preview_rows): ?>
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card p-3 bg-light">
+                    <h6 class="fw-bold mb-3">ফাইল আপলোড করুন</h6>
+                    <form method="POST" action="index.php?page=academic_class_import" enctype="multipart/form-data">
+                        <?php echo csrf_field(); ?>
+                        <div class="mb-3">
+                            <label class="form-label">Excel (.xlsx) / CSV / TXT ফাইল সিলেক্ট করুন</label>
+                            <input type="file" name="import_file" class="form-control" accept=".xlsx,.csv,.txt" required>
+                            <small class="text-muted d-block mt-1">সর্বোচ্চ 5MB। পুরনো .xls ফরম্যাট হলে আগে .xlsx বা .csv তে সেভ করে নিন।</small>
+                        </div>
+                        <button type="submit" name="upload_file" class="btn btn-primary btn-sm">
+                            <i class="fa-solid fa-upload"></i> Upload &amp; Preview
+                        </button>
+                        <a href="index.php?page=academic_class_import&sample=1" class="btn btn-outline-secondary btn-sm">
+                            <i class="fa-solid fa-download"></i> স্যাম্পল টেমপ্লেট ডাউনলোড
+                        </a>
+                    </form>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="alert alert-info small">
+                    <b>নিয়মাবলী:</b>
+                    <ul class="mb-0 ps-3">
+                        <li>প্রথম সারি অবশ্যই হেডার (কলামের নাম) হতে হবে।</li>
+                        <li>আবশ্যক কলাম: <b>Class Name</b> — বাকিগুলো ঐচ্ছিক।</li>
+                        <li><b>Medium</b> দিলে Academic Module &gt; All Medium এ আগে থেকে তৈরি করা নামের সাথে মিলতে হবে। শুধু একটা Medium থাকলে খালি রাখলেও চলবে।</li>
+                        <li><b>Class Code</b> দিলে ১-২ ডিজিটের সংখ্যা হতে হবে (যেমন: 9, 09, 10) — সব Medium মিলিয়ে গ্লোবালি ডুপ্লিকেট Code থাকলে সেই সারি এরর দেখাবে।</li>
+                        <li><b>Class Name</b>-ও সব Medium মিলিয়ে গ্লোবালি ইউনিক হতে হবে — একই নামে দুইবার থাকলে এরর দেখাবে।</li>
+                        <li><b>Has Group/4th Subject</b> কলামে Yes / No দিন, খালি থাকলে ডিফল্ট 'No' বসবে।</li>
+                        <li><b>Status</b> কলামে Active / Inactive দিন, খালি থাকলে ডিফল্ট 'Active' বসবে।</li>
+                        <li>Upload করার পর প্রথমে প্রিভিউ দেখাবে — Confirm করলে শুধু ঠিক সারিগুলোই সেভ হবে।</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    <?php else: ?>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <span class="badge bg-success">ঠিক আছে: <?php echo $ok_count; ?></span>
+                <span class="badge bg-danger">এরর: <?php echo $err_count; ?></span>
+                <span class="text-muted small ms-2">মোট <?php echo count($preview_rows); ?> সারি পাওয়া গেছে</span>
+            </div>
+            <div>
+                <a href="index.php?page=academic_class_import" class="btn btn-outline-secondary btn-sm">বাতিল করুন</a>
+                <form method="POST" action="index.php?page=academic_class_import" class="d-inline">
+                    <?php echo csrf_field(); ?>
+                    <input type="hidden" name="token" value="<?php echo htmlspecialchars($preview_token); ?>">
+                    <button type="submit" name="confirm_import" class="btn btn-success btn-sm" <?php echo $ok_count === 0 ? 'disabled' : ''; ?>>
+                        <i class="fa-solid fa-check"></i> Confirm Import (<?php echo $ok_count; ?> টি)
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-bordered table-sm align-middle">
+                <thead class="table-dark">
+                    <tr>
+                        <th>সারি</th><th>স্ট্যাটাস</th><th>Medium</th><th>Class Name</th><th>Rank</th><th>Class Code</th><th>Group</th><th>বিস্তারিত</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($preview_rows as $r): $d = $r['data']; ?>
+                        <tr class="<?php echo $r['ok'] ? '' : 'table-danger'; ?>">
+                            <td><?php echo (int) $r['row_no']; ?></td>
+                            <td><?php echo $r['ok'] ? '<span class="badge bg-success">OK</span>' : '<span class="badge bg-danger">Error</span>'; ?></td>
+                            <td><?php echo $d['medium_id'] ? '✓ ' . civ($d['medium_label']) : '<span class="text-muted">—</span>'; ?></td>
+                            <td><?php echo civ($d['class_name']); ?></td>
+                            <td><?php echo (int) $d['rank']; ?></td>
+                            <td><?php echo civ($d['class_code']); ?></td>
+                            <td><?php echo $d['has_group'] ? 'Yes' : 'No'; ?></td>
+                            <td class="small text-danger"><?php echo civ(implode(', ', $r['errors'])); ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    <?php endif; ?>
+</div>

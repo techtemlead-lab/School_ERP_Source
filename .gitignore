@@ -1,0 +1,24 @@
+﻿# Environment and sensitive files
+.env
+.env.*
+!.env.example
+
+# Temporary / Scratch files
+temp/
+tmp/
+*.tmp
+*.log
+logs/*.log
+
+# Operating system files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# IDE / Editor folders
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace

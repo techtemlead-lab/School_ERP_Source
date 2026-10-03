@@ -1,0 +1,4 @@
+# সংবেদনশীল ফাইল ওয়েব থেকে খোলা বন্ধ
+<FilesMatch "(?i)\.(sql|log|ini|md|bak|zip|env)$">
+    Require all denied
+</FilesMatch>
