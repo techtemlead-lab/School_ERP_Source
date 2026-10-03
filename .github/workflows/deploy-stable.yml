@@ -33,6 +33,7 @@ jobs:
           bash -n deployment/deploy.sh deployment/backup.sh deployment/monitor.sh deployment/deploy-gate.sh
       - name: Verify security, demo, onboarding and exports
         run: |
+          python3 -u tests/release_archive.py
           python3 -u tests/public_landing.py
           python3 -u tests/demo_integration.py
           python3 -u tests/master_requests.py
