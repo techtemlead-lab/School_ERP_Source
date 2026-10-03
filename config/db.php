@@ -25,9 +25,16 @@ $tenant = resolve_tenant($pdo_master);
 $GLOBALS['tenant'] = $tenant;
 $_SESSION['tenant_school_code'] = $tenant['school_code']; // uploads path আলাদা রাখতে কাজে লাগবে (Phase 2 নোট দ্রষ্টব্য)
 
+$tenant_host = $tenant['db_host'];
+if (($tenant_host === 'localhost' || $tenant_host === '127.0.0.1') && gethostbyname('school-erp-mariadb') !== 'school-erp-mariadb') {
+    $tenant_host = 'school-erp-mariadb';
+} elseif ($tenant_host === 'school-erp-mariadb' && gethostbyname('school-erp-mariadb') === 'school-erp-mariadb') {
+    $tenant_host = '127.0.0.1';
+}
+
 try {
     $pdo = new PDO(
-        "mysql:host={$tenant['db_host']};dbname={$tenant['db_name']};charset=utf8mb4",
+        "mysql:host={$tenant_host};dbname={$tenant['db_name']};charset=utf8mb4",
         $tenant['db_user'],
         $tenant['db_pass'],
         [

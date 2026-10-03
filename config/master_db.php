@@ -9,10 +9,10 @@
  * ⚠️ প্রোডাকশনে আসল cPanel credential দিয়ে বদলাও।
  */
 
-$master_db_host = 'localhost';
-$master_db_user = 'YOUR_DB_USER';
-$master_db_pass = 'YOUR_DB_PASS';
-$master_db_name = 'YOUR_DB_NAME';
+$master_db_host = getenv('DB_HOST') ?: (gethostbyname('school-erp-mariadb') !== 'school-erp-mariadb' ? 'school-erp-mariadb' : '127.0.0.1');
+$master_db_user = getenv('DB_USER') ?: 'root';
+$master_db_pass = getenv('DB_PASS') ?: 'root';
+$master_db_name = getenv('DB_NAME') ?: 'school_master_db';
 
 try {
     $pdo_master = new PDO(

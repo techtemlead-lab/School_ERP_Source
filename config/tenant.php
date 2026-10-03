@@ -19,8 +19,8 @@ function resolve_tenant(PDO $pdo_master): array
     $host = strtolower($_SERVER['HTTP_HOST'] ?? '');
     $host = preg_replace('/:\d+$/', '', $host); // remove port if any
 
-    // ডেভ/টেস্টিং override — লাইভে থাকলে সমস্যা নাই, শুধু ?school= দিলে কাজ করবে
-    $override_code = $_GET['school'] ?? null;
+    // ডেভ/টেস্টিং override — লাইভে থাকলে সমস্যা নাই, ?school= দিলে অথবা session-এ থাকলে কাজ করবে
+    $override_code = $_GET['school'] ?? ($_SESSION['tenant_school_code'] ?? null);
 
     $tenant = null;
 
@@ -46,6 +46,16 @@ function resolve_tenant(PDO $pdo_master): array
                 $tenant = $stmt->fetch();
             }
         }
+
+        // ৩) Localhost / Tunnel / Development fallback: একটি সক্রিয় tenant থাকলে সেটি ব্যবহার করা
+        if (!$tenant && (in_array($host, ['localhost', '127.0.0.1', '']) || strpos($host, 'trycloudflare.com') !== false || strpos($host, 'loca.lt') !== false || strpos($host, 'ngrok') !== false)) {
+            $stmt = $pdo_master->query("SELECT * FROM tenants WHERE deleted_at IS NULL AND status = 'Active' ORDER BY id ASC LIMIT 1");
+            $tenant = $stmt->fetch() ?: null;
+        }
+    }
+
+    if ($tenant && session_status() === PHP_SESSION_ACTIVE) {
+        $_SESSION['tenant_school_code'] = $tenant['school_code'];
     }
 
     if (!$tenant) {
