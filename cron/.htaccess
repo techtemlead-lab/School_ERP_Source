@@ -1,0 +1,16 @@
+# ==============================================================================
+# Security Policy for /cron Directory
+# ==============================================================================
+# Direct HTTP web access to scheduled tasks is strictly blocked.
+# Cron scripts must be invoked via PHP CLI or with valid authentication tokens.
+# ==============================================================================
+
+<FilesMatch "\.(php|log|txt|sh)$">
+    # Deny all direct web browsing by default
+    Require all denied
+</FilesMatch>
+
+# Allow authorized ping to reset_demo_db.php for external health/ping services
+<Files "reset_demo_db.php">
+    Require all granted
+</Files>

@@ -1,6 +1,21 @@
-# এই ফোল্ডারে শুধু upload করা ছবি (লোগো/ফেভিকন) থাকবে — কোনো script execute হবে না (security)
-<FilesMatch "\.(php|php3|php4|php5|phtml|pl|py|cgi|sh)$">
+# ==============================================================================
+# Security Policy for /master/assets/uploads Directory
+# ==============================================================================
+
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>
+
+<FilesMatch "(?i)\.(php|php[0-9]|phtml|pht|phps|cgi|pl|py|sh|bash|exe|bat|cmd|dll|bin|com|vbs|msi|jsp|asp|aspx)$">
     Require all denied
 </FilesMatch>
-Options -ExecCGI
-AddType text/plain .php .phtml .php3 .php4 .php5
+
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+</IfModule>

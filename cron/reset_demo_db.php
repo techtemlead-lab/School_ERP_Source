@@ -39,10 +39,10 @@ function reset_demo_database(bool $force = false): array
     }
 
     // Resolve tenant credentials
-    $db_name = 'school_demo';
-    $db_user = 'root';
-    $db_pass = 'root';
-    $db_hosts = ['school-erp-mariadb', '127.0.0.1', 'localhost'];
+    $db_name = getenv('DEMO_DB_NAME') ?: 'school_demo';
+    $db_user = getenv('DEMO_DB_USER') ?: 'root';
+    $db_pass = getenv('DEMO_DB_PASS') ?: 'root';
+    $db_hosts = array_filter([getenv('DEMO_DB_HOST') ?: null, 'school-erp-mariadb', '127.0.0.1', 'localhost']);
 
     // Try finding config from master_db if available
     if (file_exists(__DIR__ . '/../config/master_db.php')) {
@@ -142,11 +142,11 @@ if (isset($_GET['key']) || isset($_GET['action'])) {
     header('Content-Type: application/json; charset=utf-8');
     
     // Simple protection key or action
-    $valid_key = 'demo_reset_secret_2026';
+    $valid_key = getenv('DEMO_RESET_KEY') ?: 'demo_reset_secret_2026';
     $req_key = $_GET['key'] ?? '';
     $force = isset($_GET['force']) && ($_GET['force'] === '1' || $_GET['force'] === 'true');
 
-    if ($req_key !== $valid_key && !isset($_GET['instant_reset'])) {
+    if ($req_key !== $valid_key) {
         http_response_code(403);
         echo json_encode(['success' => false, 'message' => 'Unauthorized reset request.']);
         exit;

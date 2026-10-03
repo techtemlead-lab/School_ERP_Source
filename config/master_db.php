@@ -7,7 +7,7 @@
  * সম্পূর্ণ আলাদা কানেকশন।
  *
  * ⚠️ প্রোডাকশনে আসল cPanel credential দিয়ে বদলাও।
- */
+require_once __DIR__ . '/env.php';
 
 $master_db_host = getenv('DB_HOST') ?: (gethostbyname('school-erp-mariadb') !== 'school-erp-mariadb' ? 'school-erp-mariadb' : '127.0.0.1');
 $master_db_user = getenv('DB_USER') ?: 'root';

@@ -1,4 +1,19 @@
-# সংবেদনশীল ফাইল ওয়েব থেকে খোলা বন্ধ
-<FilesMatch "(?i)\.(sql|log|ini|md|bak|zip|env)$">
+# ==============================================================================
+# Security Policy for Root Directory
+# ==============================================================================
+
+# সংবেদনশীল ফাইল ও এক্সটেনশন ওয়েব থেকে সরাসরি খোলা বন্ধ
+<FilesMatch "(?i)\.(sql|log|ini|md|bak|zip|env|example|git|sh|conf)$">
     Require all denied
 </FilesMatch>
+
+# Prevent directory indexing
+Options -Indexes
+
+# Security Headers
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set X-XSS-Protection "1; mode=block"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
