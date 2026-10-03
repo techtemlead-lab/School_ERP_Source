@@ -9,6 +9,7 @@ RUN printf 'RemoteIPHeader X-Real-IP\nRemoteIPInternalProxy 172.16.0.0/12\nRemot
 RUN docker-php-ext-install opcache && printf 'ServerTokens Prod\nServerSignature Off\n' > /etc/apache2/conf-available/erp-security.conf && a2enconf erp-security
 COPY deployment/php-production.ini /usr/local/etc/php/conf.d/erp-production.ini
 COPY . /var/www/html/
+RUN find /var/www/html -type d -exec chmod 755 {} + && find /var/www/html -type f -exec chmod 644 {} +
 
 COPY deployment/entrypoint.sh /opt/erp/entrypoint.sh
 COPY deployment/uploads.htaccess /opt/erp/uploads.htaccess
