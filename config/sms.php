@@ -117,6 +117,11 @@ function send_sms(PDO $pdo, string $phone, string $message): array
         return ['success' => false, 'response' => 'ফাঁকা নম্বর বা মেসেজ।'];
     }
 
+    // Sandbox / Demo tenant safety: simulate sending without consuming real gateway credits
+    if (($GLOBALS['tenant']['school_code'] ?? ($_SESSION['tenant_school_code'] ?? '')) === 'demo') {
+        return ['success' => true, 'response' => '[DEMO SANDBOX] SMS simulated successfully to ' . $phone];
+    }
+
     $gw = sms_get_gateway_settings($pdo);
 
     if (!$gw['enabled']) {
