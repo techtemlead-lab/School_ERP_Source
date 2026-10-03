@@ -9,6 +9,9 @@ tmp/
 *.tmp
 *.log
 logs/*.log
+cron/*.log
+logs/*.txt
+cron/*.txt
 
 # Operating system files
 Thumbs.db
