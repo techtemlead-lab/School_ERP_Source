@@ -34,6 +34,7 @@ services:
       - real_uploads:/var/www/html/uploads
       - master_uploads:/var/www/html/master/assets/uploads
       - real_logs:/var/www/html/logs
+      - main_sessions:/var/lib/php/sessions
     environment:
       APP_ENV: local
       ERP_ROLE: main
@@ -55,6 +56,7 @@ services:
     volumes:
       - ../:/var/www/html:ro
       - demo_uploads:/var/www/html/uploads
+      - demo_sessions:/var/lib/php/sessions
     environment:
       APP_ENV: local
       ERP_ROLE: demo
@@ -80,6 +82,7 @@ services:
     volumes:
       - ../:/var/www/html:ro
       - demo_uploads:/var/www/html/uploads
+      - demo_sessions:/var/lib/php/sessions
     environment:
       APP_ENV: local
       DEMO_DB_HOST: db
@@ -122,6 +125,8 @@ volumes:
   real_uploads:
   master_uploads:
   real_logs:
+  main_sessions:
+  demo_sessions:
 networks:
   private:
     internal: true

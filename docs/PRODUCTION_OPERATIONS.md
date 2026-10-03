@@ -15,9 +15,11 @@ Public demo visitors have separate disposable SQL accounts, databases and privat
 Root-owned deployment directory: /opt/schoolmng. Source releases and immutable images are separate from persistent MariaDB volumes and shared uploads. Main and demo use different MariaDB engines and isolated private networks. Apache is reachable only through a loopback gateway and host Nginx.
 
 - secrets/: root-only environment files; never commit or print these.
+- php-production.ini: root-managed runtime policy, mounted into web containers so rollback preserves session storage and security configuration.
 - private/: verification hashes and initial real portal password roster, outside web roots.
 - shared/uploads and shared/master-uploads: persistent real media.
 - shared/demo-uploads: disposable visitor media.
+- shared/sessions/main and shared/sessions/demo: separate private session storage; logins survive code updates. The demo worker removes expired demo session files at each hour.
 - backups/: verified application database and upload archives.
 - releases/: source releases. shared/deployed-commit identifies the current promoted commit.
 

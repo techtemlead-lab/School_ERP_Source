@@ -21,6 +21,9 @@ function demo_maintain(bool $replenish=false,bool $prewarm=false): void {
   $current=demo_hour();$hour=$prewarm?$current+1:$current;$last=$pdo->query('SELECT last_run_hour FROM demo_allocator WHERE id=1')->fetchColumn();
   if($replenish&&(int)$last!==$current)throw new RuntimeException('Hourly reset has not run. Replenishment refuses to bypass it.');
   if(!$replenish && !$prewarm){
+   foreach(glob('/var/lib/php/sessions/sess_*') ?: [] as $sessionFile) {
+    if(is_file($sessionFile) && !is_link($sessionFile) && filemtime($sessionFile)<$current*3600)unlink($sessionFile);
+   }
    foreach($pdo->query('SELECT * FROM demo_sandboxes WHERE hour_key<'.(int)$hour.' OR ready=0')->fetchAll() as $row){
     if(!preg_match('/^ds_[a-f0-9]{32}$/',$row['db_name'])||!preg_match('/^du_[a-f0-9]{24}$/',$row['db_user']))throw new RuntimeException('Unsafe sandbox name');
     $pdo->exec('DROP DATABASE IF EXISTS '.demo_ident($row['db_name']));$pdo->exec('DROP USER IF EXISTS '.$pdo->quote($row['db_user'])."@'%'");

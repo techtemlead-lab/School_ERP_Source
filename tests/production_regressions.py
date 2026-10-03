@@ -26,6 +26,13 @@ def captcha(raw):return ''.join(x.decode() for x in re.findall(rb'<text[^>]*>([0
 def login(browser,username,password):
  s,raw,h=browser.get('/master/login.php')
  assert browser.get('/master/login.php',{'csrf_token':token(raw),'login':'1','username':username,'password':password})[0]==302
+def after_replacement(browser,path):
+ for attempt in range(30):
+  status,raw,headers=browser.get(path)
+  if status not in [502,503]:return status
+  time.sleep(1)
+ return status
+
 def check(ok,text):
  assert ok,text
  print('PASS',text)
@@ -67,7 +74,12 @@ try:
  check(school.get('/admin/index.php?page=website_notice',b''.join(chunks),{'Content-Type':'multipart/form-data; boundary='+boundary})[0] in [302,303],'real school can upload with read-only source')
  path=php(connect+"echo $p->query(\"SELECT attachment_path FROM notices WHERE title='CI private school upload' ORDER BY id DESC LIMIT 1\")->fetchColumn();").decode()
  check(path.startswith('uploads/'+code+'/') and school.get('/'+path)[0]==200,'real school upload is persistent and correctly scoped')
+ subprocess.run(compose+['up','-d','--force-recreate','main'],cwd=root,check=True,capture_output=True)
+ check(after_replacement(school,'/admin/index.php?page=dashboard')==200,'real school login survives container replacement')
+ check(owner.get('/master/dashboard.php')[0]==200,'master login survives container replacement')
  demo=Browser(8088,'demo.schoolmng.localhost');check(demo.get('/admin/')[0]==200,'demo admin opens')
+ subprocess.run(compose+['up','-d','--force-recreate','demo'],cwd=root,check=True,capture_output=True)
+ check(after_replacement(demo,'/admin/index.php?page=dashboard')==200,'demo login survives container replacement within its clock hour')
  s,raw,h=demo.get('/admin/index.php?page=transport_gps_settings')
  check(demo.get('/admin/index.php?page=transport_gps_settings',{'csrf_token':token(raw),'save_gps_settings':'1','base_url':'https://gps.example.invalid','password':''})[0]==403,'GPS configuration with blank password is blocked')
  for page in ['database_reset','live_class_settings','device_settings','whatsapp_settings']:

@@ -7,6 +7,7 @@ WORKDIR /var/www/html
 RUN printf 'RemoteIPHeader X-Real-IP\nRemoteIPInternalProxy 172.16.0.0/12\nRemoteIPInternalProxy 10.0.0.0/8\nRemoteIPInternalProxy 192.168.0.0/16\n' > /etc/apache2/conf-available/erp-proxy.conf && a2enconf erp-proxy
 
 RUN docker-php-ext-install opcache && printf 'ServerTokens Prod\nServerSignature Off\n' > /etc/apache2/conf-available/erp-security.conf && a2enconf erp-security
+RUN install -d -m 700 -o 33 -g 33 /var/lib/php/sessions
 COPY deployment/php-production.ini /usr/local/etc/php/conf.d/erp-production.ini
 COPY . /var/www/html/
 RUN find /var/www/html -type d -exec chmod 755 {} + && find /var/www/html -type f -exec chmod 644 {} +

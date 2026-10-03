@@ -28,6 +28,10 @@ Validated application commit: 06107601ef07db78f297f118f9227ed6ec2877c7. This fol
 - Live checks passed bilingual landing/guide/policy pages, all three one-click demo portals, private visitor edits, exports, password denials, clock-hour cookies and simultaneous main/demo/real-school requests.
 - Browser verified Bangla/English, 3 appearance modes, 14 colours, 14 backgrounds and mobile layout.
 
+## Final session persistence correction
+
+Container replacement previously erased tmpfs PHP sessions. Main/master and demo now have separate private persistent session mounts. Local regressions replace main and demo containers and prove all logins survive. The hourly worker also removes expired demo session files independently of HTTP requests. This correction requires its stable workflow to pass before promotion. The first storage cutover can require one re-login; stored school records are unaffected.
+
 ## Operator decisions and recovery access
 
 Automatic approval review blocked copying VPS recovery data, credential files and server verification reports to the local computer. They remain root-only on the VPS. An encrypted off-server recovery copy requires the owner's pending approval. Same-server backups do not cover total VPS loss.

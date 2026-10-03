@@ -35,6 +35,8 @@ services:
       - ./shared/uploads:/var/www/html/uploads
       - ./shared/master-uploads:/var/www/html/master/assets/uploads
       - ./shared/logs:/var/www/html/logs
+      - ./shared/sessions/main:/var/lib/php/sessions
+      - ./php-production.ini:/usr/local/etc/php/conf.d/erp-production.ini:ro
     depends_on: {main-db: {condition: service_healthy}}
     networks: [main_private, outbound]
     healthcheck:
@@ -46,7 +48,7 @@ services:
   demo:
     <<: *app
     env_file: [./secrets/demo.env]
-    volumes: [./shared/demo-uploads:/var/www/html/uploads]
+    volumes: [./shared/demo-uploads:/var/www/html/uploads, ./shared/sessions/demo:/var/lib/php/sessions, ./php-production.ini:/usr/local/etc/php/conf.d/erp-production.ini:ro]
     depends_on: {demo-db: {condition: service_healthy}}
     networks: [demo_private]
     healthcheck:
@@ -60,7 +62,7 @@ services:
     user: root
     command: ["php", "cron/demo_worker.php"]
     env_file: [./secrets/worker.env]
-    volumes: [./shared/demo-uploads:/var/www/html/uploads]
+    volumes: [./shared/demo-uploads:/var/www/html/uploads, ./shared/sessions/demo:/var/lib/php/sessions]
     depends_on: {demo-db: {condition: service_healthy}}
     networks: [demo_private]
     healthcheck: {test: ["CMD", "php", "cron/health_worker.php", "demo"], interval: 60s, timeout: 5s, retries: 3, start_period: 120s}

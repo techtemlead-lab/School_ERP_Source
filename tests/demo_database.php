@@ -39,8 +39,10 @@ $expired=$pdo->query('SELECT * FROM demo_sandboxes WHERE token_hash IS NULL AND 
 check((bool)$expired,'unused sandbox available for expiry test');
 $dir=dirname(__DIR__).'/uploads/demo/'.$expired['db_name'];file_put_contents($dir.'/expiry-test.txt','erase on reset');
 $pdo->prepare('UPDATE demo_sandboxes SET hour_key=? WHERE id=?')->execute([demo_hour()-1,$expired['id']]);
+$sessionFile='/var/lib/php/sessions/sess_clockexpiry'.bin2hex(random_bytes(12));file_put_contents($sessionFile,'fictional expired input');touch($sessionFile,(demo_hour()-1)*3600+1);
 demo_maintain();
 check(!is_dir($dir),'scheduled worker deletes expired uploads without HTTP traffic');
+check(!is_file($sessionFile),'scheduled worker deletes expired demo sessions without HTTP traffic');
 $q=$pdo->prepare('SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=?');$q->execute([$expired['db_name']]);check((int)$q->fetchColumn()===0,'scheduled worker drops expired database');
 $q=$pdo->prepare('SELECT COUNT(*) FROM mysql.user WHERE User=?');$q->execute([$expired['db_user']]);check((int)$q->fetchColumn()===0,'scheduled worker revokes expired database user');
 check((int)$pdo->query('SELECT COUNT(*) FROM school_master_db.demo_requests')->fetchColumn()===$count,'main requests survive demo cleanup');
