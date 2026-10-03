@@ -3,7 +3,8 @@
 // Result Module > Exam Settings > Working Days (Add ফর্ম) এর Exam Term / Classes /
 // Start Date / End Date বদলালে (পেজ রিলোড ছাড়াই) Total Working Days লাইভ প্রিভিউ ক্যালকুলেট করে।
 // Action: action=preview (GET term_id, class_id[], start_date, end_date) -> JSON {success, total}
-session_start();
+require_once __DIR__ . '/../../config/runtime.php';
+erp_session_start();
 
 header('Content-Type: application/json; charset=utf-8');
 

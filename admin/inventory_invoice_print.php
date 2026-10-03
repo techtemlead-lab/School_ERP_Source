@@ -1,6 +1,7 @@
 <?php
 // admin/inventory_invoice_print.php - Sales Invoice এর প্রফেশনাল Print View (স্বতন্ত্র পেজ, sidebar ছাড়া)
-session_start();
+require_once __DIR__ . '/../config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/../config/db.php';
 
 if (!isset($_SESSION['admin_logged'])) {

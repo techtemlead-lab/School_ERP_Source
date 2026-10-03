@@ -26,9 +26,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!is_dir($uploadDir)) @mkdir($uploadDir, 0755, true);
 
             // লোগো আপলোড
-            if (isset($_FILES['panel_logo']) && $_FILES['panel_logo']['error'] === 0) {
+            if (isset($_FILES['panel_logo']) && $_FILES['panel_logo']['error'] === 0 && $_FILES['panel_logo']['size'] <= 2097152 && in_array((new finfo(FILEINFO_MIME_TYPE))->file($_FILES['panel_logo']['tmp_name']), ['image/jpeg','image/png','image/webp'], true)) {
                 $ext = strtolower(pathinfo($_FILES['panel_logo']['name'], PATHINFO_EXTENSION));
-                if (in_array($ext, ['jpg', 'jpeg', 'png', 'svg', 'webp'], true)) {
+                if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true)) {
                     $fname = 'panel_logo_' . time() . '.' . $ext;
                     if (move_uploaded_file($_FILES['panel_logo']['tmp_name'], $uploadDir . $fname)) {
                         $pdo_master->prepare("INSERT INTO saas_settings (setting_key, setting_value) VALUES ('panel_logo', ?)
@@ -40,9 +40,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             // ফেভিকন আপলোড
-            if (isset($_FILES['panel_favicon']) && $_FILES['panel_favicon']['error'] === 0) {
+            if (isset($_FILES['panel_favicon']) && $_FILES['panel_favicon']['error'] === 0 && $_FILES['panel_favicon']['size'] <= 2097152 && in_array((new finfo(FILEINFO_MIME_TYPE))->file($_FILES['panel_favicon']['tmp_name']), ['image/png','image/webp','image/x-icon','image/vnd.microsoft.icon'], true)) {
                 $ext = strtolower(pathinfo($_FILES['panel_favicon']['name'], PATHINFO_EXTENSION));
-                if (in_array($ext, ['ico', 'png', 'svg', 'webp'], true)) {
+                if (in_array($ext, ['ico', 'png', 'webp'], true)) {
                     $fname = 'panel_favicon_' . time() . '.' . $ext;
                     if (move_uploaded_file($_FILES['panel_favicon']['tmp_name'], $uploadDir . $fname)) {
                         $pdo_master->prepare("INSERT INTO saas_settings (setting_key, setting_value) VALUES ('panel_favicon', ?)

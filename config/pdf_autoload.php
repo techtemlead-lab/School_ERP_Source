@@ -55,3 +55,13 @@ function rc_pdf_autoload_register(): void
     }
 }
 }
+
+function erp_pdf_temp_dir(): string {
+    require_once __DIR__.'/runtime.php';
+    $scope=($GLOBALS['tenant']['school_code']??$_SESSION['tenant_school_code']??'master');
+    if(!preg_match('/^[A-Za-z0-9_-]{1,64}$/',$scope))throw new RuntimeException('Invalid PDF scope');
+    $dir=erp_is_demo()?dirname(__DIR__).'/uploads/demo/'.$scope.'/.cache/pdf':rtrim(erp_env('ERP_CACHE_DIR',sys_get_temp_dir().'/school-erp-cache'),'/').'/pdf/'.$scope;
+    if(!is_dir($dir)&&!mkdir($dir,0700,true)&&!is_dir($dir))throw new RuntimeException('PDF cache unavailable');
+    if(!is_writable($dir))throw new RuntimeException('PDF cache unavailable');
+    return $dir;
+}

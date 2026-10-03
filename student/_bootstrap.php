@@ -8,7 +8,8 @@
  * admin/ ফোল্ডারের কোনো ফাইল পরিবর্তন করা হয়নি — এই ফোল্ডারটাই নতুন।
  */
 
-session_start();
+require_once __DIR__ . '/../config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/../config/db.php';      // $pdo (PDO) সেট হয় — tenant অনুযায়ী
 require_once __DIR__ . '/../config/csrf.php';    // csrf_token() / csrf_field() / csrf_verify()
 require_once __DIR__ . '/../config/captcha.php'; // captcha_new() / captcha_verify() / captcha_svg_markup()
@@ -60,6 +61,16 @@ sp_apply_branch_scope($pdo);
  */
 function sp_require_login(): void
 {
+    if (!erp_is_demo() && !empty($_SESSION['student_logged']) && !empty($_SESSION['student_pk'])) {
+        global $pdo;
+        $q = $pdo->prepare('SELECT must_change_password FROM students WHERE id=?');
+        $q->execute([(int)$_SESSION['student_pk']]);
+        $required = $q->fetchColumn();
+        $scriptName = basename($_SERVER['SCRIPT_NAME'] ?? '');
+        if ($required === false || ($required && $scriptName !== 'index.php')) {
+            erp_stop(403, 'Change your initial password from the portal dashboard before using other features.');
+        }
+    }
     if (empty($_SESSION['student_logged'])) {
         header('Location: login.php');
         exit();

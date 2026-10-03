@@ -1,7 +1,8 @@
 <?php
 // admin/captcha_refresh.php - লগইন পেজের "রিফ্রেশ" বাটন এখান থেকে AJAX কল করে
 // নতুন ভেরিফিকেশন কোড আনে, পুরো পেজ রিলোড করা লাগে না
-session_start();
+require_once __DIR__ . '/../config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/../config/captcha.php';
 
 header('Content-Type: application/json; charset=utf-8');

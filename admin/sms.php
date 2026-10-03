@@ -87,6 +87,7 @@ function sms_get_gateway_settings(PDO $pdo): array
  */
 function send_sms(PDO $pdo, string $phone, string $message): array
 {
+    if (function_exists('erp_is_demo') && erp_is_demo()) { return ['success'=>true,'response'=>'DEMO: SMS simulated. No message was sent.']; }
     $phone = preg_replace('/[^0-9]/', '', $phone);
     if (strlen($phone) === 11 && str_starts_with($phone, '01')) {
         $phone = '88' . $phone; // BD কোড

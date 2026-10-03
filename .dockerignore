@@ -1,0 +1,9 @@
+.git
+.env
+deployment/.env*
+uploads/*
+master/assets/uploads/*
+logs/*
+config/pdf_lib/mpdf_tmp/*
+__pycache__
+docs/READINESS_EVIDENCE*

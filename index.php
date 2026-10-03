@@ -1,28 +1,9 @@
 <?php
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+if (erp_host() === erp_primary_host()) { require __DIR__ . '/landing/index.php'; exit; }
 
-// If accessing root without ?school=, check if host is an explicit school domain or if we should show SaaS Landing:
-if (!isset($_GET['school'])) {
-    $host = strtolower($_SERVER['HTTP_HOST'] ?? '');
-    $host = preg_replace('/:\d+$/', '', $host);
-    
-    $is_specific_school = false;
-    if ($host && !in_array($host, ['localhost', '127.0.0.1'], true) && strpos($host, 'trycloudflare.com') === false && strpos($host, 'ngrok') === false && strpos($host, 'loca.lt') === false) {
-        require_once __DIR__ . '/config/master_db.php';
-        $stmt = $pdo_master->prepare('SELECT id FROM tenants WHERE custom_domain = ? OR subdomain = ? LIMIT 1');
-        $parts = explode('.', $host);
-        $sub = ($parts[0] !== 'www') ? $parts[0] : '';
-        $stmt->execute([$host, $sub]);
-        if ($stmt->fetch()) {
-            $is_specific_school = true;
-        }
-    }
-    
-    if (!$is_specific_school) {
-        require __DIR__ . '/landing/index.php';
-        exit;
-    }
-}
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/sms.php';
 require_once __DIR__ . '/config/teacher_display.php';
@@ -1267,6 +1248,7 @@ function site_bn_day_month(string $ymd): array
     </style>
 </head>
 <body>
+<?php if (erp_is_demo()) require __DIR__ . '/demo/banner.php'; ?>
 
     <?php $current_page = 'home'; require __DIR__ . '/site_header.php'; ?>
 

@@ -1,19 +1,10 @@
-# ==============================================================================
-# Security Policy for Root Directory
-# ==============================================================================
-
-# সংবেদনশীল ফাইল ও এক্সটেনশন ওয়েব থেকে সরাসরি খোলা বন্ধ
-<FilesMatch "(?i)\.(sql|log|ini|md|bak|zip|env|example|git|sh|conf)$">
+Options -Indexes
+RewriteEngine On
+RewriteRule ^(?:config|sql|cron|tests|deployment)(?:/|$) - [F,L]
+RewriteRule ^(?:\.env|\.git|\.user\.ini)(?:/|$) - [F,L]
+RewriteRule ^uploads/.*\.(?:php[0-9]*|phtml|phar|cgi|pl|html?|svg|js)$ - [F,L,NC]
+RewriteRule ^uploads/demo/(.*)$ demo/file.php?path=uploads/demo/$1 [QSA,L]
+RewriteRule ^demo/?$ demo/index.php [L]
+<FilesMatch "(?i)\.(sql|log|ini|md|bak|zip|env|sh|yml)$">
     Require all denied
 </FilesMatch>
-
-# Prevent directory indexing
-Options -Indexes
-
-# Security Headers
-<IfModule mod_headers.c>
-    Header set X-Content-Type-Options "nosniff"
-    Header set X-Frame-Options "SAMEORIGIN"
-    Header set X-XSS-Protection "1; mode=block"
-    Header set Referrer-Policy "strict-origin-when-cross-origin"
-</IfModule>

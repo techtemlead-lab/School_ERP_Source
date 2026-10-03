@@ -1,5 +1,6 @@
 <?php
-session_start();
+require_once __DIR__ . '/../config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/../config/master_db.php'; // $pdo_master
 require_once __DIR__ . '/../config/csrf.php';
 require_once __DIR__ . '/theme.php';   // থিম ইঞ্জিন + ব্র্যান্ডিং
@@ -24,3 +25,5 @@ if (!$_mu || !$_mu['is_active']) {
 }
 $_SESSION['master_name'] = $_mu['name'];
 $_SESSION['master_role'] = $_mu['role'];
+
+require_once __DIR__.'/_route_permissions.php';

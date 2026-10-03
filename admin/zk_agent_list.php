@@ -15,7 +15,8 @@
  * প্রথমবার খুললেই (বা এই ফাইল প্রথম কল হলেই) auto-generate হয়ে যাবে।
  */
 
-session_start();
+require_once __DIR__ . '/../config/runtime.php';
+erp_session_start();
 header('Content-Type: application/json; charset=utf-8');
 
 try {

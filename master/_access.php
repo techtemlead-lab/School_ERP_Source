@@ -57,7 +57,7 @@ function ensureUserMenuPermissionsTable($pdo) {
 // ── মেনু পারমিশন চেক ─────────────────────────────────────────
 function masterCanAccess($pdo, $menuKey, $type = 'view') {
     $userId = $_SESSION['master_user_id'] ?? null;
-    if (!$userId) return false;
+    if (!$userId || !in_array($type, ['view','add','edit'], true)) return false;
 
     $role = $pdo->prepare("SELECT role FROM master_users WHERE id=?");
     $role->execute([$userId]);
@@ -80,12 +80,8 @@ function masterCanAccess($pdo, $menuKey, $type = 'view') {
 }
 
 function masterRequireAccess($pdo, $menuKey, $type = 'view') {
-    if (!masterCanAccess($pdo, $menuKey, $type)) {
-        if ($type === 'view') {
-            $_SESSION['dash_msg'] = '⛔ এই পেজ দেখার অনুমতি নেই।';
-            header('Location: dashboard.php');
-            exit;
-        }
+    if (!in_array($type, ['view','add','edit'], true) || !masterCanAccess($pdo, $menuKey, $type)) {
+        erp_stop(403, 'You do not have permission to perform this action.');
     }
 }
 

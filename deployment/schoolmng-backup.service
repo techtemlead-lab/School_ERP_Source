@@ -1,0 +1,6 @@
+[Unit]
+Description=Verified School ERP database and media backup
+After=docker.service
+[Service]
+Type=oneshot
+ExecStart=/opt/schoolmng/bin/backup.sh

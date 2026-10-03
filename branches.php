@@ -1,5 +1,6 @@
 <?php
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/map_embed.php';
 

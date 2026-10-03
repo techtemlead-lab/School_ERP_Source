@@ -1,34 +1,12 @@
-﻿# Environment and sensitive files
-.env
-.env.*
-!.env.example
+/.env
+/uploads/*
+!/uploads/.htaccess
+/logs/*
+!/logs/.htaccess
+/master/assets/uploads/*
+!/master/assets/uploads/.htaccess
+/deployment/.env*
 
-# Temporary / Scratch files
-temp/
-tmp/
-*.tmp
-*.log
-logs/*.log
-cron/*.log
-logs/*.txt
-cron/*.txt
-
-# Operating system files
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
-.DS_Store
-
-# IDE / Editor folders
-.vscode/
-.idea/
-*.sublime-project
-*.sublime-workspace
-
-# Client / Tenant user media and uploads (exclude sensitive student/teacher photos & documents)
-uploads/*
-!uploads/.htaccess
-!uploads/**/.gitkeep
-master/assets/uploads/*
-!master/assets/uploads/.htaccess
+__pycache__/
+*.pyc
+/config/pdf_lib/mpdf_tmp/

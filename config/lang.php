@@ -18,7 +18,8 @@
 
 if (!isset($_SESSION)) {
     // এই ফাইল যদি কখনো session_start() এর আগে require হয়ে যায়, নিরাপদে নিজেই শুরু করে নেবে
-    session_start();
+    require_once __DIR__ . '/runtime.php';
+erp_session_start();
 }
 
 // ?lang=bn অথবা ?lang=en URL এ থাকলে সেটাই এখন থেকে এই ভিজিটরের জন্য মনে রাখা হবে (session-এ)

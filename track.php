@@ -1,7 +1,8 @@
 <?php
 // track.php - Parent Tracking Link (Public, No Login)
 // admin/transport_assign_student.php থেকে তৈরি হওয়া tracking_token দিয়ে অ্যাক্সেস হয়
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/db.php';
 
 $token = trim($_GET['token'] ?? '');

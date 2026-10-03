@@ -91,8 +91,8 @@ $hdr_phone_link    = site_val($inst['phone_number'] ?? '', '');
 $hdr_phone_text    = site_val($inst['phone_number'] ?? '', '+880 1700-000000');
 $hdr_is_result_pg  = in_array($current_page, ['academic_result', 'result_statistics'], true);
 $hdr_login_links   = [
-    ['href' => 'student/login.php', 'label' => t('student_login'), 'short' => t('student_short'), 'icon' => 'fa-user-graduate'],
-    ['href' => 'teacher/login.php', 'label' => t('teacher_login'), 'short' => t('teacher_short'), 'icon' => 'fa-chalkboard-user'],
+    ['href' => erp_is_demo() ? '/student/' : 'student/login.php', 'label' => t('student_login'), 'short' => t('student_short'), 'icon' => 'fa-user-graduate'],
+    ['href' => erp_is_demo() ? '/teacher/' : 'teacher/login.php', 'label' => t('teacher_login'), 'short' => t('teacher_short'), 'icon' => 'fa-chalkboard-user'],
     ['href' => 'admin/index.php',   'label' => t('admin_login'),   'short' => t('admin_short'),   'icon' => 'fa-user-shield'],
 ];
 // "ভর্তি আবেদন" + "লগইন" বাটন — ডেস্কটপ/ট্যাবলেটে হেডারের ডান পাশে, ছোট মোবাইলে হেডারের ঠিক নিচে আলাদা সারিতে

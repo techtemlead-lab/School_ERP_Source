@@ -25,6 +25,7 @@ if (!function_exists('lc_jwt_encode_hs256')) {
 if (!function_exists('lc_http_request')) {
     function lc_http_request(string $method, string $url, array $headers = [], $body = null): array
     {
+    if (function_exists('erp_is_demo') && (erp_is_demo() || erp_env('ERP_INTEGRATIONS_ENABLED','1')==='0')) { return ['ok'=>false,'error'=>'External services are disabled in the public demo.','body'=>'','code'=>403]; }
         $ch = curl_init($url);
         $opts = [
             CURLOPT_RETURNTRANSFER => true,

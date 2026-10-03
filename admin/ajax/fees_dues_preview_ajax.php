@@ -2,7 +2,8 @@
 // admin/ajax/fees_dues_preview_ajax.php - Student Fees Collection পেজে Admission/Month বাটনে
 // ক্লিক করলেই ডানপাশের "Student Dues Preview" লাইভ আপডেট করার জন্য (পেজ রিলোড ছাড়াই)।
 // Search চাপার আগেই ইউজার দেখতে পাবে কোন মাসে কত Dues আছে।
-session_start();
+require_once __DIR__ . '/../../config/runtime.php';
+erp_session_start();
 header('Content-Type: application/json; charset=utf-8');
 
 if (!isset($_SESSION['admin_logged'])) {

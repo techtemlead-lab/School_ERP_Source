@@ -8,7 +8,8 @@
  * তারপর admission_slip.php তে (একটা র‍্যান্ডম টোকেন সহ) রিডাইরেক্ট করে।
  */
 
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/csrf.php';
 require_once __DIR__ . '/config/sms.php';

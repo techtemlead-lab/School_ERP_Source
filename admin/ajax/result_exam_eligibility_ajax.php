@@ -5,7 +5,8 @@
 // Actions:
 //   action=sections  (GET class_id, shift_id)                       -> JSON section list
 //   action=table      (GET class_id, shift_id, section_id, term_id) -> HTML (student+subject grid)
-session_start();
+require_once __DIR__ . '/../../config/runtime.php';
+erp_session_start();
 
 if (!isset($_SESSION['admin_logged'])) {
     http_response_code(403);

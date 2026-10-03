@@ -108,6 +108,7 @@ function sms_get_gateway_settings(PDO $pdo): array
  */
 function send_sms(PDO $pdo, string $phone, string $message): array
 {
+    if (function_exists('erp_is_demo') && (erp_is_demo() || erp_env('ERP_INTEGRATIONS_ENABLED','1')==='0')) { return ['success'=>true,'response'=>'DEMO: SMS simulated. No message was sent.']; }
     $phone = preg_replace('/[^0-9]/', '', $phone);
     if (strlen($phone) === 11 && str_starts_with($phone, '01')) {
         $phone = '88' . $phone; // BD কোড
@@ -115,11 +116,6 @@ function send_sms(PDO $pdo, string $phone, string $message): array
 
     if ($phone === '' || $message === '') {
         return ['success' => false, 'response' => 'ফাঁকা নম্বর বা মেসেজ।'];
-    }
-
-    // Sandbox / Demo tenant safety: simulate sending without consuming real gateway credits
-    if (($GLOBALS['tenant']['school_code'] ?? ($_SESSION['tenant_school_code'] ?? '')) === 'demo') {
-        return ['success' => true, 'response' => '[DEMO SANDBOX] SMS simulated successfully to ' . $phone];
     }
 
     $gw = sms_get_gateway_settings($pdo);
@@ -212,6 +208,7 @@ function sms_apply_template(string $template, array $data): string
  */
 function sms_check_balance(PDO $pdo): array
 {
+    if (function_exists('erp_is_demo') && (erp_is_demo() || erp_env('ERP_INTEGRATIONS_ENABLED','1')==='0')) { return ['success'=>true,'balance'=>500,'response'=>'DEMO: simulated balance']; }
     sms_ensure_schema($pdo);
     $row = $pdo->query("SELECT api_token, api_user, api_sender_id, balance_api_url FROM sms_settings WHERE id = 1")->fetch();
     $url = trim($row['balance_api_url'] ?? '');

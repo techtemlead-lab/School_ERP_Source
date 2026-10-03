@@ -10,7 +10,8 @@
  * দেখিয়ে দিত, যেটা নিরাপত্তার দিক থেকেও সমস্যা।
  */
 
-session_start();
+require_once __DIR__ . '/../config/runtime.php';
+erp_session_start();
 
 if (!empty($_SESSION['master_user_id'])) {
     header('Location: dashboard.php');

@@ -23,7 +23,8 @@
  * রিজলভ হয়ে যায়, আলাদা কোনো auth লাগে না)।
  */
 
-session_start();
+require_once __DIR__ . '/../config/runtime.php';
+erp_session_start();
 define('ZK_LOG_FILE', __DIR__ . '/../logs/zk_sync.log');
 
 function zkLog(string $msg): void {

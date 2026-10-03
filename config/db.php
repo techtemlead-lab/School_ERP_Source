@@ -17,24 +17,23 @@
 // একবারেই বাংলাদেশ টাইমজোনে ফিক্স করে দেওয়া হলো
 date_default_timezone_set('Asia/Dhaka');
 
-require_once __DIR__ . '/tenant.php'; // resolve_tenant(), $pdo_master
-
-$tenant = resolve_tenant($pdo_master);
+require_once __DIR__ . '/runtime.php';
+erp_session_start();
+if (erp_is_demo()) {
+    require_once __DIR__ . '/demo.php';
+    $tenant = demo_prepare();
+} else {
+    require_once __DIR__ . '/tenant.php';
+    $tenant = resolve_tenant($pdo_master);
+}
 
 // অন্য ফাইল থেকে দরকার হতে পারে (institute name override, uploads path prefix ইত্যাদি)
 $GLOBALS['tenant'] = $tenant;
 $_SESSION['tenant_school_code'] = $tenant['school_code']; // uploads path আলাদা রাখতে কাজে লাগবে (Phase 2 নোট দ্রষ্টব্য)
 
-$tenant_host = $tenant['db_host'];
-if (($tenant_host === 'localhost' || $tenant_host === '127.0.0.1') && gethostbyname('school-erp-mariadb') !== 'school-erp-mariadb') {
-    $tenant_host = 'school-erp-mariadb';
-} elseif ($tenant_host === 'school-erp-mariadb' && gethostbyname('school-erp-mariadb') === 'school-erp-mariadb') {
-    $tenant_host = '127.0.0.1';
-}
-
 try {
     $pdo = new PDO(
-        "mysql:host={$tenant_host};dbname={$tenant['db_name']};charset=utf8mb4",
+        "mysql:host={$tenant['db_host']};dbname={$tenant['db_name']};charset=utf8mb4",
         $tenant['db_user'],
         $tenant['db_pass'],
         [
@@ -59,3 +58,5 @@ try {
 $pdo->exec("SET time_zone = '+06:00'");
 
 require_once __DIR__ . '/uploads.php'; // tenant_upload_rel() / tenant_upload_abs() — SaaS per-school file isolation
+
+if (erp_is_demo()) { demo_auto_login($pdo); }

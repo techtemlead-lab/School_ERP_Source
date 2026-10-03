@@ -1,7 +1,8 @@
 <?php
 // admin/ajax/folio_suggest_ajax.php - Fees Re-collection পেজের Folio No লাইভ সাজেশন
 // কমপক্ষে ২ অক্ষর লিখলেই মিলে যাওয়া Folio গুলো দেখায় — সর্বশেষ Collection করা Folio সবার আগে।
-session_start();
+require_once __DIR__ . '/../../config/runtime.php';
+erp_session_start();
 header('Content-Type: application/json; charset=utf-8');
 
 if (!isset($_SESSION['admin_logged'])) {

@@ -11,7 +11,8 @@
  *   ৩) copy_type সেটিং যাই থাকুক না কেন — এখানে সবসময় শুধু "Student Copy" একটাই দেখানো হয়।
  */
 
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/db.php';                     // $pdo (tenant resolve সহ)
 require_once __DIR__ . '/config/branch_scope.php';            // branch_current_id()
 require_once __DIR__ . '/config/money_receipt_render.php';    // mr_render_copy() / mr_receipt_css() — admin/print_money_receipt.php এর সাথে শেয়ার্ড

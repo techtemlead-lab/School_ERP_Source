@@ -18,6 +18,7 @@ $menus = [
     'deploy'         => 'Deploy',
     'domain_tracker' => 'Domain Tracker',
     'activity'       => 'Activity Log',
+    'settings'       => 'Settings',
     'sms'            => 'SMS পাঠানো',
 ];
 

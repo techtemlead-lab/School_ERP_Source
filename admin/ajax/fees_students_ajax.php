@@ -2,7 +2,8 @@
 // admin/ajax/fees_students_ajax.php - Student Fees Collection পেজে Session/Class বদলালে
 // পেজ রিলোড ছাড়াই সেই Session+Class-এর Active Student তালিকা আনার জন্য।
 // Branch scope মেনে ফিল্টার হয় (finance_fees_collection.php-এর মূল কোয়েরির সাথে হুবহু এক)।
-session_start();
+require_once __DIR__ . '/../../config/runtime.php';
+erp_session_start();
 header('Content-Type: application/json; charset=utf-8');
 
 if (!isset($_SESSION['admin_logged'])) {

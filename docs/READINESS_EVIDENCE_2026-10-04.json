@@ -1,0 +1,41 @@
+{
+  "checked_at": "2026-10-04T03:01:19+0600",
+  "scope": "local only",
+  "master_permission_probe": {
+    "allowed": false,
+    "continued_after_denied_guard": true
+  },
+  "viewer_login": {
+    "status": 200,
+    "dashboard": true
+  },
+  "viewer_write_forms": {
+    "/master/create_tenant.php": {
+      "status": 200,
+      "same_url": true,
+      "form_visible": true
+    },
+    "/master/deploy.php": {
+      "status": 200,
+      "same_url": true,
+      "form_visible": true
+    },
+    "/master/settings.php": {
+      "status": 200,
+      "same_url": true,
+      "form_visible": true
+    }
+  },
+  "pdf_temp_probe": "Mpdf\\MpdfException: Temporary files directory \"/var/www/html/config/pdf_lib/mpdf_tmp/mpdf\" is not writable",
+  "demo_login_status": 200,
+  "admin_page_smoke": {
+    "tested": 206,
+    "failures": [],
+    "non_200": []
+  },
+  "demo_integration_settings_probe": {
+    "post_status": 302,
+    "saved_in_private_demo": true,
+    "expected_status": 403
+  }
+}

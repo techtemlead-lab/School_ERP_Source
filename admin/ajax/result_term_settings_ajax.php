@@ -2,7 +2,8 @@
 // admin/ajax/result_term_settings_ajax.php
 // Result Module > Exam Settings > Term Publish Settings পেজের Session filter select
 // change হলে (page reload ছাড়াই) এখান থেকে টার্ম লিস্ট + পাবলিশ সেটিংস টেবিল AJAX দিয়ে রিফ্রেশ হয়।
-session_start();
+require_once __DIR__ . '/../../config/runtime.php';
+erp_session_start();
 
 if (!isset($_SESSION['admin_logged'])) {
     http_response_code(403);

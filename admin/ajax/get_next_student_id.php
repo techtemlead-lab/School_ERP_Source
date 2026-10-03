@@ -1,7 +1,8 @@
 <?php
 // admin/ajax/get_next_student_id.php - Session+Class+Section+Shift সিলেক্ট হলে
 // পরবর্তী Student ID ও Roll No প্রিভিউ করে দেয় (student_admission.php থেকে AJAX দিয়ে কল হয়)
-session_start();
+require_once __DIR__ . '/../../config/runtime.php';
+erp_session_start();
 header('Content-Type: application/json; charset=utf-8');
 
 if (!isset($_SESSION['admin_logged'])) {

@@ -64,12 +64,6 @@ $default_branch_id = $default_branch ? (int) $default_branch['id'] : null;
 // POST Handlers (Create / Update / Delete)
 // -----------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (($GLOBALS['tenant']['school_code'] ?? ($_SESSION['tenant_school_code'] ?? '')) === 'demo') {
-        $_SESSION['ul_err'] = 'Demo Sandbox মোডে ইউজার তৈরি, পরিবর্তন বা পাসওয়ার্ড বদল বন্ধ রাখা হয়েছে।';
-        header('Location: index.php?page=users_list');
-        exit();
-    }
-
     if (!csrf_verify($_POST['csrf_token'] ?? null)) {
         $_SESSION['ul_err'] = 'ফর্মের মেয়াদ শেষ হয়ে গেছে, পেজ রিলোড করে আবার চেষ্টা করুন।';
         header('Location: index.php?page=users_list');

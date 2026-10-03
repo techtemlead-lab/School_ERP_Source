@@ -1,7 +1,8 @@
 <?php
 // admin/ajax/calendar_holiday_ajax.php - Academic Calendar এর Dynamic (Drag & Drop) ভিউ এর জন্য AJAX endpoint
 // Actions: list (GET), create (POST), update_dates (POST - ড্র্যাগ করে বাড়ানো/কমানো/সরানো), delete (POST)
-session_start();
+require_once __DIR__ . '/../../config/runtime.php';
+erp_session_start();
 header('Content-Type: application/json; charset=utf-8');
 
 if (!isset($_SESSION['admin_logged'])) {

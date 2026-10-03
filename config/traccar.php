@@ -28,6 +28,7 @@ function traccar_cookie_path(array $settings): string
  */
 function traccar_ensure_session(array $settings): bool
 {
+    if (function_exists('erp_is_demo') && (erp_is_demo() || erp_env('ERP_INTEGRATIONS_ENABLED','1')==='0')) { return false; }
     $base_url = rtrim($settings['base_url'] ?? '', '/');
     if ($base_url === '' || empty($settings['username']) || empty($settings['password'])) return false;
 

@@ -2,7 +2,8 @@
 // admin/ajax/result_exam_terms_ajax.php
 // Result Module > Exam Settings > Exam Terms পেজের list view এর f_final/f_status filter select
 // change হলে (page reload ছাড়াই) এখান থেকে টেবিলটা AJAX দিয়ে রিফ্রেশ হয়।
-session_start();
+require_once __DIR__ . '/../../config/runtime.php';
+erp_session_start();
 
 if (!isset($_SESSION['admin_logged'])) {
     http_response_code(403);

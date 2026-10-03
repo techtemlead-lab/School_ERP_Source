@@ -86,6 +86,7 @@ function wa_normalize_phone(string $phone): string
  */
 function wa_api_call(array $gw, array $body): array
 {
+    if (function_exists('erp_is_demo') && (erp_is_demo() || erp_env('ERP_INTEGRATIONS_ENABLED','1')==='0')) { return ['success'=>true,'response'=>'DEMO: WhatsApp simulated. No message was sent.']; }
     if (!$gw['enabled']) {
         return ['success' => false, 'response' => 'WhatsApp API Settings পেজে API Enable করা নেই।'];
     }

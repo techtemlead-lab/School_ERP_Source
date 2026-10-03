@@ -3,7 +3,8 @@
 // Session + Term (+ ঐচ্ছিক Class) সিলেক্ট করলে সেই টার্মের সব স্টুডেন্টের ফলাফল থেকে
 // Pass Rate ও Grade-wise distribution (কতজন A+, A, B... পেয়েছে) দেখায়।
 // শুধু "Website Result Publish" অন করা টার্মের পরিসংখ্যান পাবলিকলি দেখানো হয়।
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/lang.php';
 

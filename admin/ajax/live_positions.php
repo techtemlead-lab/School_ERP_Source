@@ -3,7 +3,8 @@
 // (Traccar কে সরাসরি হিট না করে transport_vehicle_live থেকে পড়া হয় —
 //  এই টেবিল cron/fetch_gps_positions.php প্রতি মিনিটে আপডেট করে, তাই Live Map
 //  বারবার রিফ্রেশ হলেও Traccar এর ওপর চাপ পড়ে না)
-session_start();
+require_once __DIR__ . '/../../config/runtime.php';
+erp_session_start();
 header('Content-Type: application/json; charset=utf-8');
 
 if (!isset($_SESSION['admin_logged'])) {

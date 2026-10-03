@@ -1,7 +1,8 @@
 <?php
 // gallery.php - পাবলিক পেজ: হোমপেজের "ফটো গ্যালারি" সেকশনের "See All"
 // এবং মেনুবারের "Gallery" লিংকে ক্লিক করলে আসে — সব Active গ্যালারি ছবির সম্পূর্ণ তালিকা।
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/lang.php';
 

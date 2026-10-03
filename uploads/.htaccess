@@ -1,27 +1,4 @@
-# ==============================================================================
-# Security Policy for /uploads Directory
-# ==============================================================================
-# Prevents any uploaded script or file from being executed by the web server.
-# Only static documents, pictures, and PDFs are served directly.
-# ==============================================================================
-
-# Disable script execution engines
-<IfModule mod_php.c>
-    php_flag engine off
-</IfModule>
-<IfModule mod_php7.c>
-    php_flag engine off
-</IfModule>
-<IfModule mod_php8.c>
-    php_flag engine off
-</IfModule>
-
-# Deny direct access to executable and dangerous extensions
-<FilesMatch "(?i)\.(php|php[0-9]|phtml|pht|phps|cgi|pl|py|sh|bash|exe|bat|cmd|dll|bin|com|vbs|msi|jsp|asp|aspx)$">
+Options -Indexes
+<FilesMatch "(?i)\.(php\d*|phtml|phar|cgi|pl|html?|svg|js)$">
     Require all denied
 </FilesMatch>
-
-# Enforce secure MIME headers
-<IfModule mod_headers.c>
-    Header set X-Content-Type-Options "nosniff"
-</IfModule>

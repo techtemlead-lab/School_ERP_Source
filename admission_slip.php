@@ -1,6 +1,7 @@
 <?php
 // admission_slip.php - Register করার পর রিডাইরেক্ট হয়ে আসা প্রিন্টযোগ্য Admission Slip
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/db.php';
 
 function asv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }

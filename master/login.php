@@ -1,11 +1,14 @@
 <?php
-session_start();
+require_once __DIR__ . '/../config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/../config/master_db.php'; // $pdo_master
 require_once __DIR__ . '/../config/csrf.php';
 require_once __DIR__ . '/theme.php';   // থিম ইঞ্জিন + ব্র্যান্ডিং
 require_once __DIR__ . '/_access.php'; // master_users + মাইগ্রেশন
 
 ensureMasterUsersTable($pdo_master);
+require_once __DIR__.'/../config/auth_rate_limit.php';
+if(isset($_POST['login']))erp_login_limit($pdo_master,'master');
 
 if (!empty($_SESSION['master_user_id'])) {
     header('Location: dashboard.php');

@@ -1,6 +1,8 @@
 <?php
 // student/login.php - Student / Guardian Portal Login (Branch + Student ID + Password + Verification Code)
 require_once __DIR__ . '/_bootstrap.php';
+require_once __DIR__.'/../config/auth_rate_limit.php';
+if(($_SERVER['REQUEST_METHOD']??'GET')==='POST')erp_login_limit($pdo,'student');
 
 // আগে থেকেই লগইন থাকলে সরাসরি ড্যাশবোর্ডে
 if (!empty($_SESSION['student_logged'])) {
@@ -55,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
         if ($row && $branch_ok) {
             if (empty($row['password'])) {
                 // প্রথমবার — ডিফল্ট পাসওয়ার্ড হলো নিজের Student ID
-                if (hash_equals((string) $row['student_id'], (string) $password)) {
+                if (erp_env('APP_ENV')!=='production' && hash_equals((string) $row['student_id'], (string) $password)) {
                     $hash = password_hash($password, PASSWORD_DEFAULT);
                     $pdo->prepare('UPDATE students SET password = ?, must_change_password = 1 WHERE id = ?')
                         ->execute([$hash, $row['id']]);

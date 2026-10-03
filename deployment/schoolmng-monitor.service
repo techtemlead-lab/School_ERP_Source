@@ -1,0 +1,6 @@
+[Unit]
+Description=School ERP health and demo worker recovery
+After=docker.service
+[Service]
+Type=oneshot
+ExecStart=/opt/schoolmng/bin/monitor.sh

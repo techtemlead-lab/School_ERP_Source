@@ -1,0 +1,119 @@
+name: school-erp-local
+x-base: &base
+  build:
+    context: ..
+    dockerfile: deployment/Dockerfile
+  restart: unless-stopped
+  image: school-erp-local:php83
+  volumes:
+    - ../:/var/www/html:ro
+services:
+  gateway:
+    restart: unless-stopped
+    image: nginx:alpine
+    ports: ["127.0.0.1:8087:8087", "127.0.0.1:8088:8088"]
+    volumes:
+      - ./nginx.local.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on: [main, demo]
+    networks: [private, edge]
+  db:
+    restart: unless-stopped
+    image: mariadb:11.4
+    environment:
+      MARIADB_ROOT_PASSWORD: ${LOCAL_DB_ROOT_PASSWORD}
+    volumes: [database:/var/lib/mysql]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 3s
+      retries: 30
+    networks: [private]
+  main:
+    <<: *base
+    volumes:
+      - ../:/var/www/html:ro
+      - real_uploads:/var/www/html/uploads
+      - master_uploads:/var/www/html/master/assets/uploads
+      - real_logs:/var/www/html/logs
+    environment:
+      APP_ENV: local
+      ERP_ROLE: main
+      ERP_PRIMARY_HOST: schoolmng.localhost
+      ERP_PRIMARY_URL: http://schoolmng.localhost:8087
+      ERP_DEMO_HOST: demo.schoolmng.localhost
+      ERP_DEMO_URL: http://demo.schoolmng.localhost:8088
+      MASTER_DB_HOST: db
+      MASTER_DB_NAME: school_master_db
+      MASTER_DB_USER: master_web
+      MASTER_DB_PASS: ${LOCAL_MASTER_PASSWORD}
+      LEAD_REQUEST_SALT: ${LOCAL_TOKEN_SECRET}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [private]
+  demo:
+    <<: *base
+    volumes:
+      - ../:/var/www/html:ro
+      - demo_uploads:/var/www/html/uploads
+    environment:
+      APP_ENV: local
+      ERP_ROLE: demo
+      ERP_PRIMARY_HOST: schoolmng.localhost
+      ERP_PRIMARY_URL: http://schoolmng.localhost:8087
+      ERP_DEMO_HOST: demo.schoolmng.localhost
+      ERP_DEMO_URL: http://demo.schoolmng.localhost:8088
+      DEMO_DB_HOST: db
+      DEMO_CONTROL_DB: school_demo_control
+      DEMO_CONTROL_USER: demo_web
+      DEMO_CONTROL_PASS: ${LOCAL_CONTROL_PASSWORD}
+      DEMO_IP_LIMIT: 50
+      DEMO_TOKEN_SECRET: ${LOCAL_TOKEN_SECRET}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [private]
+  worker:
+    <<: *base
+    user: root
+    command: ["php", "cron/demo_worker.php"]
+    restart: unless-stopped
+    volumes:
+      - ../:/var/www/html:ro
+      - demo_uploads:/var/www/html/uploads
+    environment:
+      APP_ENV: local
+      DEMO_DB_HOST: db
+      DEMO_PROVISION_USER: root
+      DEMO_PROVISION_PASS: ${LOCAL_DB_ROOT_PASSWORD}
+      DEMO_CONTROL_DB: school_demo_control
+      DEMO_POOL_SIZE: 5
+      DEMO_MAX_SANDBOXES: 60
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [private]
+  provisioner:
+    <<: *base
+    command: ["php", "cron/provision_worker.php"]
+    environment:
+      APP_ENV: local
+      MASTER_DB_HOST: db
+      MASTER_DB_NAME: school_master_db
+      ERP_TENANT_DB_HOST: db
+      ERP_PROVISION_HOST: db
+      ERP_PROVISION_USER: root
+      ERP_PROVISION_PASS: ${LOCAL_DB_ROOT_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [private]
+volumes:
+  database:
+  demo_uploads:
+  real_uploads:
+  master_uploads:
+  real_logs:
+networks:
+  private:
+    internal: true
+  edge: {}

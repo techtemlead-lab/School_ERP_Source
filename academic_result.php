@@ -5,7 +5,8 @@
 //   - না দিলে -> ঐ ক্লাস/শিফট/সেকশনের সব স্টুডেন্টের মেরিট লিস্ট (Pass/Fail, GPA)
 // শুধুমাত্র যে Exam Term-এর "Website Result Publish" টগল অন করা আছে (Result Module >
 // Exam Settings > Term Publish Settings পেজ থেকে), সেই টার্মের ফলাফলই এখানে দেখানো হবে।
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/lang.php';
 

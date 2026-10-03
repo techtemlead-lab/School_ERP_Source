@@ -217,7 +217,7 @@ if ($do_export && $f_session_id && $f_class_id && $f_term_id) {
             'mode' => 'utf-8',
             'format' => 'A4',
             'default_font' => 'freeserif',
-            'tempDir' => __DIR__ . '/../config/pdf_lib/mpdf_tmp',
+            'tempDir' => erp_pdf_temp_dir(),
             'fontDir' => [__DIR__ . '/../config/pdf_lib/mpdf_ttfonts'],
             'margin_top' => 12, 'margin_bottom' => 12, 'margin_left' => 14, 'margin_right' => 14,
         ]);

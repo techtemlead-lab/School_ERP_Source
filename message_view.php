@@ -1,6 +1,7 @@
 <?php
 // message_view.php - পাবলিক পেজ: একটা বাণীর সম্পূর্ণ লেখা (হোমপেজ / সকল বাণী পেজের "Read More" এখানে আসে)
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/lang.php';
 require_once __DIR__ . '/config/home_messages.php';

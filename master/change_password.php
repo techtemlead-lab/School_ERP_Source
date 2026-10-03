@@ -18,8 +18,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!$row || !password_verify($current, $row['password'])) {
             $error = 'বর্তমান পাসওয়ার্ড ভুল।';
-        } elseif (strlen($new1) < 6) {
-            $error = 'নতুন পাসওয়ার্ড কমপক্ষে ৬ ক্যারেক্টার হতে হবে।';
+        } elseif (strlen($new1) < 12) {
+            $error = 'নতুন পাসওয়ার্ড কমপক্ষে ১২ ক্যারেক্টার হতে হবে।';
         } elseif ($new1 !== $new2) {
             $error = 'নতুন পাসওয়ার্ড দুইবার একই দাওনি।';
         } else {
@@ -52,11 +52,11 @@ require_once __DIR__ . '/_layout_top.php';
                 </div>
                 <div class="mb-3">
                     <label class="form-label small fw-bold">নতুন পাসওয়ার্ড</label>
-                    <input type="password" name="new_password" class="form-control" required minlength="6">
+                    <input type="password" name="new_password" class="form-control" required minlength="12">
                 </div>
                 <div class="mb-3">
                     <label class="form-label small fw-bold">নতুন পাসওয়ার্ড আবার লেখো</label>
-                    <input type="password" name="confirm_password" class="form-control" required minlength="6">
+                    <input type="password" name="confirm_password" class="form-control" required minlength="12">
                 </div>
                 <button type="submit" class="btn btn-primary fw-bold w-100 py-2">পাসওয়ার্ড আপডেট করো</button>
             </form>

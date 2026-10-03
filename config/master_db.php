@@ -1,32 +1,9 @@
 <?php
-/**
- * config/master_db.php
- * -----------------------------------------------------------
- * Master DB কানেকশন — শুধু "tenants" ও "super_admin" টেবিলের জন্য।
- * এইটা প্রতিটা স্কুলের আলাদা DB (config/db.php যেটা বানায়) থেকে
- * সম্পূর্ণ আলাদা কানেকশন।
- *
- * ⚠️ প্রোডাকশনে আসল cPanel credential দিয়ে বদলাও।
-require_once __DIR__ . '/env.php';
-
-$master_db_host = getenv('DB_HOST') ?: (gethostbyname('school-erp-mariadb') !== 'school-erp-mariadb' ? 'school-erp-mariadb' : '127.0.0.1');
-$master_db_user = getenv('DB_USER') ?: 'root';
-$master_db_pass = getenv('DB_PASS') ?: 'root';
-$master_db_name = getenv('DB_NAME') ?: 'school_master_db';
-
+require_once __DIR__ . '/runtime.php';
+if (erp_is_demo()) erp_stop(404,'The real master panel is not part of the public demo.');
 try {
-    $pdo_master = new PDO(
-        "mysql:host={$master_db_host};dbname={$master_db_name};charset=utf8mb4",
-        $master_db_user,
-        $master_db_pass,
-        [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES   => false,
-        ]
-    );
-} catch (PDOException $e) {
-    error_log('Master DB Connection Failed: ' . $e->getMessage());
-    http_response_code(500);
-    die('দুঃখিত, সিস্টেমটি এই মুহূর্তে পাওয়া যাচ্ছে না।');
-}
+    $pdo_master = new PDO('mysql:host='.erp_env('MASTER_DB_HOST','localhost').';dbname='.erp_env('MASTER_DB_NAME','school_master_db').';charset=utf8mb4',
+        erp_env('MASTER_DB_USER'),erp_env('MASTER_DB_PASS'),
+        [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION,PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC,PDO::ATTR_EMULATE_PREPARES=>false]);
+    $pdo_master->exec("SET time_zone = '+06:00'");
+} catch (PDOException $e) { error_log('Master DB connection failed'); erp_stop(503,'The ERP database is temporarily unavailable.'); }

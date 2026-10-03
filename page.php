@@ -2,7 +2,8 @@
 // page.php - পাবলিক পেজ: Website Module > Menu / Sub Menu এর কন্টেন্ট পেজ (page.php?id=মেনু_id)
 // মেনু/সাব-মেনুর লিংক ফাঁকা রাখলে এই পেজেই আসে। মেনুর নিচের Active কন্টেন্টগুলো ক্রমানুসারে দেখায়,
 // আর সাব-মেনু থাকলে সেগুলোর তালিকাও দেখায়।
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/lang.php';
 require_once __DIR__ . '/config/website_menu.php';

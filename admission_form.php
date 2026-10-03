@@ -2,7 +2,8 @@
 // admission_form.php - পাবলিক ওয়েবসাইটের অনলাইন ভর্তি ফরম (স্ক্রিনশট অনুযায়ী)
 // submit_admission_form.php তে POST হয়ে students টেবিলে status='Pending' নিয়ে সেভ হয়,
 // তারপর admission_slip.php তে রিডাইরেক্ট হয়ে Admission Slip প্রিন্ট করা যায়।
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/csrf.php';
 require_once __DIR__ . '/config/admission_fee_helpers.php';

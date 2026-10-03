@@ -1,5 +1,6 @@
 <?php
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/master_db.php'; // $pdo_master
 require_once __DIR__ . '/config/tenant.php';
 require_once __DIR__ . '/config/csrf.php';

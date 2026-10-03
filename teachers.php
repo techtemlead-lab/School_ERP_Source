@@ -1,7 +1,8 @@
 <?php
 // teachers.php - পাবলিক পেজ: হোমপেজের "OUR TEACHERS AND STAFFS" সেকশনের "See All"
 // এবং মেনুবারের "Teachers/Staff" লিংকে ক্লিক করলে আসে — সব Active Teacher/Staff-এর সম্পূর্ণ তালিকা।
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/lang.php';
 require_once __DIR__ . '/config/teacher_display.php';

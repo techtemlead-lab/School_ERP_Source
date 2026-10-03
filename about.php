@@ -2,7 +2,8 @@
 // about.php - পাবলিক পেজ: মেনুবারের "আমাদের সম্পর্কে" ক্লিক করলে আসে —
 // Global Settings > General Information (Institute Settings) এর Short Description ফিল্ডের
 // সম্পূর্ণ কনটেন্ট দেখায়। (why_choose.php এর প্যাটার্ন অনুসরণ করে বানানো)
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/lang.php';
 

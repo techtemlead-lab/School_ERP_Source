@@ -45,17 +45,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if (isset($_POST['reset_password'])) {
-        if (($GLOBALS['tenant']['school_code'] ?? ($_SESSION['tenant_school_code'] ?? '')) === 'demo') {
-            $_SESSION['se_err'] = 'Demo Sandbox মোডে পাসওয়ার্ড রিসেট করা বন্ধ রাখা হয়েছে।';
-        } else {
-            $id = (int) ($_POST['id'] ?? 0);
-            $reset_emp_name = $pdo->prepare("SELECT name FROM employees WHERE id = ?");
-            $reset_emp_name->execute([$id]);
-            $reset_emp_name_val = $reset_emp_name->fetchColumn();
-            $pdo->prepare("UPDATE employees SET password = NULL, must_change_password = 1 WHERE id = ?")->execute([$id]);
-            $_SESSION['se_msg'] = 'পাসওয়ার্ড ডিফল্টে (Employee ID) রিসেট করা হয়েছে। এখন সংশ্লিষ্ট Employee ID দিয়েই প্রথমবার লগইন করা যাবে।';
-            sec_log_activity($pdo, 'SMS', 'Update', "Employee পাসওয়ার্ড রিসেট করা হয়েছে: " . ($reset_emp_name_val ?: "#$id"));
-        }
+        $id = (int) ($_POST['id'] ?? 0);
+        $reset_emp_name = $pdo->prepare("SELECT name FROM employees WHERE id = ?");
+        $reset_emp_name->execute([$id]);
+        $reset_emp_name_val = $reset_emp_name->fetchColumn();
+        $pdo->prepare("UPDATE employees SET password = NULL, must_change_password = 1 WHERE id = ?")->execute([$id]);
+        $_SESSION['se_msg'] = 'পাসওয়ার্ড ডিফল্টে (Employee ID) রিসেট করা হয়েছে। এখন সংশ্লিষ্ট Employee ID দিয়েই প্রথমবার লগইন করা যাবে।';
+        sec_log_activity($pdo, 'SMS', 'Update', "Employee পাসওয়ার্ড রিসেট করা হয়েছে: " . ($reset_emp_name_val ?: "#$id"));
     } elseif (isset($_POST['send_sms']) || isset($_POST['send_sms_all'])) {
         if (isset($_POST['send_sms_all'])) {
             $f_type_p = trim($_POST['p_type'] ?? '');

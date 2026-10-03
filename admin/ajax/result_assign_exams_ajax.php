@@ -4,7 +4,8 @@
 // change হলে (page reload ছাড়াই) এখান থেকে ডাটা টেনে আনা হয়।
 // Actions:
 //   action=table  (GET class_id, term_id, part_id) -> HTML (Subject list Full Mark ফর্ম)
-session_start();
+require_once __DIR__ . '/../../config/runtime.php';
+erp_session_start();
 
 if (!isset($_SESSION['admin_logged'])) {
     http_response_code(403);

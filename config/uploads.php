@@ -21,7 +21,7 @@ function tenant_upload_rel(string $sub = ''): string
 {
     $code = $GLOBALS['tenant']['school_code'] ?? 'legacy';
     $sub = trim($sub, '/');
-    return 'uploads/' . $code . ($sub !== '' ? '/' . $sub : '');
+    return 'uploads/' . (function_exists('erp_is_demo') && erp_is_demo() ? 'demo/' : '') . $code . ($sub !== '' ? '/' . $sub : '');
 }
 
 /**

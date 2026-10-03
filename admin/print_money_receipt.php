@@ -16,7 +16,8 @@
 // সিলেক্ট করলে ৩টা কপিই একই পেজে পাশাপাশি চলে আসবে। A5 সিলেক্ট করলে প্রতিটা কপি
 // নিজের আলাদা A5 সাইজের পেজে আলাদাভাবে প্রিন্ট হবে (page-break দিয়ে ভাগ করা)।
 
-if (session_status() !== PHP_SESSION_ACTIVE) { session_start(); }
+if (session_status() !== PHP_SESSION_ACTIVE) { require_once __DIR__ . '/../config/runtime.php';
+erp_session_start(); }
 require_once __DIR__ . '/../config/db.php';          // $pdo
 require_once __DIR__ . '/../config/branch_scope.php'; // branch_current_id()
 require_once __DIR__ . '/../config/permissions.php';  // perm_page_allowed()

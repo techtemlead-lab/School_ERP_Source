@@ -1,7 +1,8 @@
 <?php
 // messages.php - পাবলিক পেজ: হোমপেজের "সকল বাণী" বাটন এখানে আসে।
 // Home Page Settings-এ On থাকা পদবির সব Active বাণী দেখায় — পদবির Order অনুযায়ী (হোমপেজে সর্বোচ্চ ৩টা, বাকিগুলো এখানে)।
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/lang.php';
 require_once __DIR__ . '/config/home_messages.php';

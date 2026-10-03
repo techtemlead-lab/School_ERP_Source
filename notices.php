@@ -1,7 +1,8 @@
 <?php
 // notices.php - পাবলিক পেজ: মেনুবার "নোটিশ" এবং হোমপেজ / govt থিমের "All / সকল" বাটন
 // এখানে ক্লিক করলে আসে — সব Active নোটিশের সম্পূর্ণ তালিকা (সার্চ + Branch ফিল্টার + পেজিনেশনসহ)
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/lang.php';
 

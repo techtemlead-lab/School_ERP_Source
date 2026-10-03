@@ -10,7 +10,8 @@
 //
 // Roll No: একই Session + Class + Section এর মধ্যে সবচেয়ে বড় বিদ্যমান roll_no (সংখ্যা হিসেবে) থেকে +1।
 
-session_start();
+require_once __DIR__ . '/../config/runtime.php';
+erp_session_start();
 header('Content-Type: application/json; charset=utf-8');
 
 if (!isset($_SESSION['admin_logged'])) {

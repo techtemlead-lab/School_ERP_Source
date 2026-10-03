@@ -1,204 +1,27 @@
 <?php
-require_once __DIR__ . '/_guard.php';
-masterRequireAccess($pdo_master, 'create_tenant', 'add');
-
-$errors = [];
-$success = false;
-$manual_sql = null;
-
-function slugify(string $s): string
-{
-    $s = strtolower(trim($s));
-    $s = preg_replace('/[^a-z0-9]+/', '', $s);
-    return substr($s, 0, 30) ?: 'school' . rand(100, 999);
-}
-
-/**
- * schema.sql কে আলাদা আলাদা SQL statement এ ভাঙে — শুধু ";\n" এ split করার
- * বদলে, quote (' এবং ") এর ভেতরের সেমিকোলন বাদ দিয়ে, প্রতিটা আসল
- * statement-terminating সেমিকোলন ধরে split করে। CRLF/LF দুটোই হ্যান্ডল করে।
- */
-function split_sql_statements(string $sql): array
-{
-    $sql = str_replace("\r\n", "\n", $sql); // CRLF -> LF নরমালাইজ
-    $statements = [];
-    $buf = '';
-    $len = strlen($sql);
-    $inQuote = null; // ' বা " বা null
-    for ($i = 0; $i < $len; $i++) {
-        $ch = $sql[$i];
-        if ($inQuote !== null) {
-            $buf .= $ch;
-            if ($ch === '\\' && $i + 1 < $len) { // এস্কেপ ক্যারেক্টার — পরের ক্যারেক্টার যেভাবেই থাকুক নিয়ে নাও
-                $buf .= $sql[++$i];
-                continue;
-            }
-            if ($ch === $inQuote) { $inQuote = null; }
-            continue;
-        }
-        if ($ch === "'" || $ch === '"') { $inQuote = $ch; $buf .= $ch; continue; }
-        if ($ch === ';') {
-            $statements[] = $buf;
-            $buf = '';
-            continue;
-        }
-        $buf .= $ch;
-    }
-    if (trim($buf) !== '') { $statements[] = $buf; }
-
-    // কমেন্ট-অনলি বা খালি statement বাদ দাও
-    $clean = [];
-    foreach ($statements as $stmt) {
-        $lines = array_filter(
-            array_map('rtrim', explode("\n", $stmt)),
-            fn($l) => trim($l) !== '' && !str_starts_with(trim($l), '--')
-        );
-        $t = trim(implode("\n", $lines));
-        if ($t !== '') { $clean[] = $t; }
-    }
-    return $clean;
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!csrf_verify($_POST['csrf_token'] ?? null)) {
-        $errors[] = 'ফর্মের মেয়াদ শেষ হয়ে গেছে, আবার চেষ্টা করুন।';
-    } else {
-        $school_name   = trim($_POST['school_name'] ?? '');
-        $school_code   = slugify($_POST['school_code'] ?? $school_name);
-        $subdomain     = $school_code;
-        $custom_domain = trim($_POST['custom_domain'] ?? '') ?: null;
-        $plan          = $_POST['plan'] ?? 'Trial';
-        $contact_name  = trim($_POST['contact_name'] ?? '');
-        $contact_phone = trim($_POST['contact_phone'] ?? '');
-        $contact_email = trim($_POST['contact_email'] ?? '');
-
-        // Super Admin (এই স্কুলের admin panel-এ লগইন করার একমাত্র মালিক অ্যাকাউন্ট)
-        $super_admin_username = trim($_POST['super_admin_username'] ?? '');
-        $super_admin_password = (string) ($_POST['super_admin_password'] ?? '');
-
-        $db_host = trim($_POST['db_host'] ?? 'localhost');
-        $db_name = trim($_POST['db_name'] ?? '');
-        $db_user = trim($_POST['db_user'] ?? '');
-        $db_pass = trim($_POST['db_pass'] ?? '');
-        $db_mode       = ($_POST['db_mode'] ?? 'manual') === 'auto' ? 'auto' : 'manual';
-        $create_db_now = $db_mode === 'auto'; // Auto সিলেক্ট করলেই স্ক্রিপ্ট নিজে DB বানানোর চেষ্টা করবে
-
-        if ($school_name === '' || $db_name === '' || $db_user === '' || $db_pass === '') {
-            $errors[] = 'স্কুলের নাম, DB Name, DB User, DB Password — সবগুলো পূরণ করা আবশ্যক।';
-        }
-        if ($super_admin_username === '' || $super_admin_password === '') {
-            $errors[] = 'Super Admin User ID (username/phone/email) এবং Password — দুটোই আবশ্যক।';
-        } elseif (strlen($super_admin_password) < 6) {
-            $errors[] = 'Super Admin Password কমপক্ষে ৬ ক্যারেক্টার হতে হবে।';
-        }
-
-        // school_code / subdomain আগে থেকে থাকলে
-        if (!$errors) {
-            $chk = $pdo_master->prepare('SELECT id FROM tenants WHERE school_code = ? OR subdomain = ?');
-            $chk->execute([$school_code, $subdomain]);
-            if ($chk->fetch()) {
-                $errors[] = 'এই school_code/subdomain ইতিমধ্যে ব্যবহৃত হয়েছে। আলাদা একটা দাও।';
-            }
-        }
-
-        // ধাপ ১: DB তৈরি (ঐচ্ছিক — শেয়ার্ড হোস্টিং এ সাধারণত এই প্রিভিলেজ থাকে না,
-        // তাই fail করলে manual SQL instruction দেখানো হবে)
-        if (!$errors && $create_db_now) {
-            try {
-                // এই কানেকশনের জন্য master DB user এরই CREATE privilege লাগবে
-                $pdo_master->exec("CREATE DATABASE IF NOT EXISTS `{$db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-                $pdo_master->exec("CREATE USER IF NOT EXISTS '{$db_user}'@'localhost' IDENTIFIED BY " . $pdo_master->quote($db_pass));
-                $pdo_master->exec("GRANT ALL PRIVILEGES ON `{$db_name}`.* TO '{$db_user}'@'localhost'");
-                $pdo_master->exec("FLUSH PRIVILEGES");
-            } catch (PDOException $e) {
-                $manual_sql = "CREATE DATABASE `{$db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n"
-                    . "CREATE USER '{$db_user}'@'localhost' IDENTIFIED BY 'তোমার_পাসওয়ার্ড';\n"
-                    . "GRANT ALL PRIVILEGES ON `{$db_name}`.* TO '{$db_user}'@'localhost';\n"
-                    . "FLUSH PRIVILEGES;";
-                $errors[] = 'অটো DB তৈরি করা যায়নি (শেয়ার্ড হোস্টিং এ সাধারণত এই পারমিশন থাকে না)। '
-                    . 'নিচের SQL cPanel > phpMyAdmin এ ম্যানুয়ালি রান করে, অথবা cPanel > MySQL Databases থেকে DB+User বানিয়ে, তারপর "Manual" অপশন সিলেক্ট করে আবার সাবমিট করো।';
-            }
-        }
-
-        // ধাপ ২: নতুন DB-তে কানেক্ট করে schema.sql ইমপোর্ট
-        if (!$errors) {
-            try {
-                $tenant_pdo = new PDO(
-                    "mysql:host={$db_host};dbname={$db_name};charset=utf8mb4",
-                    $db_user, $db_pass,
-                    [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
-                );
-
-                $sql = file_get_contents(__DIR__ . '/../sql/schema.sql');
-                $statements = split_sql_statements($sql);
-                $stepNo = 0;
-                foreach ($statements as $stmt) {
-                    $stepNo++;
-                    try {
-                        $tenant_pdo->exec($stmt);
-                    } catch (PDOException $stmtErr) {
-                        $preview = mb_substr(preg_replace('/\s+/', ' ', $stmt), 0, 120);
-                        throw new PDOException(
-                            "Statement #{$stepNo} এ সমস্যা — {$stmtErr->getMessage()} | SQL: {$preview}..."
-                        );
-                    }
-                }
-            } catch (PDOException $e) {
-                $errors[] = 'DB তে কানেক্ট বা schema import করা যায়নি: ' . $e->getMessage()
-                    . ' — নিশ্চিত করো DB Host/Name/User/Password সঠিক এবং DB টা আগে থেকে তৈরি আছে।';
-            }
-        }
-
-        // ধাপ ২.৫: schema.sql-এর ডিফল্ট admin এর বদলে, ফর্মে দেওয়া Super Admin
-        // username/password বসিয়ে দেওয়া হচ্ছে — এটাই এই স্কুলের একমাত্র Super Admin অ্যাকাউন্ট
-        if (!$errors) {
-            try {
-                $hash = password_hash($super_admin_password, PASSWORD_BCRYPT);
-                // schema.sql-এ শুধু একটাই admin রো ইনসার্ট হয় (WHERE NOT EXISTS দিয়ে) —
-                // তাই ORDER BY id ASC LIMIT 1 দিয়ে নিরাপদে সেই একটা রো-ই আপডেট করা হচ্ছে
-                $upd = $tenant_pdo->prepare('UPDATE admin SET username = ?, password = ? ORDER BY id ASC LIMIT 1');
-                $upd->execute([$super_admin_username, $hash]);
-                if ($upd->rowCount() === 0) {
-                    // কোনো কারণে admin রো না থাকলে (যেমন পুরনো/আংশিক schema), সরাসরি ইনসার্ট
-                    $tenant_pdo->prepare('INSERT INTO admin (username, password) VALUES (?, ?)')
-                        ->execute([$super_admin_username, $hash]);
-                }
-            } catch (PDOException $e) {
-                $errors[] = 'Super Admin অ্যাকাউন্ট সেট করা যায়নি: ' . $e->getMessage();
-            }
-        }
-
-        // ধাপ ২.৬: schema.sql-এ 'Your School Name' নামে জেনেরিক ডেমো
-        // institute_settings ও branches রো ইনসার্ট হয় — সেগুলো এখন ফর্মে দেওয়া আসল
-        // school_name / contact_phone / contact_email দিয়ে ওভাররাইট করা হচ্ছে।
-        // (logo_path/favicon_path/banner_path ইচ্ছাকৃতভাবে ছোঁয়া হচ্ছে না — ওগুলো
-        // schema.sql-এই NULL/খালি থাকে, স্কুল নিজে পরে আপলোড করে নেবে।)
-        if (!$errors) {
-            try {
-                $tenant_pdo->prepare(
-                    'UPDATE institute_settings SET institute_name = ?, phone_number = ?, email = ? WHERE id = 1'
-                )->execute([$school_name, $contact_phone, $contact_email]);
-
-                $tenant_pdo->prepare(
-                    'UPDATE branches SET branch_name = ?, phone = ?, email = ? ORDER BY id ASC LIMIT 1'
-                )->execute([$school_name, $contact_phone, $contact_email]);
-            } catch (PDOException $e) {
-                $errors[] = 'Institute/Branch তথ্য সেট করা যায়নি: ' . $e->getMessage();
-            }
-        }
-
-        // ধাপ ৩: master DB তে tenant রেজিস্টার
-        if (!$errors) {
-            $stmt = $pdo_master->prepare(
-                'INSERT INTO tenants (school_name, school_code, subdomain, custom_domain, db_host, db_name, db_user, db_pass, plan, status, contact_name, contact_phone, contact_email, trial_ends_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,\'Active\',?,?,?,?)'
-            );
-            $trial_ends = $plan === 'Trial' ? date('Y-m-d', strtotime('+14 days')) : null;
-            $stmt->execute([$school_name, $school_code, $subdomain, $custom_domain, $db_host, $db_name, $db_user, $db_pass, $plan, $contact_name, $contact_phone, $contact_email, $trial_ends]);
-            logActivity($pdo_master, (int) $pdo_master->lastInsertId(), 'tenant_created', $school_name);
-            $success = true;
-        }
-    }
+require_once __DIR__.'/_guard.php';
+require_once __DIR__.'/../config/provisioning.php';
+masterRequireAccess($pdo_master,'create_tenant','add');
+$errors=[];$success=false;$manual_sql=null;$queued=false;
+$school_name=$school_code=$super_admin_username='';
+if(($_SERVER['REQUEST_METHOD']??'GET')==='POST'){
+ if(!csrf_verify($_POST['csrf_token']??null))$errors[]='Invalid security token. Reload the form.';
+ else try {
+  $data=erp_tenant_payload($_POST);
+  $school_name=$data['school_name'];$school_code=$data['school_code'];$subdomain=$school_code;$super_admin_username=$data['super_admin_username'];
+  if(($_POST['db_mode']??'auto')==='auto'){
+   $jobId=erp_queue_tenant($pdo_master,$data);$queued=true;$success=true;
+   logActivity($pdo_master,null,'tenant_queued',$school_code.' job '.$jobId);
+  }else{
+   foreach(['db_name','db_user'] as $key)if(!preg_match('/^[A-Za-z][A-Za-z0-9_]{2,63}$/',(string)($data[$key]??'')))throw new RuntimeException('Use a valid database and user name.');
+   $data['db_host']=trim((string)($data['db_host']??''));
+   if($data['db_host']!==erp_env('ERP_TENANT_DB_HOST',erp_env('MASTER_DB_HOST','db')))throw new RuntimeException('Use the configured school database server.');
+   if(strlen((string)($data['db_pass']??''))<12)throw new RuntimeException('Use a database password of at least 12 characters.');
+   $q=$pdo_master->prepare('SELECT id FROM tenants WHERE school_code=? OR db_name=? OR custom_domain=?');$q->execute([$school_code,$data['db_name'],$data['custom_domain']]);if($q->fetch())throw new RuntimeException('School or database already registered.');
+   $school=new PDO('mysql:host='.$data['db_host'].';dbname='.$data['db_name'].';charset=utf8mb4',$data['db_user'],$data['db_pass'],[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
+   erp_install_empty_school($school,$data);$id=erp_register_school($pdo_master,$data);logActivity($pdo_master,$id,'tenant_created',$school_name);$success=true;
+  }
+ }catch(Throwable $e){error_log('School setup request failed: '.get_class($e));$errors[]=$e instanceof RuntimeException && !($e instanceof PDOException)?$e->getMessage():'School setup failed. Verify the database details; existing records were not imported over.';}
 }
 $pageTitle = 'নতুন স্কুল যোগ করুন';
 $pageIcon  = '➕';
@@ -209,10 +32,11 @@ require_once __DIR__ . '/_layout_top.php';
 
         <?php if ($success): ?>
             <div class="alert alert-success">
-                <h5 class="fw-bold">✅ স্কুল সফলভাবে যোগ হয়েছে!</h5>
-                <p class="mb-1">Subdomain: <code><?php echo htmlspecialchars($subdomain); ?>.তোমারডোমেইন.com</code></p>
-                <p class="mb-1">টেস্ট করতে: <code>?school=<?php echo htmlspecialchars($school_code); ?></code> যোগ করে ভিজিট করো</p>
-                <p class="mb-0">Super Admin লগইন: <b><?php echo htmlspecialchars($super_admin_username); ?></b> / <b>(আপনার দেওয়া পাসওয়ার্ড)</b></p>
+                <h5>School setup <?php echo $queued?'queued':'complete'; ?></h5>
+                <p><?php echo erp_e($school_name); ?></p>
+                <p>School address: <code><?php echo erp_e($school_code.'.'.erp_primary_host()); ?></code></p>
+                <?php if($queued): ?><a href="provisioning.php">View setup status</a><?php endif; ?>
+                <p>DNS and TLS must be configured for the school address before public access.</p>
             </div>
             <a href="create_tenant.php" class="btn btn-primary">আরেকটা স্কুল যোগ করো</a>
             <a href="dashboard.php" class="btn btn-outline-secondary">Dashboard এ যাও</a>
@@ -279,7 +103,7 @@ require_once __DIR__ . '/_layout_top.php';
                         <div class="col-md-6">
                             <label class="form-label small fw-bold">Password *</label>
                             <div class="input-group">
-                                <input type="password" id="pw_super_admin" name="super_admin_password" class="form-control" required minlength="6" placeholder="কমপক্ষে ৬ ক্যারেক্টার" value="<?php echo htmlspecialchars($_POST['super_admin_password'] ?? ''); ?>">
+                                <input type="password" id="pw_super_admin" name="super_admin_password" minlength="12" class="form-control" required minlength="6" placeholder="কমপক্ষে ৬ ক্যারেক্টার" value="<?php echo htmlspecialchars($_POST['super_admin_password'] ?? ''); ?>">
                                 <button type="button" class="btn btn-outline-secondary" onclick="const f=document.getElementById('pw_super_admin'); f.type = f.type==='password' ? 'text' : 'password';">👁</button>
                             </div>
                         </div>
@@ -311,20 +135,20 @@ require_once __DIR__ . '/_layout_top.php';
                     <div class="row g-3 mb-4">
                         <div class="col-md-6">
                             <label class="form-label small fw-bold">DB Host</label>
-                            <input type="text" name="db_host" class="form-control" value="<?php echo htmlspecialchars($_POST['db_host'] ?? 'localhost'); ?>">
+                            <input type="text" name="db_host" class="form-control" value="<?php echo htmlspecialchars($_POST['db_host'] ?? erp_env('ERP_TENANT_DB_HOST',erp_env('MASTER_DB_HOST','db'))); ?>">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label small fw-bold">DB Name *</label>
-                            <input type="text" name="db_name" class="form-control" required placeholder="dbprefix_school1" value="<?php echo htmlspecialchars($_POST['db_name'] ?? ''); ?>">
+                            <input type="text" name="db_name" class="form-control" placeholder="dbprefix_school1" value="<?php echo htmlspecialchars($_POST['db_name'] ?? ''); ?>">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label small fw-bold">DB User *</label>
-                            <input type="text" name="db_user" class="form-control" required placeholder="dbprefix_school1" value="<?php echo htmlspecialchars($_POST['db_user'] ?? ''); ?>">
+                            <input type="text" name="db_user" class="form-control" placeholder="dbprefix_school1" value="<?php echo htmlspecialchars($_POST['db_user'] ?? ''); ?>">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label small fw-bold">DB Password *</label>
                             <div class="input-group">
-                                <input type="password" id="pw_db_pass" name="db_pass" class="form-control" required value="<?php echo htmlspecialchars($_POST['db_pass'] ?? ''); ?>">
+                                <input type="password" id="pw_db_pass" name="db_pass" class="form-control" value="<?php echo htmlspecialchars($_POST['db_pass'] ?? ''); ?>">
                                 <button type="button" class="btn btn-outline-secondary" onclick="const f=document.getElementById('pw_db_pass'); f.type = f.type==='password' ? 'text' : 'password';">👁</button>
                             </div>
                         </div>

@@ -2,7 +2,8 @@
 // notice_view.php - পাবলিক পেজ: একটা নির্দিষ্ট নোটিশের বিস্তারিত (বিস্তারিত লেখা + সংযুক্তি)
 // academic_result.php / admission_form.php এর মতোই site_header.php (লোগো, মেনুবার) সহ রেন্ডার হয়,
 // যাতে সাইটের বাকি সব পেজের মতোই দেখতে লাগে — আগে এই পেজের নিজস্ব আলাদা মিনি-হেডার ছিল, মেনু ছিল না
-session_start();
+require_once __DIR__ . '/config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/lang.php';
 

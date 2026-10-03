@@ -11,7 +11,8 @@
  * দিয়েই claim যাচাই করা হয়।
  */
 
-session_start();
+require_once __DIR__ . '/../config/runtime.php';
+erp_session_start();
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../config/monthly_fee_helpers.php';
 require_once __DIR__ . '/../config/admission_fee_helpers.php';

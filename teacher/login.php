@@ -1,6 +1,8 @@
 <?php
 // teacher/login.php - Teacher Portal Login (Employee ID + Password)
 require_once __DIR__ . '/_bootstrap.php';
+require_once __DIR__.'/../config/auth_rate_limit.php';
+if(($_SERVER['REQUEST_METHOD']??'GET')==='POST')erp_login_limit($pdo,'teacher');
 
 // আগে থেকেই লগইন থাকলে সরাসরি ড্যাশবোর্ডে
 if (!empty($_SESSION['teacher_logged'])) {
@@ -35,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
             if (empty($row['password'])) {
                 // এই এমপ্লয়ির জন্য এখনো কোনো পাসওয়ার্ড সেট হয়নি —
                 // ডিফল্ট পাসওয়ার্ড হলো তার নিজের Employee ID
-                if (hash_equals((string) $row['employee_id'], (string) $password)) {
+                if (erp_env('APP_ENV')!=='production' && hash_equals((string) $row['employee_id'], (string) $password)) {
                     $hash = password_hash($password, PASSWORD_DEFAULT);
                     $pdo->prepare('UPDATE employees SET password = ?, must_change_password = 1 WHERE id = ?')
                         ->execute([$hash, $row['id']]);

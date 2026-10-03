@@ -1,0 +1,60 @@
+name: Verify and deploy stable ERP
+on:
+  push:
+    branches: [stable]
+  pull_request:
+    branches: [stable]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: schoolmng-stable
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Prepare disposable local test data
+        run: |
+          python3 deployment/generate_local_env.py
+          docker compose --env-file deployment/.env.local -f deployment/compose.local.yml up -d --build
+          docker compose --env-file deployment/.env.local -f deployment/compose.local.yml run --rm -T --env-file deployment/.env.local -e APP_ENV=local main php deployment/init_local.php
+          for n in $(seq 1 60); do
+            if curl -fsS -H 'Host: demo.schoolmng.localhost:8088' http://127.0.0.1:8088/health.php >/dev/null; then break; fi
+            sleep 2
+          done
+      - name: Lint PHP and deployment scripts
+        run: |
+          docker compose --env-file deployment/.env.local -f deployment/compose.local.yml exec -T main sh -c 'find . -name "*.php" -print0 | xargs -0 -n1 php -l >/tmp/lint; ! grep -E "Parse error|Fatal error|Errors parsing" /tmp/lint'
+          bash -n deployment/deploy.sh deployment/backup.sh deployment/monitor.sh deployment/deploy-gate.sh
+      - name: Verify security, demo, onboarding and exports
+        run: |
+          python3 -u tests/public_landing.py
+          python3 -u tests/demo_integration.py
+          python3 -u tests/master_requests.py
+          python3 -u tests/production_regressions.py
+          docker compose --env-file deployment/.env.local -f deployment/compose.local.yml run --rm -T worker php tests/demo_database.php
+      - name: Stop disposable test services
+        if: always()
+        run: docker compose --env-file deployment/.env.local -f deployment/compose.local.yml stop
+  deploy:
+    needs: verify
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/stable'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Deploy tested commit without replacing school data
+        env:
+          DEPLOY_KEY: ${{ secrets.SCHOOLMNG_DEPLOY_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SCHOOLMNG_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          git archive --format=tar.gz "$GITHUB_SHA" | ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes schoolmng-ci@198.54.121.88 "deploy $GITHUB_SHA"
