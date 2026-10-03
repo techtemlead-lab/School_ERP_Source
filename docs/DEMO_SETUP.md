@@ -18,8 +18,9 @@ The demo host cannot access /master. Main-host /admin redirects to /master. Mast
 
 ## Local preview
 
-Docker Desktop is required. From the source root:
+Docker Desktop and Python are required. From the source root:
 
+    python deployment/generate_local_env.py
     docker compose --env-file deployment/.env.local -f deployment/compose.local.yml up -d --build
 
 The ignored deployment/.env.local contains random local credentials. To initialize a fresh LOCAL database:
