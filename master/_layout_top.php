@@ -137,6 +137,7 @@ label,.form-label{color:var(--sidebar-text);}
   <a href="deploy.php" class="<?php echo $activeKey === 'deploy' ? 'active' : ''; ?>"><span class="icon">🚀</span> Deploy</a>
   <a href="domain_tracker.php" class="<?php echo $activeKey === 'domain_tracker' ? 'active' : ''; ?>"><span class="icon">🌐</span> Domain Tracker</a>
   <a href="billing.php" class="<?php echo $activeKey === 'billing' ? 'active' : ''; ?>"><span class="icon">💳</span> Billing</a>
+  <a href="demo_requests.php" class="<?php echo $activeKey === 'demo_requests' ? 'active' : ''; ?>"><span class="icon">📬</span> Demo Requests</a>
   <a href="activity.php" class="<?php echo $activeKey === 'activity' ? 'active' : ''; ?>"><span class="icon">📜</span> Activity Log</a>
   <?php if (($_SESSION['master_role'] ?? '') === 'superadmin'): ?>
   <a href="users.php" class="<?php echo $activeKey === 'users' ? 'active' : ''; ?>"><span class="icon">👥</span> Users</a>
