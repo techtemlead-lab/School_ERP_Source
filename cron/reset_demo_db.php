@@ -113,6 +113,29 @@ function reset_demo_database(bool $force = false): array
         // Table might not exist or already clean
     }
 
+    // Clean up temporary uploads created by demo users in uploads/demo
+    $demo_uploads_dir = __DIR__ . '/../uploads/demo';
+    if (is_dir($demo_uploads_dir)) {
+        try {
+            $files = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($demo_uploads_dir, RecursiveDirectoryIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::CHILD_FIRST
+            );
+            foreach ($files as $fileinfo) {
+                if ($fileinfo->getFilename() === '.htaccess' || $fileinfo->getFilename() === '.gitkeep') {
+                    continue;
+                }
+                if ($fileinfo->isDir()) {
+                    @rmdir($fileinfo->getRealPath());
+                } else {
+                    @unlink($fileinfo->getRealPath());
+                }
+            }
+        } catch (\Throwable $e) {
+            // Ignore filesystem errors during cleanup
+        }
+    }
+
     $now = time();
     @file_put_contents($timestamp_file, (string) $now);
 
