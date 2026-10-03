@@ -191,6 +191,9 @@ if (!isset($page_map[$page])) { $page = 'dashboard'; }
                 <div class="d-flex align-items-center gap-2">
                     <i class="fa-solid fa-bars fs-5 text-white" id="toggleSidebar" style="cursor:pointer;"></i>
                     <span class="badge" style="background:#14b8a6;color:#0f172a;font-weight:700;">Student Portal</span>
+                    <?php if ($is_demo): ?>
+                        <a href="../demo/index.php" class="badge bg-warning text-dark text-decoration-none fw-bold ms-1" title="Demo Sandbox"><i class="fa-solid fa-flask me-1"></i>Demo</a>
+                    <?php endif; ?>
                 </div>
                 <div class="nav-icons">
                     <div class="dropdown">

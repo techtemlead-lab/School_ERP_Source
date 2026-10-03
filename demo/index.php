@@ -22,6 +22,7 @@ if ($last_reset === 0 || (time() - $last_reset) >= 3600) {
 
 $seconds_elapsed = max(0, time() - $last_reset);
 $seconds_remaining = max(0, 3600 - $seconds_elapsed);
+$reset_key = getenv('DEMO_RESET_KEY') ?: 'demo_reset_secret_2026';
 
 $current_lang = saas_current_lang();
 $other_lang = ($current_lang === 'bn') ? 'en' : 'bn';
@@ -392,7 +393,7 @@ $other_lang_label = ($current_lang === 'bn') ? 'English' : 'বাংলা';
             icon.classList.add('animate-spin');
             txt.textContent = '<?php echo ($current_lang === 'bn') ? 'রিসেট হচ্ছে...' : 'Resetting...'; ?>';
 
-            fetch('../cron/reset_demo_db.php?key=demo_reset_secret_2026&force=1')
+            fetch('../cron/reset_demo_db.php?key=<?php echo urlencode($reset_key); ?>&force=1')
                 .then(r => r.json())
                 .then(data => {
                     if (data.success) {

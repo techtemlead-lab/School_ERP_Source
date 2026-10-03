@@ -203,6 +203,9 @@ if (!isset($page_map[$page])) { $page = 'dashboard'; }
             <div class="top-navbar">
                 <div class="d-flex align-items-center gap-2">
                     <span class="badge" style="background:#38bdf8;color:#0a2540;font-weight:700;">Teacher Portal</span>
+                    <?php if ($is_demo): ?>
+                        <a href="../demo/index.php" class="badge bg-warning text-dark text-decoration-none fw-bold ms-1" title="Demo Sandbox"><i class="fa-solid fa-flask me-1"></i>Demo</a>
+                    <?php endif; ?>
                 </div>
 
                 <div class="nav-icons">
