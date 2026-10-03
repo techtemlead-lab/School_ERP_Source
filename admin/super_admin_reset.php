@@ -14,6 +14,11 @@ if (!$is_super_admin) {
     return;
 }
 
+if (($GLOBALS['tenant']['school_code'] ?? ($_SESSION['tenant_school_code'] ?? '')) === 'demo') {
+    echo '<div class="card-custom"><div class="alert alert-warning mb-0"><i class="fa-solid fa-shield-halved me-2"></i><b>Demo Sandbox</b> মোডে Super Admin Reset ও পাসওয়ার্ড পরিবর্তন বন্ধ রাখা হয়েছে।</div></div>';
+    return;
+}
+
 function sarv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 
 $sar_err = $_SESSION['sar_err'] ?? '';

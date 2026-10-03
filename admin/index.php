@@ -537,6 +537,7 @@ if ($idx_students_exists) {
 }
 
 // Change Password Handler
+$is_admin_demo = (($GLOBALS['tenant']['school_code'] ?? ($_SESSION['tenant_school_code'] ?? '')) === 'demo');
 $pass_msg = '';
 $pass_err = '';
 if (isset($_POST['change_password'])) {
@@ -548,7 +549,9 @@ if (isset($_POST['change_password'])) {
         $confirm_pass = $_POST['confirm_password'] ?? '';
         $username = $_SESSION['admin_user'];
 
-        if (strlen($new_pass) < 6) {
+        if (($GLOBALS['tenant']['school_code'] ?? ($_SESSION['tenant_school_code'] ?? '')) === 'demo') {
+            $pass_err = 'Demo Sandbox মোডে পাসওয়ার্ড পরিবর্তন করা বন্ধ রাখা হয়েছে।';
+        } elseif (strlen($new_pass) < 6) {
             $pass_err = 'নতুন পাসওয়ার্ড কমপক্ষে ৬ ক্যারেক্টার হতে হবে!';
         } elseif ($new_pass !== $confirm_pass) {
             $pass_err = 'New password and confirm password do not match!';
@@ -718,6 +721,12 @@ if (isset($_POST['change_password'])) {
                         <a href="#" title="Transactions"><i class="fa-solid fa-coins"></i></a>
                         <a href="#" title="Staffs"><i class="fa-solid fa-user-tie"></i></a>
                     </div>
+                    <?php if (($GLOBALS['tenant']['school_code'] ?? ($_SESSION['tenant_school_code'] ?? '')) === 'demo'): ?>
+                        <div class="d-flex align-items-center gap-2 px-3 py-1 rounded-pill bg-warning text-dark fw-bold shadow-sm" style="font-size: 11px;">
+                            <i class="fa-solid fa-flask"></i> DEMO SANDBOX (Hourly Reset)
+                            <a href="../demo/index.php" class="badge bg-dark text-white text-decoration-none ms-1">Hub</a>
+                        </div>
+                    <?php endif; ?>
                 </div>
 
                 <div class="nav-icons">
@@ -727,7 +736,11 @@ if (isset($_POST['change_password'])) {
                             <span class="fs-6"><?php echo htmlspecialchars($_SESSION['admin_user']); ?></span>
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end shadow border-0 mt-2" style="font-size: 13.5px;">
-                            <li><a class="dropdown-item py-2" href="#" data-bs-toggle="modal" data-bs-target="#changePasswordModal"><i class="fa-solid fa-key text-primary me-2"></i> Change Password</a></li>
+                            <?php if (!$is_admin_demo): ?>
+                                <li><a class="dropdown-item py-2" href="#" data-bs-toggle="modal" data-bs-target="#changePasswordModal"><i class="fa-solid fa-key text-primary me-2"></i> Change Password</a></li>
+                            <?php else: ?>
+                                <li><span class="dropdown-item py-2 text-muted disabled"><i class="fa-solid fa-lock text-muted me-2"></i> Password Change (Demo Locked)</span></li>
+                            <?php endif; ?>
                             <li><hr class="dropdown-divider my-1"></li>
                             <li><a class="dropdown-item text-danger fw-bold py-2" href="index.php?logout=true"><i class="fa-solid fa-power-off me-2"></i> Logout</a></li>
                         </ul>
@@ -1440,22 +1453,27 @@ if (isset($_POST['change_password'])) {
                         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
+                        <?php if ($is_admin_demo): ?>
+                            <div class="alert alert-warning py-2 mb-3">
+                                <i class="fa-solid fa-lock me-1"></i> <strong>Demo Sandbox:</strong> ডেমো অ্যাডমিন অ্যাকাউন্টের পাসওয়ার্ড পরিবর্তন লক করা আছে।
+                            </div>
+                        <?php endif; ?>
                         <div class="mb-3">
                             <label class="form-label fw-bold" style="font-size: 13px;">Current Password</label>
-                            <input type="password" name="current_password" class="form-control" required>
+                            <input type="password" name="current_password" class="form-control" <?php echo $is_admin_demo ? 'disabled' : 'required'; ?>>
                         </div>
                         <div class="mb-3">
                             <label class="form-label fw-bold" style="font-size: 13px;">New Password</label>
-                            <input type="password" name="new_password" class="form-control" required>
+                            <input type="password" name="new_password" class="form-control" <?php echo $is_admin_demo ? 'disabled' : 'required'; ?>>
                         </div>
                         <div class="mb-3">
                             <label class="form-label fw-bold" style="font-size: 13px;">Confirm New Password</label>
-                            <input type="password" name="confirm_password" class="form-control" required>
+                            <input type="password" name="confirm_password" class="form-control" <?php echo $is_admin_demo ? 'disabled' : 'required'; ?>>
                         </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
-                        <button type="submit" name="change_password" class="btn btn-success btn-sm">Update Password</button>
+                        <button type="submit" name="change_password" class="btn btn-success btn-sm" <?php echo $is_admin_demo ? 'disabled' : ''; ?>>Update Password</button>
                     </div>
                 </form>
             </div>

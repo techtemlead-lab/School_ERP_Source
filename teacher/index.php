@@ -28,10 +28,13 @@ if (!$teacher || $teacher['status'] !== 'Active') {
 }
 
 // Change Password Handler
+$is_demo = (($GLOBALS['tenant']['school_code'] ?? ($_SESSION['tenant_school_code'] ?? '')) === 'demo');
 $pass_msg = '';
 $pass_err = '';
 if (isset($_POST['change_password'])) {
-    if (!csrf_verify($_POST['csrf_token'] ?? null)) {
+    if ($is_demo) {
+        $pass_err = 'Demo Sandbox মোডে পাসওয়ার্ড পরিবর্তন বন্ধ রাখা হয়েছে।';
+    } elseif (!csrf_verify($_POST['csrf_token'] ?? null)) {
         $pass_err = 'ফর্মের মেয়াদ শেষ হয়ে গেছে, পেজ রিলোড করে আবার চেষ্টা করুন।';
     } else {
         $current_pass = $_POST['current_password'] ?? '';
@@ -213,7 +216,11 @@ if (!isset($page_map[$page])) { $page = 'dashboard'; }
                             <span class="fs-6"><?php echo tp_e($teacher['name']); ?></span>
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end shadow border-0 mt-2" style="font-size: 13.5px;">
-                            <li><a class="dropdown-item py-2" href="#" data-bs-toggle="modal" data-bs-target="#changePasswordModal"><i class="fa-solid fa-key text-primary me-2"></i> Change Password</a></li>
+                            <?php if (!$is_demo): ?>
+                                <li><a class="dropdown-item py-2" href="#" data-bs-toggle="modal" data-bs-target="#changePasswordModal"><i class="fa-solid fa-key text-primary me-2"></i> Change Password</a></li>
+                            <?php else: ?>
+                                <li><span class="dropdown-item py-2 text-muted disabled"><i class="fa-solid fa-lock text-muted me-2"></i> Change Password (Demo Locked)</span></li>
+                            <?php endif; ?>
                             <li><hr class="dropdown-divider my-1"></li>
                             <li><a class="dropdown-item text-danger fw-bold py-2" href="index.php?logout=true"><i class="fa-solid fa-power-off me-2"></i> Logout</a></li>
                         </ul>
@@ -223,14 +230,14 @@ if (!isset($page_map[$page])) { $page = 'dashboard'; }
 
             <!-- BREADCRUMB -->
             <div class="breadcrumb-bar">
-                <span>Home &gt; Teacher Portal &gt; <b><?php echo $breadcrumb_labels[$page] ?? 'Dashboard'; ?></b></span>
+                <span>Home &gt; Teacher Portal &gt; <b><?php echo tp_e($breadcrumb_labels[$page] ?? 'Dashboard'); ?></b></span>
                 <span class="text-muted">ID: <?php echo tp_e($teacher['employee_id']); ?></span>
             </div>
         </div>
 
         <!-- CONTENT -->
         <div class="content-body">
-            <?php if (!empty($teacher['must_change_password'])): ?>
+            <?php if (!empty($teacher['must_change_password']) && !$is_demo): ?>
                 <div class="alert alert-warning d-flex justify-content-between align-items-center py-2">
                     <span><i class="fa-solid fa-triangle-exclamation me-1"></i> আপনি এখনো ডিফল্ট পাসওয়ার্ড ব্যবহার করছেন। নিরাপত্তার জন্য পাসওয়ার্ড পরিবর্তন করে নিন।</span>
                     <a href="#" class="btn btn-sm btn-warning fw-bold" data-bs-toggle="modal" data-bs-target="#changePasswordModal">Change Now</a>
@@ -254,22 +261,27 @@ if (!isset($page_map[$page])) { $page = 'dashboard'; }
                         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
+                        <?php if ($is_demo): ?>
+                            <div class="alert alert-warning py-2 mb-3">
+                                <i class="fa-solid fa-lock me-1"></i> <strong>Demo Sandbox:</strong> পাসওয়ার্ড পরিবর্তন সুবিধা ডেমো অ্যাকাউন্টের জন্য নিষ্ক্রিয় রাখা হয়েছে।
+                            </div>
+                        <?php endif; ?>
                         <div class="mb-3">
                             <label class="form-label fw-bold" style="font-size: 13px;">Current Password</label>
-                            <input type="password" name="current_password" class="form-control" required>
+                            <input type="password" name="current_password" class="form-control" <?php echo $is_demo ? 'disabled' : 'required'; ?>>
                         </div>
                         <div class="mb-3">
                             <label class="form-label fw-bold" style="font-size: 13px;">New Password</label>
-                            <input type="password" name="new_password" class="form-control" required>
+                            <input type="password" name="new_password" class="form-control" <?php echo $is_demo ? 'disabled' : 'required'; ?>>
                         </div>
                         <div class="mb-3">
                             <label class="form-label fw-bold" style="font-size: 13px;">Confirm New Password</label>
-                            <input type="password" name="confirm_password" class="form-control" required>
+                            <input type="password" name="confirm_password" class="form-control" <?php echo $is_demo ? 'disabled' : 'required'; ?>>
                         </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
-                        <button type="submit" name="change_password" class="btn btn-success btn-sm">Update Password</button>
+                        <button type="submit" name="change_password" class="btn btn-success btn-sm" <?php echo $is_demo ? 'disabled' : ''; ?>>Update Password</button>
                     </div>
                 </form>
             </div>
