@@ -25,3 +25,10 @@ $RECYCLE.BIN/
 .idea/
 *.sublime-project
 *.sublime-workspace
+
+# Client / Tenant user media and uploads (exclude sensitive student/teacher photos & documents)
+uploads/*
+!uploads/.htaccess
+!uploads/**/.gitkeep
+master/assets/uploads/*
+!master/assets/uploads/.htaccess

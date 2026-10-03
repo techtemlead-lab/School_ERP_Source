@@ -18,7 +18,6 @@ $other_lang_label = ($lang === 'bn') ? '🇬🇧 English' : '🇧🇩 বাং�
 $is_subfolder = (strpos($_SERVER['PHP_SELF'] ?? '', '/landing/') !== false);
 $demo_url     = $is_subfolder ? '../demo/index.php' : 'demo/index.php';
 $master_url   = $is_subfolder ? '../master/login.php' : 'master/login.php';
-$tawhaa_url   = $is_subfolder ? '../index.php?school=tawhaaschool' : 'index.php?school=tawhaaschool';
 $ajax_url     = $is_subfolder ? 'demo_request_ajax.php' : 'landing/demo_request_ajax.php';
 $privacy_url  = $is_subfolder ? 'privacy.php' : 'landing/privacy.php';
 $terms_url    = $is_subfolder ? 'terms.php' : 'landing/terms.php';
@@ -178,22 +177,6 @@ $logo_url     = $is_subfolder ? '../logo.png' : 'logo.png';
         </div>
     </section>
 
-    <!-- Live Client Showcase Banner -->
-    <section class="bg-gradient-to-r from-emerald-900 to-slate-900 text-white py-6 border-b border-emerald-800">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
-            <div class="flex items-center gap-3">
-                <span class="text-2xl">🏆</span>
-                <div>
-                    <span class="text-xs text-emerald-400 font-bold uppercase tracking-wider block">সক্রিয় ক্লায়েন্ট শোকেস (Live Client)</span>
-                    <span class="text-base font-semibold">ত্ব-হা যিন নূরাঈন ইসলামিক স্কুল, রংপুর — ১৯২ জন শিক্ষার্থী ও স্টাফ পরিচালিত</span>
-                </div>
-            </div>
-            <a href="<?php echo $tawhaa_url; ?>" target="_blank" class="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs px-4 py-2 rounded-lg transition-all shadow-md">
-                <span>লাইভ স্কুল ওয়েবসাইট ভিজিট করুন</span>
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
-            </a>
-        </div>
-    </section>
 
     <!-- 80+ Modules Catalog Section -->
     <section id="features" class="py-20 lg:py-28 bg-white border-b border-slate-200">
