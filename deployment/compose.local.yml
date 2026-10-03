@@ -92,6 +92,15 @@ services:
       db:
         condition: service_healthy
     networks: [private]
+  init:
+    <<: *base
+    profiles: [tools]
+    restart: "no"
+    command: ["php", "deployment/init_local.php"]
+    env_file: [./.env.local]
+    environment: {APP_ENV: local}
+    depends_on: {db: {condition: service_healthy}}
+    networks: [private]
   provisioner:
     <<: *base
     command: ["php", "cron/provision_worker.php"]

@@ -24,7 +24,7 @@ Docker Desktop is required. From the source root:
 
 The ignored deployment/.env.local contains random local credentials. To initialize a fresh LOCAL database:
 
-    docker compose --env-file deployment/.env.local -f deployment/compose.local.yml run --rm -T --env-file deployment/.env.local -e APP_ENV=local main php deployment/init_local.php
+    docker compose --env-file deployment/.env.local -f deployment/compose.local.yml run --rm -T init
 
 Wait for the worker to seed the initial five school databases.
 

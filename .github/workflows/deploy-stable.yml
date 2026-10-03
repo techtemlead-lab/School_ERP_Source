@@ -20,11 +20,13 @@ jobs:
         run: |
           python3 deployment/generate_local_env.py
           docker compose --env-file deployment/.env.local -f deployment/compose.local.yml up -d --build
-          docker compose --env-file deployment/.env.local -f deployment/compose.local.yml run --rm -T --env-file deployment/.env.local -e APP_ENV=local main php deployment/init_local.php
+          docker compose --env-file deployment/.env.local -f deployment/compose.local.yml run --rm -T init
+          healthy=0
           for n in $(seq 1 60); do
-            if curl -fsS -H 'Host: demo.schoolmng.localhost:8088' http://127.0.0.1:8088/health.php >/dev/null; then break; fi
+            if curl -fsS -H 'Host: demo.schoolmng.localhost:8088' http://127.0.0.1:8088/health.php >/dev/null; then healthy=1; break; fi
             sleep 2
           done
+          test "$healthy" = 1
       - name: Lint PHP and deployment scripts
         run: |
           docker compose --env-file deployment/.env.local -f deployment/compose.local.yml exec -T main sh -c 'find . -name "*.php" -print0 | xargs -0 -n1 php -l >/tmp/lint; ! grep -E "Parse error|Fatal error|Errors parsing" /tmp/lint'
