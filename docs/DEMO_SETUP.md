@@ -2,7 +2,7 @@
 
 ## Current state
 
-Built and tested locally. The previous VPS deployment remains removed at the owner's request. This work does not restart it, restore the Tawhaa backup, alter DNS, configure GitHub secrets, or publish a stable-branch workflow.
+The replacement production deployment is live on the three requested HTTPS hosts. Tawhaa was restored from the latest retained server backup. The stable workflow is configured and has passed verification and production promotion. See [release evidence](PRODUCTION_WORK_LOG.md) and [operations](PRODUCTION_OPERATIONS.md).
 
 | Production address | Purpose |
 | --- | --- |

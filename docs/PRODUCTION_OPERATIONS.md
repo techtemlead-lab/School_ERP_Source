@@ -45,7 +45,7 @@ Code rollback does not reverse database migrations. Restore a backup to a separa
 
 ## School provisioning
 
-Superadmins create a school in the master panel. A separate CLI worker with main-engine provisioning privileges handles new school creation. Web apps do not hold engine-wide DB credentials. The worker refuses an existing database and records success/failure in the master provisioning page. New school credentials must be unique and strong.
+Superadmins create a school in the master panel. A separate CLI worker with main-engine provisioning privileges handles new school creation. Web apps do not hold engine-wide DB credentials. The worker refuses an existing database and records success/failure in the master provisioning page. New school credentials must be unique and strong. The three requested hosts are configured. Before publishing an additional school or custom domain, create its DNS record, add its hostname to the host Nginx site and issue a certificate covering that hostname. Verify HTTPS and tenant routing before sharing its address; database provisioning does not grant domain ownership or configure a new certificate.
 
 ## Verification scope
 
