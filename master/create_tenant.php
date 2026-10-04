@@ -13,6 +13,7 @@ if(($_SERVER['REQUEST_METHOD']??'GET')==='POST'){
    $jobId=erp_queue_tenant($pdo_master,$data);$queued=true;$success=true;
    logActivity($pdo_master,null,'tenant_queued',$school_code.' job '.$jobId);
   }else{
+   if(erp_env('APP_ENV')==='production')throw new RuntimeException('Use automatic school setup. Private database imports are handled by the operator.');
    foreach(['db_name','db_user'] as $key)if(!preg_match('/^[A-Za-z][A-Za-z0-9_]{2,63}$/',(string)($data[$key]??'')))throw new RuntimeException('Use a valid database and user name.');
    $data['db_host']=trim((string)($data['db_host']??''));
    if($data['db_host']!==erp_env('ERP_TENANT_DB_HOST',erp_env('MASTER_DB_HOST','db')))throw new RuntimeException('Use the configured school database server.');
@@ -103,7 +104,7 @@ require_once __DIR__ . '/_layout_top.php';
                         <div class="col-md-6">
                             <label class="form-label small fw-bold">Password *</label>
                             <div class="input-group">
-                                <input type="password" id="pw_super_admin" name="super_admin_password" minlength="12" class="form-control" required minlength="6" placeholder="কমপক্ষে ৬ ক্যারেক্টার" value="<?php echo htmlspecialchars($_POST['super_admin_password'] ?? ''); ?>">
+                                <input type="password" id="pw_super_admin" name="super_admin_password" minlength="12" class="form-control" required placeholder="কমপক্ষে ৬ ক্যারেক্টার" value="">
                                 <button type="button" class="btn btn-outline-secondary" onclick="const f=document.getElementById('pw_super_admin'); f.type = f.type==='password' ? 'text' : 'password';">👁</button>
                             </div>
                         </div>
@@ -112,8 +113,12 @@ require_once __DIR__ . '/_layout_top.php';
                         </div>
                     </div>
 
+                    <?php if(erp_env('APP_ENV')==='production'): ?>
+                    <input type="hidden" name="db_mode" value="auto">
+                    <div class="alert alert-info">The private worker prepares a separate school database and SQL account. An operator then connects a dedicated runtime, private uploads, DNS and HTTPS. School data remains separate from the master and public demo.</div>
+                    <?php else: ?>
                     <h6 class="fw-bold mb-3">Database তথ্য</h6>
-                    <?php $db_mode_val = $db_mode ?? 'manual'; ?>
+                    <?php $db_mode_val = $_POST['db_mode'] ?? 'auto'; ?>
                     <div class="mb-3">
                         <label class="form-label small fw-bold d-block mb-2">DB তৈরি করার পদ্ধতি</label>
                         <div class="d-flex gap-2 flex-wrap">
@@ -148,11 +153,13 @@ require_once __DIR__ . '/_layout_top.php';
                         <div class="col-md-6">
                             <label class="form-label small fw-bold">DB Password *</label>
                             <div class="input-group">
-                                <input type="password" id="pw_db_pass" name="db_pass" class="form-control" value="<?php echo htmlspecialchars($_POST['db_pass'] ?? ''); ?>">
+                                <input type="password" id="pw_db_pass" name="db_pass" class="form-control" value="">
                                 <button type="button" class="btn btn-outline-secondary" onclick="const f=document.getElementById('pw_db_pass'); f.type = f.type==='password' ? 'text' : 'password';">👁</button>
                             </div>
                         </div>
                     </div>
+
+                    <?php endif; ?>
 
                     <button type="submit" class="btn btn-success fw-bold w-100 py-2">স্কুল তৈরি করো</button>
                 </form>
