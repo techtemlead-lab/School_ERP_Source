@@ -18,7 +18,7 @@ cleanup() {
   rm -f "$archive"
   if [[ "$stopped" == 1 && "$committed" == 0 ]]; then
     cp "$previous_env" runtime.env
-    dc up -d main demo worker provisioner gateway || true
+    dc up -d main tawhaa demo worker provisioner gateway || true
     echo 'Previous code restored; additive database migrations were not rolled back.' >&2
   fi
   rm -f "$previous_env"
@@ -39,12 +39,12 @@ fi
 test -f "$release/config/runtime.php"
 docker build -f "$release/deployment/Dockerfile" -t "schoolmng-app:$sha" "$release"
 docker run --rm --network none --read-only --tmpfs /tmp --entrypoint sh "schoolmng-app:$sha" -c 'find /var/www/html -name "*.php" -print0 | xargs -0 -n1 php -l >/tmp/lint; ! grep -E "Parse error|Fatal error|Errors parsing" /tmp/lint'
-dc stop main provisioner
+dc stop main tawhaa provisioner
 stopped=1
 ERP_BACKUP_ALREADY_STOPPED=1 "$base/bin/backup.sh"
 sed -i "s/^ERP_IMAGE=.*/ERP_IMAGE=schoolmng-app:$sha/" runtime.env
 dc run --rm -T provisioner php cron/migrate_production.php
-dc up -d main demo worker provisioner gateway
+dc up -d main tawhaa demo worker provisioner gateway
 healthy=0
 for attempt in $(seq 1 45); do
   if curl -fsS --max-time 5 -H 'Host: schoolmng.techteamlead.com' http://127.0.0.1:18083/health.php >/dev/null &&

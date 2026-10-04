@@ -22,6 +22,11 @@ function erp_stop(int $status,string $message): never {
     echo '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>School ERP</title><body style="font:16px system-ui;background:#f4f7f6;color:#12332d;margin:0;padding:8vw"><main style="max-width:640px;margin:auto"><h1>School ERP</h1><p>' . erp_e($message) . '</p><a href="' . erp_e(erp_primary_url().'/demo/') . '">Demo information</a></main></body></html>'; exit;
 }
 if (PHP_SAPI !== 'cli') {
+    if (erp_env('ERP_ROLE') === 'tenant') {
+        $allowed=array_filter(array_map('trim',explode(',',strtolower(erp_env('ERP_TENANT_HOSTS')))));
+        if(!in_array(erp_host(),$allowed,true)||in_array(erp_host(),[erp_primary_host(),erp_demo_host()],true))erp_stop(421,'Incorrect school host.');
+    }
+    if (erp_env('ERP_ROLE') === 'main' && erp_env('APP_ENV') === 'production' && erp_host() !== erp_primary_host())erp_stop(421,'Use the dedicated school runtime.');
     if (erp_env('ERP_ROLE') === 'demo' && erp_host() !== erp_demo_host()) erp_stop(421,'Incorrect demo host.');
     if (erp_env('ERP_ROLE') === 'main' && erp_host() === erp_demo_host()) erp_stop(421,'Use the separate demo runtime.');
     $path = rawurldecode(parse_url($_SERVER['REQUEST_URI'] ?? '/',PHP_URL_PATH) ?: '/');

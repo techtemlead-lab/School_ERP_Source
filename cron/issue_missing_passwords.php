@@ -3,8 +3,8 @@ if(PHP_SAPI!=='cli')exit(1);
 umask(0077);require_once __DIR__.'/../config/provisioning.php';
 $school=$argv[1]??'';if(!preg_match('/^[a-z][a-z0-9]{2,29}$/',$school))throw new RuntimeException('Pass one real school code');
 $p=new PDO('mysql:host='.erp_env('ERP_PROVISION_HOST','main-db').';dbname='.erp_env('MASTER_DB_NAME','school_master_db').';charset=utf8mb4',erp_env('ERP_PROVISION_USER'),erp_env('ERP_PROVISION_PASS'),[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION,PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC]);
-$q=$p->prepare('SELECT db_name FROM tenants WHERE school_code=? AND deleted_at IS NULL');$q->execute([$school]);$db=$q->fetchColumn();if(!$db||str_starts_with($db,'ds_'))throw new RuntimeException('Real school not found');
-$p->exec('USE '.demo_ident($db));$rows=[];
+$q=$p->prepare('SELECT db_name,db_host FROM tenants WHERE school_code=? AND deleted_at IS NULL');$q->execute([$school]);$tenant=$q->fetch();$db=$tenant['db_name']??null;if(!$db||str_starts_with($db,'ds_'))throw new RuntimeException('Real school not found');
+$p=new PDO('mysql:host='.$tenant['db_host'].';dbname='.$db.';charset=utf8mb4',erp_env('ERP_TENANT_PROVISION_USER',erp_env('ERP_PROVISION_USER')),erp_env('ERP_TENANT_PROVISION_PASS',erp_env('ERP_PROVISION_PASS')),[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION,PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC]);$rows=[];
 foreach(['teacher'=>'employees','student'=>'students'] as $role=>$table)foreach($p->query('SELECT id,'.($role==='teacher'?'employee_id':'student_id').' AS identifier FROM '.demo_ident($table)." WHERE status='Active' AND (password IS NULL OR password='')")->fetchAll() as $row)$rows[]=[$role,$table,$row];
 if(!$rows){echo "No missing passwords; existing credentials remain unchanged.\n";exit;}
 $dir='/credentials';if(!is_dir($dir))throw new RuntimeException('Mount a private credential directory in this CLI runtime');

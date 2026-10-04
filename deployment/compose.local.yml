@@ -95,6 +95,30 @@ services:
       db:
         condition: service_healthy
     networks: [private]
+  isolated:
+    <<: *base
+    profiles: [tools]
+    ports: ["127.0.0.1:8089:80"]
+    volumes:
+      - ../:/var/www/html:ro
+      - bound_uploads:/var/www/html/uploads
+      - bound_logs:/var/www/html/logs
+      - bound_sessions:/var/lib/php/sessions
+    environment:
+      APP_ENV: local
+      ERP_ROLE: tenant
+      ERP_PRIMARY_HOST: schoolmng.localhost
+      ERP_DEMO_HOST: demo.schoolmng.localhost
+      ERP_TENANT_HOSTS: boundfixture.schoolmng.localhost
+      ERP_TENANT_CODE: boundfixture
+      ERP_TENANT_PROFILE: /var/www/html/deployment/local-tenant.json
+      TENANT_DB_HOST: db
+      TENANT_DB_NAME: sc_boundfixture
+      TENANT_DB_USER: bound_web
+      TENANT_DB_PASS: ${LOCAL_TENANT_PASSWORD}
+      ERP_INTEGRATIONS_ENABLED: '0'
+    depends_on: {db: {condition: service_healthy}}
+    networks: [private, edge]
   init:
     <<: *base
     profiles: [tools]
@@ -125,6 +149,9 @@ volumes:
   real_uploads:
   master_uploads:
   real_logs:
+  bound_uploads:
+  bound_logs:
+  bound_sessions:
   main_sessions:
   demo_sessions:
 networks:

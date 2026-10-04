@@ -38,6 +38,7 @@ jobs:
           python3 -u tests/demo_integration.py
           python3 -u tests/master_requests.py
           python3 -u tests/production_regressions.py
+          python3 -u tests/tenant_isolation.py
           docker compose --env-file deployment/.env.local -f deployment/compose.local.yml run --rm -T worker php tests/demo_database.php
       - name: Stop disposable test services
         if: always()

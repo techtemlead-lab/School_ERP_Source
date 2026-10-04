@@ -36,7 +36,7 @@ require_once __DIR__ . '/_layout_top.php';
                 <p><?php echo erp_e($school_name); ?></p>
                 <p>School address: <code><?php echo erp_e($school_code.'.'.erp_primary_host()); ?></code></p>
                 <?php if($queued): ?><a href="provisioning.php">View setup status</a><?php endif; ?>
-                <p>DNS and TLS must be configured for the school address before public access.</p>
+                <p>An operator must configure an isolated school runtime, DNS and TLS before public access. Database provisioning alone does not publish the school.</p>
             </div>
             <a href="create_tenant.php" class="btn btn-primary">আরেকটা স্কুল যোগ করো</a>
             <a href="dashboard.php" class="btn btn-outline-secondary">Dashboard এ যাও</a>

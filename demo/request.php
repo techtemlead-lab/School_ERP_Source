@@ -1,9 +1,10 @@
 <?php
 require_once __DIR__.'/../config/runtime.php';
+require_once __DIR__.'/../config/plans.php';
 if (erp_host()!==erp_primary_host()) erp_stop(404,'Not found.');
 erp_session_start();require_once __DIR__.'/../config/csrf.php';
 if (($_SERVER['REQUEST_METHOD']??'GET')!=='POST') { header('Location: /demo/#request');exit; }
-$data=[];foreach(['name','school','email','phone','students','plan','needs'] as $key) $data[$key]=is_scalar($_POST[$key]??'')?trim((string)($_POST[$key]??'')):'';
+$data=[];foreach(['name','school','email','phone','students','plan','billing','needs'] as $key) $data[$key]=is_scalar($_POST[$key]??'')?trim((string)($_POST[$key]??'')):'';
 function request_finish(bool $ok,string $message,array $data=[]): never {
     $_SESSION['demo_request_flash']=['ok'=>$ok,'message'=>$message];
     if (!$ok) $_SESSION['demo_request_old']=$data;
@@ -11,7 +12,8 @@ function request_finish(bool $ok,string $message,array $data=[]): never {
 }
 if (!csrf_verify($_POST['csrf_token']??null)) request_finish(false,'Please reload the page and submit again.',$data);
 if (!empty($_POST['website'])) request_finish(true,'Thank you. Your request has been received.');
-if (($data['name']==='' || mb_strlen($data['name'])>120) || ($data['school']==='' || mb_strlen($data['school'])>200) || !filter_var($data['email'],FILTER_VALIDATE_EMAIL) || strlen($data['email'])>150 || !preg_match('/^[+0-9 ()-]{7,30}$/',$data['phone']) || !ctype_digit($data['students']) || (int)$data['students']<1 || (int)$data['students']>100000 || mb_strlen($data['needs'])>2000 || !in_array($data['plan'],['','Basic','Standard','Premium'],true) || ($_POST['consent']??'')!=='1') request_finish(false,'Check your name, institution, email, phone and student count, then accept the privacy policy.',$data);
+if (($data['name']==='' || mb_strlen($data['name'])>120) || ($data['school']==='' || mb_strlen($data['school'])>200) || !filter_var($data['email'],FILTER_VALIDATE_EMAIL) || strlen($data['email'])>150 || !preg_match('/^[+0-9 ()-]{7,30}$/',$data['phone']) || !ctype_digit($data['students']) || (int)$data['students']<1 || (int)$data['students']>100000 || mb_strlen($data['needs'])>2000 || !in_array($data['plan'],['','Basic','Standard','Premium'],true) || !in_array($data['billing'],array_merge([''],array_keys(erp_billing_cycles())),true) || ($_POST['consent']??'')!=='1') request_finish(false,'Check your name, institution, email, phone and student count, then accept the privacy policy.',$data);
+$data['needs']=($data['billing']!==''?'Preferred billing period: '.erp_billing_cycles()[$data['billing']]['label']."\n":'').$data['needs'];
 require_once __DIR__.'/../config/master_db.php';
 require_once __DIR__.'/../config/demo_requests.php';
 try {

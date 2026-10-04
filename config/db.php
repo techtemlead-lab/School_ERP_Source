@@ -22,6 +22,9 @@ erp_session_start();
 if (erp_is_demo()) {
     require_once __DIR__ . '/demo.php';
     $tenant = demo_prepare();
+} elseif (erp_env('ERP_ROLE') === 'tenant') {
+    require_once __DIR__.'/bound_tenant.php';
+    $tenant = erp_bound_tenant();
 } else {
     require_once __DIR__ . '/tenant.php';
     $tenant = resolve_tenant($pdo_master);

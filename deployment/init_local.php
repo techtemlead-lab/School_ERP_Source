@@ -11,3 +11,10 @@ foreach(['master_web'=>['LOCAL_MASTER_PASSWORD','school_master_db','ALL PRIVILEG
  $pdo->exec('GRANT '.$permissions.' ON '.demo_ident($db).'.* TO '.$pdo->quote($user)."@'%'");
 }
 echo "Local master and web DB permissions installed.\n";
+
+require_once __DIR__.'/../config/provisioning.php';
+$pdo->exec('CREATE DATABASE IF NOT EXISTS sc_boundfixture CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');$pdo->exec('USE sc_boundfixture');
+if((int)$pdo->query('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()')->fetchColumn()===0)erp_install_empty_school($pdo,['school_name'=>'Fictional isolation fixture','super_admin_username'=>'bound_owner','super_admin_password'=>erp_env('LOCAL_ADMIN_PASSWORD')]);
+$pdo->exec('CREATE USER IF NOT EXISTS '. $pdo->quote('bound_web')."@'%' IDENTIFIED BY ".$pdo->quote(erp_env('LOCAL_TENANT_PASSWORD')));
+$pdo->exec('GRANT SELECT,INSERT,UPDATE,DELETE,CREATE,ALTER,INDEX,REFERENCES ON sc_boundfixture.* TO '. $pdo->quote('bound_web')."@'%'");
+echo "Disposable bound school isolation fixture ready.\n";

@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/_guard.php';
 masterRequireAccess($pdo_master, 'migrate_tenant', 'add');
+if(erp_env('APP_ENV')==='production')erp_stop(403,'Existing-school imports require the private operator migration workflow and an isolated runtime.');
 
 /**
  * master/migrate_existing_tenant.php

@@ -13,8 +13,8 @@ try{
   $pdo->prepare('INSERT INTO schema_migrations(version) VALUES(?)')->execute([$version]);
  }
  foreach($pdo->query('SELECT db_host,db_name FROM tenants WHERE deleted_at IS NULL')->fetchAll(PDO::FETCH_ASSOC) as $tenant){
-  if($tenant['db_host']!==erp_env('ERP_PROVISION_HOST','main-db'))throw new RuntimeException('Review external tenant migration separately');
-  $school=new PDO('mysql:host='.$tenant['db_host'].';dbname='.$tenant['db_name'].';charset=utf8mb4',erp_env('ERP_PROVISION_USER'),erp_env('ERP_PROVISION_PASS'),[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
+  if($tenant['db_host']!==erp_env('ERP_TENANT_PROVISION_HOST',erp_env('ERP_PROVISION_HOST','main-db')))throw new RuntimeException('Review external tenant migration separately');
+  $school=new PDO('mysql:host='.$tenant['db_host'].';dbname='.$tenant['db_name'].';charset=utf8mb4',erp_env('ERP_TENANT_PROVISION_USER',erp_env('ERP_PROVISION_USER')),erp_env('ERP_TENANT_PROVISION_PASS',erp_env('ERP_PROVISION_PASS')),[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
   $school->exec("CREATE TABLE IF NOT EXISTS schema_migrations(version VARCHAR(80) PRIMARY KEY,applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB");
   $modules='20261004_missing_module_tables';$m=$school->prepare('SELECT version FROM schema_migrations WHERE version=?');$m->execute([$modules]);if(!$m->fetch()){demo_sql_file($school,__DIR__.'/../sql/demo_modules.sql');$school->prepare('INSERT INTO schema_migrations(version) VALUES(?)')->execute([$modules]);}
   $ver='20261004_portal_columns';$q=$school->prepare('SELECT version FROM schema_migrations WHERE version=?');$q->execute([$ver]);

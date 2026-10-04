@@ -10,13 +10,22 @@ x-app: &app
   cpus: 1.0
   working_dir: /var/www/html
 services:
+  master-db:
+    image: mariadb:11.4@sha256:70cc072b29b4a89ae07abb2d4da2c64678a7f2dfe092751bb51c87d67dc1338b
+    restart: unless-stopped
+    env_file: [./secrets/master-db.env]
+    command: ["--innodb-buffer-pool-size=128M", "--max-connections=100"]
+    volumes: [master_database:/var/lib/mysql]
+    networks: [master_private]
+    mem_limit: 512m
+    healthcheck: {test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"], interval: 10s, timeout: 5s, retries: 30}
   main-db:
     image: mariadb:11.4@sha256:70cc072b29b4a89ae07abb2d4da2c64678a7f2dfe092751bb51c87d67dc1338b
     restart: unless-stopped
     env_file: [./secrets/main-db.env]
     command: ["--innodb-buffer-pool-size=256M", "--max-connections=100"]
     volumes: [main_database:/var/lib/mysql]
-    networks: [main_private]
+    networks: [tenant_private]
     mem_limit: 768m
     healthcheck: {test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"], interval: 10s, timeout: 5s, retries: 30}
   demo-db:
@@ -32,15 +41,32 @@ services:
     <<: *app
     env_file: [./secrets/main.env]
     volumes:
-      - ./shared/uploads:/var/www/html/uploads
+      - ./shared/platform-uploads:/var/www/html/uploads
       - ./shared/master-uploads:/var/www/html/master/assets/uploads
-      - ./shared/logs:/var/www/html/logs
+      - ./shared/master-logs:/var/www/html/logs
       - ./shared/sessions/main:/var/lib/php/sessions
       - ./php-production.ini:/usr/local/etc/php/conf.d/erp-production.ini:ro
-    depends_on: {main-db: {condition: service_healthy}}
-    networks: [main_private, outbound]
+    depends_on: {master-db: {condition: service_healthy}}
+    networks: [master_private]
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS -H \"Host: $$ERP_PRIMARY_HOST\" http://127.0.0.1/health.php >/dev/null"]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+  tawhaa:
+    <<: *app
+    env_file: [./secrets/tawhaa.env]
+    volumes:
+      - ./shared/uploads:/var/www/html/uploads
+      - ./shared/logs/tawhaaschool:/var/www/html/logs
+      - ./shared/sessions/tawhaa:/var/lib/php/sessions
+      - ./shared/tenant-profiles/tawhaa:/run/erp:ro
+      - ./php-production.ini:/usr/local/etc/php/conf.d/erp-production.ini:ro
+    depends_on: {main-db: {condition: service_healthy}}
+    networks: [tenant_private]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -H 'Host: tawhaa.schoolmng.techteamlead.com' http://127.0.0.1/health.php >/dev/null"]
       interval: 20s
       timeout: 5s
       retries: 6
@@ -70,8 +96,8 @@ services:
     <<: *app
     command: ["php", "cron/provision_worker.php"]
     env_file: [./secrets/provisioner.env]
-    depends_on: {main-db: {condition: service_healthy}}
-    networks: [main_private]
+    depends_on: {master-db: {condition: service_healthy}, main-db: {condition: service_healthy}}
+    networks: [master_private, tenant_private]
     healthcheck: {test: ["CMD", "php", "cron/health_worker.php", "provisioner"], interval: 30s, timeout: 5s, retries: 3, start_period: 60s}
   bootstrap:
     <<: *app
@@ -83,21 +109,23 @@ services:
       - ./shared/uploads:/var/www/html/uploads
       - ./shared/master-uploads:/var/www/html/master/assets/uploads
       - ./private:/credentials
-    networks: [main_private, demo_private]
+    networks: [master_private, tenant_private, demo_private]
   gateway:
     image: nginx:alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
     restart: unless-stopped
     ports: ["127.0.0.1:${ERP_PORT:-18083}:8080"]
     volumes: [./nginx.gateway.conf:/etc/nginx/conf.d/default.conf:ro]
-    depends_on: [main, demo]
-    networks: [main_private, demo_private, outbound]
+    depends_on: [main, tawhaa, demo]
+    networks: [master_private, tenant_private, demo_private, outbound]
     mem_limit: 96m
     pids_limit: 100
     healthcheck: {test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/gateway-health"], interval: 20s, timeout: 5s, retries: 3}
 volumes:
+  master_database:
   main_database:
   demo_database:
 networks:
-  main_private: {internal: true}
+  master_private: {internal: true}
+  tenant_private: {internal: true}
   demo_private: {internal: true}
   outbound: {}

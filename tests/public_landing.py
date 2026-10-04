@@ -22,3 +22,12 @@ assert len(re.findall('<option ',select))==14
 assert all('value="'+mode+'"' in en for mode in ['day','night','system'])
 assert len(json.loads((root/'landing/bn.json').read_text(encoding='utf-8')))>200
 print('PASS server-rendered Bangla/English, persistent language, translated guide/policies, stable form values, 14 themes, 14 backgrounds and 3 appearance modes')
+
+for cycle,amounts in [('monthly',['1,500','3,000','5,000']),('quarterly',['4,500','9,000','15,000']),('yearly',['15,000','30,000','50,000'])]:
+ html,_=get('/?lang=en&billing='+cycle)
+ assert all('৳'+amount in html for amount in amounts)
+ assert 'Initial connection fee' in html and 'active students included' in html
+ bn,_=get('/?lang=bn&billing='+cycle);assert 'Initial connection fee' not in bn and 'প্রাথমিক সংযোগ ফি' in bn
+html,_=get('/demo/?lang=en&plan=Standard&billing=quarterly')
+assert '<option value="quarterly" selected>Quarterly</option>' in html
+print('PASS shared pricing, student allowances, all billing periods and translated setup fees')

@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/runtime.php';
+if (erp_env('ERP_ROLE')==='tenant') erp_stop(404,'The master database is unavailable in a school runtime.');
 if (erp_is_demo()) erp_stop(404,'The real master panel is not part of the public demo.');
 try {
     $pdo_master = new PDO('mysql:host='.erp_env('MASTER_DB_HOST','localhost').';dbname='.erp_env('MASTER_DB_NAME','school_master_db').';charset=utf8mb4',

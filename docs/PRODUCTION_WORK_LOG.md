@@ -43,3 +43,13 @@ Initial portal roster: /opt/schoolmng/private/tawhaaschool-initial-passwords-*.c
 Retained master credential file: /root/schoolmng-retained-20261003/bootstrap/credentials.
 
 See [production operations](PRODUCTION_OPERATIONS.md) for update, backup, rollback and onboarding procedures.
+
+## Pricing and runtime isolation release — 4 October 2026
+
+Reviewed official Edufy, IskulAI and Fedena public plans. Published shared bilingual BDT prices using the existing monthly configuration, quarterly/yearly periods, active-student/branch allowances, discussed connection fees and scoped external costs. Existing contracts and school records are retained.
+
+Added the bound-tenant web role, exact school-host validation, separate school credentials and profile, and a focused CI isolation regression. Production master, Tawhaa and demo now run on separate SQL engines/private networks. Tawhaa has private uploads/session mounts and no master credentials; master web has no school filesystem mount/network. The private operator migration verified every imported master table and the school data snapshot, retained backups, removed the active master copy from the school engine and redacted Tawhaa SQL credentials from the master registry. All nine ERP services and the minute-based metadata timer passed health checks.
+
+Local PHP/shell lint, bilingual pricing, existing complete production gate and new bound-runtime login/SQL/host tests passed before promotion. Stable CI must pass its full gate and deploy this commit. Privileged operator/host compromise remains a shared trust boundary. Additional schools must receive their own bound runtime before publishing their DNS address.
+
+Credential delivery and unknown-password resets await the owner's private handoff choice. Existing passwords remain unchanged.

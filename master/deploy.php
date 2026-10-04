@@ -1,6 +1,12 @@
 <?php
 require_once __DIR__ . '/_guard.php';
 masterRequireAccess($pdo_master, 'deploy', 'edit');
+if(erp_env('APP_ENV')==='production'){
+ $pageTitle='Production releases';$activeKey='deploy';require __DIR__.'/_layout_top.php';
+ echo '<div class="card-custom p-4"><h2>Production releases</h2><p>Push or merge reviewed changes to the stable branch. GitHub Actions verifies the application, creates a private backup and applies additive migrations before updating each runtime.</p><p>School SQL credentials and direct database maintenance are restricted to the operator runtime.</p><a class="btn btn-primary" href="https://github.com/techtemlead-lab/School_ERP_Source/actions/workflows/deploy-stable.yml" target="_blank" rel="noopener">View release pipeline</a></div>';
+ require __DIR__.'/_layout_bottom.php';exit;
+}
+
 
 // ── SQL Statement Parser ─────────────────────────────────────
 // -- কমেন্ট লাইন ও /* */ ব্লক বাদ দিয়ে ';' দিয়ে split করে

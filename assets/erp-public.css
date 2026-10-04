@@ -4,3 +4,5 @@
 @media(max-width:430px){.feature-grid{grid-template-columns:1fr}.portal-grid{grid-template-columns:1fr}.portal-card p{min-height:auto}.preview-body aside{display:none}.preview-body{min-height:auto}.preview-content{padding:18px}.preview-stats div>span{font-size:8px}.field-row{grid-template-columns:1fr;gap:0}.nav nav>a:nth-child(3){display:none}.hero-note{font-size:10px}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.btn{transition:none}}
 @media print{.site-header,.site-footer,.actions,.btn,#demo-notice{display:none!important}.wrap{width:100%}.section{padding:25px 0}.product-preview{box-shadow:none;transform:none}.hero{padding:20px 0}}
+
+.billing-options{display:flex;flex-wrap:wrap;justify-content:center;gap:12px;margin:28px 0 12px}.billing-options [aria-current]{outline:2px solid var(--green);outline-offset:3px}.billing-note{text-align:center;margin-bottom:32px}.plan-period{margin-top:6px}.plan-details{padding:32px;border:1px solid var(--line);border-radius:24px;margin-top:28px;background:var(--paper)}.plan-details h3{margin-top:20px}.plan-details p{line-height:1.8;max-width:95ch}
