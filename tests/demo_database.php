@@ -15,6 +15,8 @@ $db=$row['db_name'];$scoped=new PDO('mysql:host=db;dbname='.$db.';charset=utf8mb
 check((int)$scoped->query('SELECT COUNT(*) FROM students')->fetchColumn()===240,'240 fictional students');
 check((int)$scoped->query('SELECT COUNT(*) FROM exam_marks')->fetchColumn()===720,'sample exam marks');
 check((int)$scoped->query("SELECT COUNT(*) FROM employees")->fetchColumn()===24,'24 fictional teachers');
+check((int)$scoped->query("SELECT COUNT(*) FROM elearning_lesson_plans")->fetchColumn()===18,'18 fictional lesson plans');
+check((int)$scoped->query("SELECT COUNT(*) FROM elearning_lesson_plans WHERE status='Approved' AND branch_id=1")->fetchColumn()===15,'15 approved class and subject examples');
 check((int)$scoped->query("SELECT COUNT(*) FROM student_daily_attendance WHERE attendance_date='".date('Y-m-d')."'")->fetchColumn()===240,'sample attendance uses target reset day');
 foreach(['admin','employees','students','system_users'] as $table){
  check((int)$scoped->query('SELECT COUNT(*) FROM '.demo_ident($table))->fetchColumn()>0,'password guard fixture '.$table);

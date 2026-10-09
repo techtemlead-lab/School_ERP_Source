@@ -224,6 +224,7 @@ return [
         'label' => 'E-Learning Module',
         'children' => [
             ['type'=>'leaf','key'=>'homework','label'=>'Homework'],
+            ['type'=>'leaf','key'=>'lesson_plan','label'=>'Lesson Plan'],
             ['type'=>'leaf','key'=>'live_class','label'=>'Live Class'],
             ['type'=>'leaf','key'=>'live_class_settings','label'=>'Live Class Setting'],
             ['type'=>'leaf','key'=>'recorded_class','label'=>'Recorded Class'],

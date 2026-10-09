@@ -1132,6 +1132,8 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                         echo 'HR Module > Import Employees';
                     } elseif ($page == 'homework') {
                         echo 'E-Learning Module > Homework';
+                    } elseif ($page == 'lesson_plan') {
+                        echo 'E-Learning Module > Lesson Plan';
                     } elseif ($page == 'live_class') {
                         echo 'E-Learning Module > Live Class';
                     } elseif ($page == 'live_class_host') {
@@ -1404,6 +1406,7 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                 'security_activity_log' => 'security_activity_log.php',
                 'database_reset' => 'database_reset.php',
                 'homework' => 'homework.php',
+                'lesson_plan' => 'lesson_plan.php',
                 'live_class' => 'live_class.php',
                 'live_class_host' => 'live_class_host.php',
                 'live_class_settings' => 'live_class_settings.php',

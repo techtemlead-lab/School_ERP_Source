@@ -90,15 +90,16 @@ $tp_brand_icon_data_uri = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d
 
         <!-- E-Learning Module -->
         <li class="has-submenu">
-            <a href="#" data-bs-toggle="collapse" data-bs-target="#tElearningSubmenu" aria-expanded="<?php echo in_array($tp_page, ['homework', 'live_class', 'recorded_class'], true) ? 'true' : 'false'; ?>" title="E-Learning Module">
+            <a href="#" data-bs-toggle="collapse" data-bs-target="#tElearningSubmenu" aria-expanded="<?php echo in_array($tp_page, ['homework', 'lesson_plan', 'live_class', 'recorded_class'], true) ? 'true' : 'false'; ?>" title="E-Learning Module">
                 <span class="d-flex align-items-center gap-2">
                     <i class="fa-solid fa-laptop menu-icon"></i>
                     <span class="menu-text">E-Learning Module</span>
                 </span>
                 <i class="fa-solid fa-chevron-down small menu-text"></i>
             </a>
-            <ul class="collapse submenu <?php echo in_array($tp_page, ['homework', 'live_class', 'recorded_class'], true) ? 'show' : ''; ?>" id="tElearningSubmenu">
+            <ul class="collapse submenu <?php echo in_array($tp_page, ['homework', 'lesson_plan', 'live_class', 'recorded_class'], true) ? 'show' : ''; ?>" id="tElearningSubmenu">
                 <li><a href="index.php?page=homework" class="<?php echo $tp_page === 'homework' ? 'active' : ''; ?>">Homework</a></li>
+                <li><a href="index.php?page=lesson_plan" class="<?php echo $tp_page === 'lesson_plan' ? 'active' : ''; ?>">Lesson Plan</a></li>
                 <li><a href="index.php?page=live_class" class="<?php echo $tp_page === 'live_class' ? 'active' : ''; ?>">Live Class</a></li>
                 <li><a href="index.php?page=recorded_class" class="<?php echo $tp_page === 'recorded_class' ? 'active' : ''; ?>">Recorded Class</a></li>
             </ul>

@@ -441,6 +441,7 @@ function sb_mod_ok(PDO $pdo, array $tree, string $modkey): bool
             </a>
             <ul class="collapse submenu" id="elearningModuleSubmenu">
                 <li><a href="index.php?page=homework">Homework</a></li>
+                <li><a href="index.php?page=lesson_plan">Lesson Plan</a></li>
                 <li><a href="index.php?page=live_class">Live Class</a></li>
                 <li><a href="index.php?page=live_class_settings">Live Class Setting</a></li>
                 <li><a href="index.php?page=recorded_class">Recorded Class</a></li>

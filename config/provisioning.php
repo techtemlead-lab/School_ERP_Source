@@ -42,6 +42,7 @@ function erp_install_empty_school(PDO $school,array $data): void {
   $columns=$school->query('SHOW COLUMNS FROM '.demo_ident($table))->fetchAll(PDO::FETCH_COLUMN);
   foreach(['rfid_card_no'=>'VARCHAR(100) NULL','tracking_id'=>'VARCHAR(100) NULL','device_serial'=>'VARCHAR(100) NULL','password'=>'VARCHAR(255) NULL','must_change_password'=>'TINYINT NOT NULL DEFAULT 0','branch_id'=>'INT NULL'] as $column=>$definition)if(!in_array($column,$columns,true))$school->exec('ALTER TABLE '.demo_ident($table).' ADD COLUMN '.demo_ident($column).' '.$definition);
  }
+ require_once __DIR__.'/lesson_plan_helpers.php';lp_ensure_tables($school);
  $school->beginTransaction();
  try{
   $school->exec('DELETE FROM admin');

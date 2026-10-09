@@ -27,6 +27,8 @@ function demo_seed_database(PDO $pdo,?int $anchor=null): void {
   $cols=$pdo->query('SHOW COLUMNS FROM '.demo_ident($table))->fetchAll(PDO::FETCH_COLUMN);
   foreach(['rfid_card_no'=>'VARCHAR(100) NULL','tracking_id'=>'VARCHAR(100) NULL','device_serial'=>'VARCHAR(100) NULL','password'=>'VARCHAR(255) NULL','must_change_password'=>'TINYINT NOT NULL DEFAULT 0','branch_id'=>'INT NULL'] as $col=>$type)if(!in_array($col,$cols,true))$pdo->exec('ALTER TABLE '.demo_ident($table).' ADD COLUMN '.demo_ident($col).' '.$type);
  }
+ require_once __DIR__.'/lesson_plan_helpers.php';lp_ensure_tables($pdo);
+ require_once __DIR__.'/branch_scope.php';branch_ensure_column($pdo,'academic_sections');
  $pdo->beginTransaction();
  $hash=password_hash('DemoAccess!2026',PASSWORD_DEFAULT);
  demo_insert($pdo,'system_users',['id'=>1,'branch_id'=>1,'user_type'=>'Demo','username'=>'demo_staff','email'=>'staff@shapla.example.invalid','password'=>$hash,'status'=>'Active']);$pdo->exec('DELETE FROM admin');demo_insert($pdo,'admin',['username'=>'demo_admin','password'=>$hash]);
@@ -129,6 +131,12 @@ function demo_seed_database(PDO $pdo,?int $anchor=null): void {
  demo_insert($pdo,'website_useful_links',['title'=>'School ERP demo guide','url'=>'https://schoolmng.techteamlead.com/demo/']);
  foreach(['Learning support','Creative participation','Attendance achievement'] as $i=>$award)demo_insert($pdo,'scholarship_types',['id'=>$i+1,'name'=>$award.' (demo)','category'=>'School','description'=>'Fictional school award']);
  for($n=1;$n<=18;$n++)demo_insert($pdo,'scholarship_awards',['student_id'=>$n,'scholarship_type_id'=>($n-1)%3+1,'session_id'=>1,'class_id'=>($n-1)%5+1,'amount'=>500+$n*50,'status'=>'Pending','remarks'=>'Fictional demo award','created_by'=>'demo_admin']);
+ // Fictional lesson plans expose the approval workflow without touching real schools.
+ for($class=1;$class<=5;$class++)for($part=1;$part<=3;$part++){
+  $topic=['Bangla: story reading and creative writing','English: describing our school','Mathematics: fractions in everyday life'][$part-1];
+  demo_insert($pdo,'elearning_lesson_plans',['branch_id'=>1,'session_id'=>1,'class_id'=>$class,'section_id'=>$class,'subject_id'=>($class-1)*3+$part,'teacher_id'=>($class-1)*3+$part,'title'=>$topic.' (fictional demo)','chapter'=>'Practice lesson '.$class,'lesson_date'=>demo_seed_date('Y-m-d'),'duration_minutes'=>45,'objectives'=>'Students explain the topic in their own words and solve a short practice task.','methods'=>'Discussion, pair work and guided practice.','materials'=>'Textbook, whiteboard and fictional classroom worksheets.','activities'=>'Warm-up: 5 minutes; guided practice: 20 minutes; group activity: 15 minutes; review: 5 minutes.','assessment'=>'Ask three review questions and check a short exit ticket.','homework'=>'Complete five sample exercises. This is fictional demo content.','status'=>'Approved','reviewed_by'=>'demo_admin','reviewed_at'=>demo_seed_date('Y-m-d H:i:s'),'created_by'=>'teacher#'.(($class-1)*3+$part)]);
+ }
+ foreach(['Draft','Pending','Rejected'] as $status)demo_insert($pdo,'elearning_lesson_plans',['branch_id'=>1,'session_id'=>1,'class_id'=>1,'section_id'=>1,'subject_id'=>1,'teacher_id'=>1,'title'=>'Bangla lesson - '.$status.' (fictional demo)','lesson_date'=>demo_seed_date('Y-m-d',demo_seed_time('+1 day')),'duration_minutes'=>45,'objectives'=>'Practice reading and explaining a short fictional story.','status'=>$status,'submitted_at'=>$status==='Draft'?null:demo_seed_date('Y-m-d H:i:s'),'admin_remarks'=>$status==='Rejected'?'Add a short assessment and resubmit this fictional plan.':null,'created_by'=>'teacher#1']);
  $pdo->commit();
 
  foreach(['admin','employees','students','system_users'] as $table)$pdo->exec('CREATE TRIGGER '.demo_ident('demo_lock_'.$table).' BEFORE UPDATE ON '.demo_ident($table)." FOR EACH ROW BEGIN IF NOT(NEW.password <=> OLD.password) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='Password changes disabled in public demo'; END IF; END");
