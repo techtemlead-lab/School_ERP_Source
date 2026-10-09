@@ -1,6 +1,6 @@
 """Local Docker HTTP regression: approvals, printing, role/branch and visitor isolation."""
 from pathlib import Path
-import datetime, hashlib, hmac, http.cookiejar, json, re, secrets, subprocess
+import hashlib, hmac, http.cookiejar, json, re, secrets, subprocess
 import urllib.error, urllib.parse, urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,7 +63,7 @@ check(b.get('/teacher/')[0] == 200, 'teacher login while admin session remains s
 path = '/teacher/index.php?page=lesson_plan'
 status, raw = b.get(path + '&action=form')
 check(status == 200 and b'lpClassSelect' in raw and b'PUBLIC DEMO' in raw, 'teacher form and existing demo banner')
-fields = {'csrf_token': token(raw), 'lp_id': '0', 'class_id': '1', 'section_id': '1', 'subject_id': '1', 'title': marker, 'lesson_date': datetime.date.today().isoformat(), 'duration_minutes': '45', 'objectives': '<script>alert(1)</script>', 'save_draft': '1'}
+fields = {'csrf_token': token(raw), 'lp_id': '0', 'class_id': '1', 'section_id': '1', 'subject_id': '1', 'title': marker, 'lesson_date': sql("echo date('Y-m-d');").decode(), 'duration_minutes': '45', 'objectives': '<script>alert(1)</script>', 'save_draft': '1'}
 check(b.get(path, {**fields, 'csrf_token': 'invalid'})[0] == 302, 'invalid CSRF form rejected')
 check(sql("echo $p->query('SELECT COUNT(*) FROM elearning_lesson_plans WHERE title=' . $p->quote(" + json.dumps(marker) + "))->fetchColumn();") == b'0', 'invalid CSRF cannot create data')
 check(b.get(path, fields)[0] == 302, 'teacher saves draft')
