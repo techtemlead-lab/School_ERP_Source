@@ -1,6 +1,6 @@
 """Local-only HTTP checks for scholarship accounting and confidential question files."""
 from pathlib import Path
-import datetime, hashlib, hmac, http.cookiejar, io, json, re, secrets, subprocess, zipfile
+import datetime, hashlib, hmac, http.cookiejar, io, json, re, secrets, subprocess, time, zipfile
 import urllib.error, urllib.parse, urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,9 +18,15 @@ class Browser:
         headers = {'Host': 'demo.schoolmng.localhost:8088', **(headers or {})}
         if isinstance(data, dict): data = urllib.parse.urlencode(data).encode()
         request = urllib.request.Request('http://127.0.0.1:8088' + path, headers=headers, data=data)
-        try: response = self.opener.open(request, timeout=60)
-        except urllib.error.HTTPError as error: response = error
-        return response.code, response.read()
+        for attempt in range(31):
+            try: response = self.opener.open(request, timeout=60)
+            except urllib.error.HTTPError as error: response = error
+            raw = response.read()
+            if response.code != 503 or b'All demo sessions are busy' not in raw or attempt == 30:
+                return response.code, raw
+            # This test creates more visitors than the initial pool. Wait for
+            # the real background worker's normal 30-second replenishment.
+            time.sleep(2)
 
 def check(ok, description):
     assert ok, description
