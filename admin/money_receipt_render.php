@@ -58,6 +58,10 @@ if (!function_exists('mr_render_copy')) {
                 <img src="<?php echo $logo_prefix; ?><?php echo mr_e($inst['logo_path']); ?>" class="mr-watermark">
             <?php endif; ?>
 
+            <?php if ($period_due_total !== null): $mr_is_due = ((float) $period_due_total) > 0.005; ?>
+                <div class="mr-stamp <?php echo $mr_is_due ? 'mr-stamp-due' : 'mr-stamp-paid'; ?>"><b><?php echo $mr_is_due ? 'DUE' : 'PAID'; ?></b><span><?php echo mr_e(date('d/m/Y', strtotime($first['collected_at'] ?? 'now'))); ?></span></div>
+            <?php endif; ?>
+
             <div class="mr-copy-body">
                 <div class="mr-head">
                     <div class="mr-head-logo">
@@ -74,25 +78,29 @@ if (!function_exists('mr_render_copy')) {
                     <div class="mr-head-qr" id="<?php echo mr_e($qr_id); ?>"></div>
                 </div>
 
-                <div class="mr-receipt-title">(Money Receipt)</div>
-                <div class="mr-copy-label"><?php echo mr_e($copy_label); ?></div>
+                <div class="mr-tagrow">
+                    <div class="mr-pill">Money Receipt</div>
+                    <div class="mr-pill-out"><?php echo mr_e($copy_label); ?></div>
+                </div>
 
                 <table class="mr-info-grid">
                     <tr>
-                        <td>Session : <?php echo mr_e($first['session_name'] ?? '—'); ?></td>
-                        <td>Class : <?php echo mr_e($class_label ?: '—'); ?></td>
+                        <td><span class="mr-lbl">Session</span><span class="mr-val"><?php echo mr_e($first['session_name'] ?? '—'); ?></span></td>
+                        <td><span class="mr-lbl">Class</span><span class="mr-val"><?php echo mr_e($class_label ?: '—'); ?></span></td>
                     </tr>
                     <tr>
-                        <td>Student ID : <?php echo mr_e($first['student_code'] ?? '—'); ?></td>
-                        <td>Roll : <?php echo mr_e($first['roll_no'] ?? '—'); ?></td>
+                        <td><span class="mr-lbl">Student ID</span><span class="mr-val"><?php echo mr_e($first['student_code'] ?? '—'); ?></span></td>
+                        <td><span class="mr-lbl">Roll</span><span class="mr-val"><?php echo mr_e($first['roll_no'] ?? '—'); ?></span></td>
                     </tr>
                     <tr>
-                        <td>Student Name : <?php echo mr_e($first['student_name'] ?? '—'); ?></td>
-                        <td>Date : <?php echo mr_e(date('d F Y', strtotime($first['collected_at'] ?? 'now'))); ?></td>
+                        <td colspan="2"><span class="mr-lbl">Student Name</span><span class="mr-val"><?php echo mr_e($first['student_name'] ?? '—'); ?></span></td>
                     </tr>
                     <tr>
-                        <td>Paid for : <?php echo mr_e($paid_for_label ?: '—'); ?></td>
-                        <td>Folio No : <?php echo mr_e($folio_no); ?></td>
+                        <td><span class="mr-lbl">Date</span><span class="mr-val"><?php echo mr_e(date('d F Y', strtotime($first['collected_at'] ?? 'now'))); ?></span></td>
+                        <td><span class="mr-lbl">Folio No</span><span class="mr-val"><?php echo mr_e($folio_no); ?></span></td>
+                    </tr>
+                    <tr>
+                        <td colspan="2"><span class="mr-lbl">Paid for</span><span class="mr-val"><?php echo mr_e($paid_for_label ?: '—'); ?></span></td>
                     </tr>
                 </table>
 
@@ -124,7 +132,7 @@ if (!function_exists('mr_render_copy')) {
                     <?php endif; ?>
                 </table>
 
-                <div class="mr-in-words">In Words : <?php echo mr_e(ucfirst(mr_number_to_words((int) round($total_amount))) . ' Tk. Only'); ?></div>
+                <div class="mr-in-words"><b>In Words :</b> <?php echo mr_e(ucfirst(mr_number_to_words((int) round($total_amount))) . ' Tk. Only'); ?></div>
 
                 <?php if ($period_due_total !== null): ?>
                     <div class="mr-due-line">
@@ -156,6 +164,7 @@ if (!function_exists('mr_receipt_css')) {
     {
         ob_start();
         ?>
+        * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         body { font-family: Arial, 'Noto Sans Bengali', sans-serif; background: #eef1f5; padding: 16px; }
         .no-print-bar { max-width: 1000px; margin: 0 auto 16px; display: flex; justify-content: space-between; }
         .mr-sheet { background: #fff; margin: 0 auto 20px; box-shadow: 0 0 8px rgba(0,0,0,0.15); position: relative; display: flex; }
@@ -172,31 +181,39 @@ if (!function_exists('mr_receipt_css')) {
         .mr-head-logo { width: 46px; flex: 0 0 46px; }
         .mr-head-logo img { max-width: 46px; max-height: 46px; }
         .mr-head-text { flex: 1 1 auto; text-align: center; }
-        .mr-head-text h4 { margin: 0; font-weight: bold; color: #1e3a5f; font-size: 15px; }
-        .mr-inst-line { font-size: 10px; color: #555; }
+        .mr-head-text h4 { margin: 0; font-weight: 700; color: #1f2937; font-size: 16px; }
+        .mr-inst-line { font-size: 10px; color: #4b5563; }
         .mr-web { color: #1a56c4; }
         .mr-head-qr { width: 46px; flex: 0 0 46px; }
         .mr-head-qr img, .mr-head-qr canvas { width: 46px !important; height: 46px !important; }
 
-        .mr-receipt-title { text-align: center; font-style: italic; color: #6b3f1d; font-size: 13px; margin: 6px 0 2px; }
-        .mr-copy-label { text-align: center; font-weight: bold; text-decoration: underline; font-size: 13px; margin-bottom: 8px; }
+        .mr-tagrow { display: flex; justify-content: space-between; align-items: center; margin: 8px 0 6px; }
+        .mr-pill { background: #1e3a5f; color: #fff; font-weight: 700; font-size: 11px; letter-spacing: .6px; padding: 5px 10px; border-radius: 4px; text-transform: uppercase; }
+        .mr-pill-out { border: 1.5px solid #1e3a5f; color: #1e3a5f; font-weight: 700; font-size: 10px; letter-spacing: .5px; padding: 3px 10px; border-radius: 999px; text-transform: uppercase; }
 
-        table.mr-info-grid { width: 100%; font-size: 11px; margin-bottom: 6px; border-collapse: collapse; }
-        table.mr-info-grid td { padding: 1px 2px; vertical-align: top; }
+        table.mr-info-grid { width: 100%; border-collapse: collapse; border: 1px solid #d1d5db; margin-bottom: 8px; }
+        table.mr-info-grid td { width: 50%; border: 1px solid #e5e7eb; padding: 3px 6px; vertical-align: top; }
+        .mr-lbl { display: block; font-size: 8.5px; color: #6b7280; text-transform: uppercase; letter-spacing: .4px; }
+        .mr-val { display: block; font-size: 11.5px; font-weight: 700; color: #111827; word-break: break-word; }
 
-        table.mr-items { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 6px; }
-        table.mr-items thead th { border-bottom: 1px solid #333; padding: 3px 4px; text-align: left; }
-        table.mr-items tbody td { padding: 3px 4px; }
-        table.mr-total-row td { border-top: 1px solid #333; font-weight: bold; padding-top: 4px; }
+        table.mr-items { width: 100%; border-collapse: collapse; border: 1px solid #d1d5db; font-size: 11px; margin-bottom: 6px; }
+        table.mr-items thead th { background: #e8eef7; color: #1f2937; border-bottom: 1px solid #cbd5e1; padding: 4px 6px; text-align: left; font-weight: 700; }
+        table.mr-items thead th.text-end { text-align: right; }
+        table.mr-items tbody td { padding: 4px 6px; }
+        table.mr-items tbody tr.mr-total-row td { border-top: 1px solid #9ca3af; font-weight: 700; padding-top: 5px; }
         .text-end { text-align: right; }
 
-        .mr-in-words { font-size: 11px; margin: 4px 0; }
-        .mr-due-line { display: flex; justify-content: space-between; color: #c0392b; font-weight: bold; font-size: 11px; margin-bottom: 6px; }
+        .mr-in-words { font-size: 11px; font-style: italic; margin: 4px 0 8px; }
+        .mr-due-line { display: flex; justify-content: space-between; color: #b91c1c; background: #fef2f2; border: 1px solid #fca5a5; border-radius: 4px; padding: 4px 8px; font-weight: 700; font-size: 11px; margin-bottom: 6px; }
         .mr-footer-note { font-size: 10px; color: #666; margin: 4px 0; }
 
         .mr-sign-row { display: flex; justify-content: space-between; margin-top: auto; padding-top: 26px; }
         .mr-sign { text-align: center; font-size: 10.5px; }
-        .mr-sign-line { border-top: 1px solid #333; width: 120px; margin-bottom: 3px; }
+        .mr-sign-line { border-top: 1px solid #374151; width: 120px; margin-bottom: 3px; }
+        .mr-sign { font-weight: 700; }
+        .mr-stamp { position: absolute; top: 46%; left: 50%; z-index: 3; transform: translate(-50%,-50%) rotate(-18deg); width: 96px; height: 96px; border: 3px double; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: .4; pointer-events: none; }
+        .mr-stamp b { font-size: 20px; letter-spacing: 1px; } .mr-stamp span { font-size: 8px; }
+        .mr-stamp-due { color: #b91c1c; border-color: #b91c1c; } .mr-stamp-paid { color: #15803d; border-color: #15803d; }
 
         @media print {
             body { background: #fff; padding: 0; margin: 0; }

@@ -324,6 +324,12 @@ document.addEventListener('DOMContentLoaded', function () {
 // -----------------------------------------------------------------
 $sd_homework = [];
 $sd_live = [];
+$sd_lesson_plans = [];
+require_once __DIR__ . '/../config/lesson_plan_helpers.php';
+[$sd_lp_scope, $sd_lp_params] = lp_plan_scope($pdo, 'student');
+$sd_lp_stmt = $pdo->prepare("SELECT p.title, p.lesson_date, sub.subject_name FROM elearning_lesson_plans p LEFT JOIN academic_subjects sub ON sub.id=p.subject_id WHERE $sd_lp_scope ORDER BY p.lesson_date DESC, p.id DESC LIMIT 3");
+$sd_lp_stmt->execute($sd_lp_params);
+$sd_lesson_plans = $sd_lp_stmt->fetchAll();
 try {
     $stmt = $pdo->prepare(
         "SELECT h.id, h.title, h.deadline, sub.subject_name, s.id AS submission_id
@@ -438,7 +444,16 @@ try {
                 </div>
                 <a href="index.php?page=lesson_plan" class="btn btn-sm" style="background:#ccfbf1;color:#0f766e;font-weight:700;font-size:11.5px;">All Lesson Plan</a>
             </div>
-            <p class="text-muted mb-0" style="font-size:12.5px;"><i class="fa-solid fa-xmark me-1 text-danger"></i>এখনো কোনো লেসন প্ল্যান নেই।</p>
+            <?php if ($sd_lesson_plans): ?>
+                <?php foreach ($sd_lesson_plans as $sd_plan): ?>
+                    <a href="index.php?page=lesson_plan" class="d-block text-decoration-none border-bottom py-2">
+                        <span class="fw-bold"><?php echo sp_e($sd_plan['title']); ?></span>
+                        <small class="d-block text-muted"><?php echo sp_e($sd_plan['subject_name']); ?> · <?php echo sp_e($sd_plan['lesson_date']); ?></small>
+                    </a>
+                <?php endforeach; ?>
+            <?php else: ?>
+                <p class="text-muted mb-0" style="font-size:12.5px;"><i class="fa-solid fa-xmark me-1 text-danger"></i>এখনো কোনো লেসন প্ল্যান নেই।</p>
+            <?php endif; ?>
         </div>
     </div>
 

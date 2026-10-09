@@ -68,7 +68,10 @@ function demo_guard_request(): void {
     }
     $used=0;$directory=dirname(__DIR__).'/uploads/demo/'.$GLOBALS['demo_sandbox']['db_name'];
     if (is_dir($directory)) foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($directory,FilesystemIterator::SKIP_DOTS)) as $file) $used+=$file->getSize();
-    $inspect=function(array $file) use (&$inspect,&$used): void {
+    // Word files are accepted only by the confidential teacher-question controller.
+    // Its upload helper validates the document structure before saving it.
+    $question_upload=$path==='/teacher/index.php' && $page==='teacher_questions';
+    $inspect=function(array $file) use (&$inspect,&$used,$question_upload): void {
         if (is_array($file['name'] ?? null)) {
             foreach ($file['name'] as $key=>$name) $inspect(['name'=>$name,'tmp_name'=>$file['tmp_name'][$key],'error'=>$file['error'][$key],'size'=>$file['size'][$key]]);
             return;
@@ -77,8 +80,12 @@ function demo_guard_request(): void {
         if (($file['error'] ?? 0)!==UPLOAD_ERR_OK) erp_stop(413,'The upload could not be accepted.');
         $ext=strtolower(pathinfo($file['name'],PATHINFO_EXTENSION));
         $allowed=['jpg'=>['image/jpeg'],'jpeg'=>['image/jpeg'],'png'=>['image/png'],'webp'=>['image/webp'],'pdf'=>['application/pdf'],'csv'=>['text/plain','text/csv','application/csv'],'txt'=>['text/plain'],'xlsx'=>['application/zip','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']];
+        if ($question_upload) {
+            $allowed['doc']=['application/msword','application/octet-stream','application/CDFV2'];
+            $allowed['docx']=['application/zip','application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+        }
         $mime=(new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);$used+=(int)$file['size'];
-        if (!isset($allowed[$ext]) || !in_array($mime,$allowed[$ext],true) || $file['size']>2*1024*1024 || $used>20*1024*1024) erp_stop(413,'Use JPG, PNG, WebP, PDF, CSV, TXT or XLSX files up to 2 MB. A demo session allows 20 MB of uploads.');
+        if (!isset($allowed[$ext]) || !in_array($mime,$allowed[$ext],true) || $file['size']>2*1024*1024 || $used>20*1024*1024) erp_stop(413,$question_upload ? 'Use a valid PDF, Word or image file up to 2 MB. A demo session allows 20 MB of uploads.' : 'Use JPG, PNG, WebP, PDF, CSV, TXT or XLSX files up to 2 MB. A demo session allows 20 MB of uploads.');
     };foreach ($_FILES as $file) $inspect($file);
 }
 function demo_auto_login(PDO $pdo): void {

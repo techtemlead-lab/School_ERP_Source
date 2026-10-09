@@ -18,6 +18,8 @@ try{
   $school->exec("CREATE TABLE IF NOT EXISTS schema_migrations(version VARCHAR(80) PRIMARY KEY,applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB");
   $modules='20261004_missing_module_tables';$m=$school->prepare('SELECT version FROM schema_migrations WHERE version=?');$m->execute([$modules]);if(!$m->fetch()){demo_sql_file($school,__DIR__.'/../sql/demo_modules.sql');$school->prepare('INSERT INTO schema_migrations(version) VALUES(?)')->execute([$modules]);}
   lp_ensure_tables($school);
+  require_once __DIR__.'/../config/scholarship_application_helpers.php';sa_ensure_tables($school);
+  require_once __DIR__.'/../config/teacher_question_helpers.php';tq_ensure_tables($school);
   $ver='20261004_portal_columns';$q=$school->prepare('SELECT version FROM schema_migrations WHERE version=?');$q->execute([$ver]);
   if(!$q->fetch()){
    foreach(['students','employees'] as $table){

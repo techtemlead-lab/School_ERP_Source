@@ -6,6 +6,10 @@
 // - বাকি টাকা অভিভাবককে হাতে/মোবাইল ব্যাংকিংয়ে কত দেওয়া হলো
 // সেভ করলে সমন্বিত অংশ finance_fee_collections-এ Paid এন্ট্রি হিসেবে বসে যায়, তাই সব Finance
 // রিপোর্টে (Due, Ledger, Cash/Bank Book) এটা স্বয়ংক্রিয়ভাবে প্রতিফলিত হয়।
+require_once __DIR__ . '/../config/portal_access.php';
+erp_portal_controller_role(['admin']);
+erp_portal_require_role($pdo, 'admin', 'scholarship_disbursement');
+[$sd_scope, $sd_params] = erp_portal_student_scope($pdo, 'admin', 'a.student_id');
 require_once __DIR__ . '/../config/scholarship_helpers.php';
 require_once __DIR__ . '/finance_due_report_common.php';
 sch_ensure_tables($pdo);
@@ -16,7 +20,8 @@ function sd_money($n): string { return number_format((float) $n, 2); }
 
 $sd_msg = $_SESSION['sd_msg'] ?? '';
 $sd_err = $_SESSION['sd_err'] ?? '';
-unset($_SESSION['sd_msg'], $_SESSION['sd_err']);
+$sd_receipt_id = (int) ($_SESSION['sd_receipt_id'] ?? 0);
+unset($_SESSION['sd_msg'], $_SESSION['sd_err'], $_SESSION['sd_receipt_id']);
 
 $fee_heads = $pdo->query("SELECT id, ac_code, ac_head FROM finance_account_heads WHERE ac_type = 'Academic' AND has_child = 'No' AND status = 'Active' ORDER BY ac_head ASC")->fetchAll();
 $MONTHS = dr_months();
@@ -37,34 +42,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_disbursement'
     $trx_id = trim($_POST['trx_id'] ?? '');
     $remarks = trim($_POST['remarks'] ?? '');
 
-    $a_stmt = $pdo->prepare(
-        "SELECT a.*, t.name AS type_name FROM scholarship_awards a LEFT JOIN scholarship_types t ON t.id = a.scholarship_type_id
-         WHERE a.id = ? AND a.status = 'Pending' LIMIT 1"
-    );
-    $a_stmt->execute([$award_id]);
-    $award = $a_stmt->fetch();
-
-    if (!$award) {
-        $_SESSION['sd_err'] = 'এই Award আর Pending নেই বা পাওয়া যায়নি।';
-        header('Location: index.php?page=scholarship_disbursement');
-        exit();
+    // Allocate the existing sequential receipt numbers once per school, including
+    // simultaneous payments for different students.
+    $receipt_lock = 'scholarship_payment_' . substr(hash('sha256', (string) $pdo->query('SELECT DATABASE()')->fetchColumn()), 0, 32);
+    $lock_stmt = $pdo->prepare('SELECT GET_LOCK(?,10)');
+    $lock_stmt->execute([$receipt_lock]);
+    if ((int) $lock_stmt->fetchColumn() !== 1) {
+        $_SESSION['sd_err'] = 'Another scholarship payment is processing. Please try again.';
+        header('Location: index.php?page=scholarship_disbursement'); exit;
     }
-
-    $total_amount = (float) $award['amount'];
-    if ($adjust_amount < 0) { $adjust_amount = 0; }
-    if ($adjust_amount > $total_amount) { $adjust_amount = $total_amount; }
-
-    // adjust_amount পর্যন্ত waterfall প্রয়োগ করে প্রকৃত সমন্বয়যোগ্য লাইন বের করা হচ্ছে
-    // (admin যা চেয়েছে তার চেয়ে Due কম থাকলে বাকিটা এমনিতেই Cash হয়ে যাবে)
-    $result = $adjust_amount > 0
-        ? sch_waterfall_adjust($pdo, (int) $award['student_id'], (int) $award['session_id'], (int) $award['class_id'], $adjust_amount, $fee_heads)
-        : ['lines' => [], 'adjusted_total' => 0.0, 'cash_amount' => 0.0];
-
-    $adjusted_total = $result['adjusted_total'];
-    $cash_amount = round($total_amount - $adjusted_total, 2);
-
+    $pdo->beginTransaction();
     try {
-        $pdo->beginTransaction();
+        $a_stmt = $pdo->prepare(
+            "SELECT a.*, t.name AS type_name FROM scholarship_awards a LEFT JOIN scholarship_types t ON t.id = a.scholarship_type_id
+             WHERE a.id = ? AND a.status = 'Pending' AND $sd_scope LIMIT 1 FOR UPDATE"
+        );
+        $a_stmt->execute(array_merge([$award_id], $sd_params));
+        $award = $a_stmt->fetch();
+
+        if (!$award) {
+            $pdo->rollBack();
+            $_SESSION['sd_err'] = 'এই Award আর Pending নেই বা পাওয়া যায়নি।';
+            header('Location: index.php?page=scholarship_disbursement');
+            exit();
+        }
+
+        $student_lock = $pdo->prepare('SELECT id FROM students WHERE id=? FOR UPDATE');
+        $student_lock->execute([(int) $award['student_id']]);
+        if (!$student_lock->fetchColumn() || !is_finite($adjust_amount)) { throw new RuntimeException('Invalid disbursement.'); }
+        $total_amount = (float) $award['amount'];
+        if ($adjust_amount < 0) { $adjust_amount = 0; }
+        if ($adjust_amount > $total_amount) { $adjust_amount = $total_amount; }
+
+        // adjust_amount পর্যন্ত waterfall প্রয়োগ করে প্রকৃত সমন্বয়যোগ্য লাইন বের করা হচ্ছে
+        // (admin যা চেয়েছে তার চেয়ে Due কম থাকলে বাকিটা এমনিতেই Cash হয়ে যাবে)
+        $result = $adjust_amount > 0
+            ? sch_waterfall_adjust($pdo, (int) $award['student_id'], (int) $award['session_id'], (int) $award['class_id'], $adjust_amount, $fee_heads)
+            : ['lines' => [], 'adjusted_total' => 0.0, 'cash_amount' => 0.0];
+
+        $adjusted_total = $result['adjusted_total'];
+        $cash_amount = round($total_amount - $adjusted_total, 2);
 
         $receipt_no = sch_next_receipt_no($pdo, 'scholarship_disbursements', 'SCH');
         $ins = $pdo->prepare(
@@ -77,7 +94,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_disbursement'
         ]);
         $disbursement_id = (int) $pdo->lastInsertId();
 
-        $method_label = 'Scholarship-' . preg_replace('/[^A-Za-z0-9]/', '', $award['type_name'] ?: 'General');
+        // Existing fee collections limit payment_method to 30 characters.
+        $method_label = substr('Scholarship-' . preg_replace('/[^A-Za-z0-9]/', '', $award['type_name'] ?: 'General'), 0, 30);
         $fc_folio = 'SCH' . date('ymd') . strtoupper(substr(uniqid(), -5));
 
         foreach ($result['lines'] as $ln) {
@@ -100,15 +118,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_disbursement'
         $pdo->prepare("UPDATE scholarship_awards SET status = 'Disbursed' WHERE id = ?")->execute([$award_id]);
 
         $pdo->commit();
+        $_SESSION['sd_receipt_id'] = $disbursement_id;
         $_SESSION['sd_msg'] = 'Disbursement সম্পন্ন হয়েছে — বকেয়ার সাথে সমন্বয় হলো ৳' . sd_money($adjusted_total) . ', অভিভাবককে দেওয়া হলো ৳' . sd_money($cash_amount) . '। Receipt: ' . $receipt_no;
         $sd_stu_row = $pdo->prepare("SELECT name_en, roll_no FROM students WHERE id = ?");
         $sd_stu_row->execute([$award['student_id']]);
         $sd_stu = $sd_stu_row->fetch();
         sec_log_activity($pdo, 'Scholarship', 'Update', "স্কলারশিপ Disbursement সম্পন্ন হয়েছে: {$sd_stu['name_en']} (Roll: {$sd_stu['roll_no']}) - {$award['type_name']} - সমন্বয় ৳" . sd_money($adjusted_total) . ', নগদ ৳' . sd_money($cash_amount) . " - Receipt: {$receipt_no}");
     } catch (Throwable $e) {
-        $pdo->rollBack();
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
         error_log('Scholarship disbursement failed: ' . $e->getMessage());
         $_SESSION['sd_err'] = 'সেভ করতে সমস্যা হয়েছে, আবার চেষ্টা করুন।';
+    } finally {
+        $release_lock = $pdo->prepare('SELECT RELEASE_LOCK(?)');
+        $release_lock->execute([$receipt_lock]);
     }
 
     header('Location: index.php?page=scholarship_disbursement');
@@ -119,6 +141,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_disbursement'
 // পেন্ডিং Award নির্বাচন করলে (award_id দিয়ে) preview দেখানো
 // -----------------------------------------------------------
 $award_id = (int) ($_GET['award_id'] ?? 0);
+// Scholarship Application অনুমোদনের পর আসলে ?mode=fee|cash — অ্যাডমিনের বেছে নেওয়া প্রদানের ধরন অনুযায়ী ডিফল্ট ঠিক হয়
+$sd_mode = in_array($_GET['mode'] ?? '', ['fee', 'cash'], true) ? $_GET['mode'] : '';
+$sd_default_adjust = 0.0;
 $preview_award = null;
 $due_summary = null;
 $waterfall_preview = null;
@@ -132,9 +157,9 @@ if ($award_id) {
          LEFT JOIN academic_sessions s ON s.id = a.session_id
          LEFT JOIN academic_classes c ON c.id = a.class_id
          LEFT JOIN students st ON st.id = a.student_id
-         WHERE a.id = ? AND a.status = 'Pending' LIMIT 1"
+         WHERE a.id = ? AND a.status = 'Pending' AND $sd_scope LIMIT 1"
     );
-    $a_stmt->execute([$award_id]);
+    $a_stmt->execute(array_merge([$award_id], $sd_params));
     $preview_award = $a_stmt->fetch();
 
     if ($preview_award) {
@@ -142,22 +167,25 @@ if ($award_id) {
         $due_summary = dr_student_summary($pdo, ['id' => $preview_award['student_id'], 'class_id' => $preview_award['class_id']], (int) $preview_award['session_id'], $fee_heads, $current_month);
         // ডিফল্ট প্রিভিউ — পুরো Award Amount দিয়ে waterfall চালিয়ে কত সমন্বয় হবে তা দেখানো (Admin পরে বদলাতে পারবে)
         $waterfall_preview = sch_waterfall_adjust($pdo, (int) $preview_award['student_id'], (int) $preview_award['session_id'], (int) $preview_award['class_id'], (float) $preview_award['amount'], $fee_heads);
+        $sd_default_adjust = ($sd_mode === 'cash') ? 0.0 : (float) min($waterfall_preview['adjusted_total'], $preview_award['amount']);
     }
 }
 
-$pending_stmt = $pdo->query(
+$pending_stmt = $pdo->prepare(
     "SELECT a.*, t.name AS type_name, s.session_name, c.class_name, st.name_en, st.student_id AS student_code, st.roll_no, st.gender
      FROM scholarship_awards a
      LEFT JOIN scholarship_types t ON t.id = a.scholarship_type_id
      LEFT JOIN academic_sessions s ON s.id = a.session_id
      LEFT JOIN academic_classes c ON c.id = a.class_id
      LEFT JOIN students st ON st.id = a.student_id
-     WHERE a.status = 'Pending' ORDER BY a.id DESC"
+     WHERE a.status = 'Pending' AND $sd_scope ORDER BY a.id DESC"
 );
+$pending_stmt->execute($sd_params);
 $pending_list = $pending_stmt->fetchAll();
 ?>
 
-<?php if ($sd_msg): ?><div class="alert alert-success py-2"><?php echo sdv($sd_msg); ?></div><?php endif; ?>
+<?php if ($sd_msg): ?><div class="alert alert-success py-2"><?php echo sdv($sd_msg); ?>
+    <?php if ($sd_receipt_id): ?><a href="../scholarship_receipt_print.php?portal=admin&amp;id=<?php echo $sd_receipt_id; ?>" target="_blank" class="btn btn-sm btn-dark ms-2"><i class="fa-solid fa-print me-1"></i> Money Receipt প্রিন্ট</a><?php endif; ?></div><?php endif; ?>
 <?php if ($sd_err): ?><div class="alert alert-danger py-2"><?php echo sdv($sd_err); ?></div><?php endif; ?>
 
 <?php if ($preview_award): ?>
@@ -174,6 +202,9 @@ $pending_list = $pending_stmt->fetchAll();
             বর্তমান মোট বকেয়া: <strong>৳<?php echo sd_money($due_summary['total_due']); ?></strong> —
             স্বয়ংক্রিয়ভাবে Admission আগে, তারপর মাস অনুক্রমে (যে হেডে Due আছে) সমন্বয় হবে।
         </div>
+        <?php if ($sd_mode !== ''): ?>
+            <div class="alert alert-info py-2">আবেদন অনুযায়ী প্রদানের ধরন: <strong><?php echo $sd_mode === 'cash' ? 'হাতে নগদ (পুরো টাকা অভিভাবককে)' : 'ফি-র বকেয়ার সাথে সমন্বয়'; ?></strong> — প্রয়োজনে নিচের পরিমাণ বদলাতে পারেন।</div>
+        <?php endif; ?>
 
         <form method="POST" action="index.php?page=scholarship_disbursement" id="sdForm">
             <?php echo csrf_field(); ?>
@@ -183,7 +214,7 @@ $pending_list = $pending_stmt->fetchAll();
                 <label class="col-sm-3 col-form-label fw-bold text-end">বকেয়ার সাথে সমন্বয় (Adjust Against Due)</label>
                 <div class="col-sm-6">
                     <input type="number" step="0.01" min="0" max="<?php echo sdv($preview_award['amount']); ?>" name="adjust_amount" id="sdAdjustAmount"
-                           class="form-control" value="<?php echo number_format((float) min($waterfall_preview['adjusted_total'], $preview_award['amount']), 2, '.', ''); ?>" onchange="sdRecalc()">
+                           class="form-control" value="<?php echo number_format($sd_default_adjust, 2, '.', ''); ?>" onchange="sdRecalc()">
                     <small class="text-muted">সর্বোচ্চ ৳<?php echo sd_money(min($due_summary['total_due'], $preview_award['amount'])); ?> (বকেয়া ও Award Amount যেটা কম)। ০ দিলে পুরো টাকাই অভিভাবককে দেওয়া হবে।</small>
                 </div>
             </div>
@@ -191,7 +222,7 @@ $pending_list = $pending_stmt->fetchAll();
             <div class="row mb-3 align-items-center">
                 <label class="col-sm-3 col-form-label fw-bold text-end">অভিভাবককে দেওয়া হবে (Cash)</label>
                 <div class="col-sm-6">
-                    <input type="text" id="sdCashAmount" class="form-control" value="<?php echo sd_money(max(0, $preview_award['amount'] - min($waterfall_preview['adjusted_total'], $preview_award['amount']))); ?>" readonly>
+                    <input type="text" id="sdCashAmount" class="form-control" value="<?php echo sd_money(max(0, $preview_award['amount'] - $sd_default_adjust)); ?>" readonly>
                 </div>
             </div>
 
@@ -219,7 +250,7 @@ $pending_list = $pending_stmt->fetchAll();
                 </div>
             </div>
 
-            <?php if ($waterfall_preview['lines']): ?>
+            <?php if ($waterfall_preview['lines'] && $sd_mode !== 'cash'): ?>
             <div class="row mb-3">
                 <label class="col-sm-3 col-form-label fw-bold text-end pt-0">প্রিভিউ — কোথায় সমন্বয় হবে</label>
                 <div class="col-sm-9">

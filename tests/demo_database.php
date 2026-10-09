@@ -15,6 +15,8 @@ $db=$row['db_name'];$scoped=new PDO('mysql:host=db;dbname='.$db.';charset=utf8mb
 check((int)$scoped->query('SELECT COUNT(*) FROM students')->fetchColumn()===240,'240 fictional students');
 check((int)$scoped->query('SELECT COUNT(*) FROM exam_marks')->fetchColumn()===720,'sample exam marks');
 check((int)$scoped->query("SELECT COUNT(*) FROM employees")->fetchColumn()===24,'24 fictional teachers');
+check((int)$scoped->query("SELECT COUNT(*) FROM scholarship_applications")->fetchColumn()===12,'12 fictional scholarship applications');
+check((int)$scoped->query("SELECT COUNT(*) FROM teacher_question_papers")->fetchColumn()===15,'15 fictional question papers');
 check((int)$scoped->query("SELECT COUNT(*) FROM elearning_lesson_plans")->fetchColumn()===18,'18 fictional lesson plans');
 check((int)$scoped->query("SELECT COUNT(*) FROM elearning_lesson_plans WHERE status='Approved' AND branch_id=1")->fetchColumn()===15,'15 approved class and subject examples');
 check((int)$scoped->query("SELECT COUNT(*) FROM student_daily_attendance WHERE attendance_date='".date('Y-m-d')."'")->fetchColumn()===240,'sample attendance uses target reset day');

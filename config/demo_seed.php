@@ -28,6 +28,8 @@ function demo_seed_database(PDO $pdo,?int $anchor=null): void {
   foreach(['rfid_card_no'=>'VARCHAR(100) NULL','tracking_id'=>'VARCHAR(100) NULL','device_serial'=>'VARCHAR(100) NULL','password'=>'VARCHAR(255) NULL','must_change_password'=>'TINYINT NOT NULL DEFAULT 0','branch_id'=>'INT NULL'] as $col=>$type)if(!in_array($col,$cols,true))$pdo->exec('ALTER TABLE '.demo_ident($table).' ADD COLUMN '.demo_ident($col).' '.$type);
  }
  require_once __DIR__.'/lesson_plan_helpers.php';lp_ensure_tables($pdo);
+ require_once __DIR__.'/scholarship_application_helpers.php';sa_ensure_tables($pdo);
+ require_once __DIR__.'/teacher_question_helpers.php';tq_ensure_tables($pdo);
  require_once __DIR__.'/branch_scope.php';branch_ensure_column($pdo,'academic_sections');
  $pdo->beginTransaction();
  $hash=password_hash('DemoAccess!2026',PASSWORD_DEFAULT);
@@ -129,6 +131,14 @@ function demo_seed_database(PDO $pdo,?int $anchor=null): void {
   demo_insert($pdo,'gallery_items',['caption'=>'Fictional school activity '.$n,'image_path'=>'assets/demo-school.svg','sort_order'=>$n+4]);
  }
  demo_insert($pdo,'website_useful_links',['title'=>'School ERP demo guide','url'=>'https://schoolmng.techteamlead.com/demo/']);
+ for($n=1;$n<=12;$n++) {
+  $state=$n%4===0?'Rejected':'Pending';
+  demo_insert($pdo,'scholarship_applications',['student_id'=>$n,'session_id'=>1,'class_id'=>($n-1)%5+1,'applicant_name'=>'Fictional guardian '.$n,'applicant_relation'=>'Guardian','occupation'=>'Fictional shopkeeper','monthly_income'=>9000+$n*250,'family_members'=>5,'earning_members'=>1,'children_json'=>json_encode([['gender'=>'Male','age'=>'12','inst'=>'Fictional Shapla Model School','class'=>'Demo class']]),'present_address'=>'Fictional ward '.$n.', Rangpur, Bangladesh','permanent_address'=>'Fictional village, Rangpur, Bangladesh','mobile'=>'0170000'.sprintf('%04d',$n),'reason'=>'Fictional education support application for exploring this demo.','status'=>$state,'admin_remarks'=>$state==='Rejected'?'Provide more information and submit a new fictional application.':null]);
+ }
+ for($class=1;$class<=5;$class++)for($part=1;$part<=3;$part++) {
+  $state=['Pending','Approved','Rejected'][$part-1];
+  demo_insert($pdo,'teacher_question_papers',['branch_id'=>1,'teacher_id'=>($class-1)*3+$part,'session_id'=>1,'class_id'=>$class,'subject_id'=>($class-1)*3+$part,'title'=>'Fictional sample question - class '.$class.' subject '.$part,'exam_name'=>'Demo practice assessment','full_marks'=>100,'duration_minutes'=>60,'exam_date'=>demo_seed_date('Y-m-d',demo_seed_time('+7 days')),'question_text'=>'Fictional practice questions: 1. Explain the lesson in your own words. 2. Give three examples. 3. Solve the exercise and show your work.','status'=>$state,'submitted_at'=>demo_seed_date('Y-m-d H:i:s'),'admin_remarks'=>$state==='Rejected'?'Add a clear marks distribution before resubmitting.':null,'reviewed_by'=>$state==='Pending'?null:'demo_admin','reviewed_at'=>$state==='Pending'?null:demo_seed_date('Y-m-d H:i:s')]);
+ }
  foreach(['Learning support','Creative participation','Attendance achievement'] as $i=>$award)demo_insert($pdo,'scholarship_types',['id'=>$i+1,'name'=>$award.' (demo)','category'=>'School','description'=>'Fictional school award']);
  for($n=1;$n<=18;$n++)demo_insert($pdo,'scholarship_awards',['student_id'=>$n,'scholarship_type_id'=>($n-1)%3+1,'session_id'=>1,'class_id'=>($n-1)%5+1,'amount'=>500+$n*50,'status'=>'Pending','remarks'=>'Fictional demo award','created_by'=>'demo_admin']);
  // Fictional lesson plans expose the approval workflow without touching real schools.

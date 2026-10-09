@@ -401,6 +401,7 @@ function sb_mod_ok(PDO $pdo, array $tree, string $modkey): bool
                         <i class="fa-solid fa-angles-down small"></i>
                     </a>
                     <ul class="collapse submenu submenu-nested" id="scholarshipWelfareSubmenu">
+                        <li><a href="index.php?page=scholarship_applications">Scholarship Applications</a></li>
                         <li><a href="index.php?page=scholarship_types">Scholarship Types</a></li>
                         <li><a href="index.php?page=scholarship_award">Assign Scholarship</a></li>
                         <li><a href="index.php?page=scholarship_disbursement">Process Disbursement</a></li>
@@ -425,6 +426,7 @@ function sb_mod_ok(PDO $pdo, array $tree, string $modkey): bool
             <ul class="collapse submenu" id="questionManagementSubmenu">
                 <li><a href="index.php?page=result_question_create">Create Question</a></li>
                 <li><a href="index.php?page=result_question_list">Question List</a></li>
+                <li><a href="index.php?page=teacher_questions">Teacher Questions</a></li>
             </ul>
         </li>
         <?php endif; // perm: question_management ?>

@@ -978,6 +978,8 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                         echo 'Question Management > Create Question';
                     } elseif ($page == 'result_question_list') {
                         echo 'Question Management > Question List';
+                    } elseif ($page == 'teacher_questions') {
+                        echo 'Question Management > Teacher Questions';
                     } elseif ($page == 'accounts_chart') {
                         echo 'Accounts Module > Chart of Accounts';
                     } elseif (in_array($page, ['accounts_journal_voucher', 'accounts_receipt_voucher', 'accounts_payment_voucher', 'accounts_contra_voucher'], true)) {
@@ -1031,11 +1033,11 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                         echo 'Finance Module > Finance Reports > Students Dues > Student Due Details';
                     } elseif ($page == 'finance_student_due_month_details') {
                         echo 'Finance Module > Finance Reports > Students Dues > Month Details';
-                    } elseif (in_array($page, ['scholarship_types', 'scholarship_award', 'scholarship_disbursement', 'scholarship_report', 'poor_fund_aid'], true)) {
+                    } elseif (in_array($page, ['scholarship_types', 'scholarship_award', 'scholarship_disbursement', 'scholarship_report', 'poor_fund_aid', 'scholarship_applications'], true)) {
                         $scholarship_labels = [
                             'scholarship_types' => 'Scholarship Types', 'scholarship_award' => 'Assign Scholarship',
                             'scholarship_disbursement' => 'Process Disbursement', 'scholarship_report' => 'Scholarship Report',
-                            'poor_fund_aid' => 'Poor Fund / Charity Aid',
+                            'poor_fund_aid' => 'Poor Fund / Charity Aid', 'scholarship_applications' => 'Scholarship Applications',
                         ];
                         echo 'Finance Module > Scholarship & Welfare > ' . $scholarship_labels[$page];
                     } elseif ($page == 'admission_selection') {
@@ -1340,6 +1342,7 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                 'result_students_report_card' => 'result_students_report_card.php',
                 'result_question_create'      => 'result_question_create.php',
                 'result_question_list'        => 'result_question_list.php',
+                'teacher_questions'           => 'teacher_questions.php',
                 'accounts_chart'                => 'accounts_chart.php',
                 'accounts_journal_voucher'      => 'accounts_journal_voucher.php',
                 'accounts_receipt_voucher'      => 'accounts_journal_voucher.php',
@@ -1370,6 +1373,7 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                 'scholarship_award'            => 'scholarship_award.php',
                 'scholarship_disbursement'     => 'scholarship_disbursement.php',
                 'scholarship_report'           => 'scholarship_report.php',
+                'scholarship_applications'     => 'scholarship_applications.php',
                 'poor_fund_aid'                => 'poor_fund_aid.php',
                 'finance_voucher_print'        => 'finance_voucher_print.php',
                 'finance_daily_collection'     => 'finance_daily_collection.php',

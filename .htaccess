@@ -1,5 +1,6 @@
 Options -Indexes
 RewriteEngine On
+RewriteRule ^uploads/(?:demo/)?[^/]+/teacher_questions(?:/|$) - [F,L,NC]
 RewriteRule ^teacher/(?!(?:index|login|captcha_refresh)\.php$)[^/]+\.php$ - [F,L]
 RewriteRule ^student/(?!(?:index|login|captcha_refresh|fee_payment_init|fee_payment_callback|live_class_status)\.php$)[^/]+\.php$ - [F,L]
 RewriteRule ^(?:config|sql|cron|tests|deployment)(?:/|$) - [F,L]

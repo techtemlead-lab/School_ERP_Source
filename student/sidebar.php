@@ -19,6 +19,7 @@ $sp_nav = [
     'admit_card'     => ['icon' => 'fa-id-card-clip',         'label' => 'My Admit Card'],
     'report_card'    => ['icon' => 'fa-file-lines',           'label' => 'My Report Card'],
     'my_dues'        => ['icon' => 'fa-money-bill-wave',      'label' => 'My Dues (Monthly)'],
+    'scholarship_apply' => ['icon' => 'fa-hand-holding-dollar', 'label' => 'Scholarship Apply'],
 ];
 ?>
 <div class="sidebar" id="sidebar">

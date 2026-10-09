@@ -203,6 +203,7 @@ return [
                 ['key'=>'finance_payable_receivable','label'=>'Payable / Receivable'],
             ]],
             ['type'=>'group','key'=>'scholarshipWelfareSubmenu','label'=>'Scholarship &amp; Welfare','children'=>[
+                ['key'=>'scholarship_applications','label'=>'Scholarship Applications'],
                 ['key'=>'scholarship_types','label'=>'Scholarship Types'],
                 ['key'=>'scholarship_award','label'=>'Assign Scholarship'],
                 ['key'=>'scholarship_disbursement','label'=>'Process Disbursement'],
@@ -217,6 +218,7 @@ return [
         'children' => [
             ['type'=>'leaf','key'=>'result_question_create','label'=>'Create Question'],
             ['type'=>'leaf','key'=>'result_question_list','label'=>'Question List'],
+            ['type'=>'leaf','key'=>'teacher_questions','label'=>'Teacher Questions'],
         ],
     ],
     'elearning' => [

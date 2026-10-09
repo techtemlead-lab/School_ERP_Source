@@ -37,6 +37,7 @@ jobs:
           python3 -u tests/public_landing.py
           python3 -u tests/demo_integration.py
           python3 -u tests/lesson_plans.py
+          python3 -u tests/batch2_updates.py
           python3 -u tests/master_requests.py
           python3 -u tests/production_regressions.py
           python3 -u tests/tenant_isolation.py

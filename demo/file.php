@@ -4,6 +4,7 @@ if (!erp_is_demo()) erp_stop(404,'Not found.');
 $path=(string)($_GET['path'] ?? '');
 $prefix='uploads/demo/'.$GLOBALS['demo_sandbox']['db_name'].'/';
 if (!str_starts_with($path,$prefix) || str_contains($path,'..') || str_contains($path,'\\') || str_contains($path,"\0")) erp_stop(404,'File not found.');
+if (preg_match('~/teacher_questions(?:/|$)~i',$path)) erp_stop(404,'File not found.');
 $base=realpath(dirname(__DIR__).'/'.$prefix);$file=realpath(dirname(__DIR__).'/'.$path);
 $ext=strtolower(pathinfo($file ?: '',PATHINFO_EXTENSION));
 if (!$base || !$file || !str_starts_with($file,$base.DIRECTORY_SEPARATOR) || !is_file($file) || !in_array($ext,['jpg','jpeg','png','webp','pdf','csv','txt','xlsx'],true)) erp_stop(404,'File not found.');

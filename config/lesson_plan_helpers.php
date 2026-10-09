@@ -145,8 +145,14 @@ function lp_plan_scope(PDO $pdo, string $role, string $alias = 'p'): array
 
 function lp_teacher_class_subjects(PDO $pdo, int $teacher_id): array
 {
-    $q = $pdo->prepare("SELECT class_id, subject_id FROM teacher_subject_assignments WHERE employee_id=? UNION SELECT class_id, subject_id FROM routines WHERE teacher_id=? AND status='Active' AND class_id IS NOT NULL");
-    $q->execute([$teacher_id, $teacher_id]);
+    try {
+        $q = $pdo->prepare("SELECT class_id, subject_id FROM teacher_subject_assignments WHERE employee_id=? UNION SELECT class_id, subject_id FROM routines WHERE teacher_id=? AND status='Active' AND class_id IS NOT NULL");
+        $q->execute([$teacher_id, $teacher_id]);
+    } catch (PDOException $e) {
+        if (($e->errorInfo[1] ?? 0) !== 1146) { throw $e; }
+        $q = $pdo->prepare('SELECT class_id, subject_id FROM teacher_subject_assignments WHERE employee_id=?');
+        $q->execute([$teacher_id]);
+    }
     $map = [];
     foreach ($q->fetchAll() as $row) { $map[(int) $row['class_id']][] = (int) $row['subject_id']; }
     return $map;
@@ -154,8 +160,16 @@ function lp_teacher_class_subjects(PDO $pdo, int $teacher_id): array
 
 function lp_teacher_can_teach(PDO $pdo, int $teacher_id, int $class, int $subject, ?int $section): bool
 {
-    $q = $pdo->prepare("SELECT 1 FROM teacher_subject_assignments WHERE employee_id=? AND class_id=? AND subject_id=? UNION SELECT 1 FROM routines WHERE teacher_id=? AND class_id=? AND subject_id=? AND status='Active' AND (section_id IS NULL OR section_id=?) LIMIT 1");
-    $q->execute([$teacher_id, $class, $subject, $teacher_id, $class, $subject, $section]);
+    $q = $pdo->prepare('SELECT 1 FROM teacher_subject_assignments WHERE employee_id=? AND class_id=? AND subject_id=? LIMIT 1');
+    $q->execute([$teacher_id, $class, $subject]);
+    if ($q->fetchColumn()) { return true; }
+    try {
+        $q = $pdo->prepare("SELECT 1 FROM routines WHERE teacher_id=? AND class_id=? AND subject_id=? AND status='Active' AND (section_id IS NULL OR section_id=?) LIMIT 1");
+        $q->execute([$teacher_id, $class, $subject, $section]);
+    } catch (PDOException $e) {
+        if (($e->errorInfo[1] ?? 0) !== 1146) { throw $e; }
+        return false;
+    }
     return (bool) $q->fetchColumn();
 }
 
