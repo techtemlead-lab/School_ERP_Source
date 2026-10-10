@@ -1,10 +1,16 @@
 <?php
+require_once __DIR__ . '/../config/routine_access.php';
+$routine_destination_branch = erp_routine_access($pdo, 'routine_dynamic');
 // admin/routine_dynamic.php - Dynamic Routine (স্ক্রিনশট অনুযায়ী)
 // একই routines টেবিল ব্যবহার করে, তাই General Routine-এ যোগ করা এন্ট্রিও এখানে দেখা যাবে (আর উল্টোটাও)
 
 $rd_err = $_SESSION['rd_err'] ?? '';
 $rd_msg = $_SESSION['rd_msg'] ?? '';
 unset($_SESSION['rd_err'], $_SESSION['rd_msg']);
+
+require_once __DIR__ . '/../config/routine_grid.php';
+require_once __DIR__ . '/../config/subject_religion.php';
+sr_ensure($pdo);
 
 function rdv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 function fmt_time_rd($t): string { return $t ? date('h:i A', strtotime($t)) : ''; }
@@ -45,7 +51,15 @@ foreach ($sections as $sec) {
         $rd_class_shifts[(int) $sec['shift_id']][] = (int) $sec['class_id'];
     }
 }
-$subjects = $pdo->query("SELECT id, subject_name, class_id FROM academic_subjects WHERE status = 'Active' ORDER BY subject_name ASC")->fetchAll();
+branch_ensure_column($pdo, 'routines'); // পুরনো ডাটাবেসে branch_id কলাম না থাকলে যোগ করে
+$subjects = $pdo->query("SELECT id, subject_name, class_id, group_id, religion FROM academic_subjects WHERE status = 'Active' ORDER BY sort_order ASC, id ASC")->fetchAll();
+// প্রতিটা Section-এ কোন কোন Group-এর (Science/Arts/Commerce...) ছাত্র আছে — Section অনুযায়ী Subject ফিল্টার করতে
+$rd_section_groups = []; // section_id => [group_id, ...]
+try {
+    $gq = "SELECT DISTINCT section_id, group_id FROM students WHERE status = 'Active' AND section_id IS NOT NULL AND group_id IS NOT NULL";
+    if ($pdo->query("SHOW COLUMNS FROM students LIKE 'is_current'")->fetch()) { $gq .= " AND is_current = 1"; }
+    foreach ($pdo->query($gq)->fetchAll() as $__g) { $rd_section_groups[(int) $__g['section_id']][] = (int) $__g['group_id']; }
+} catch (\Throwable $e) { $rd_section_groups = []; }
 $teachers = $pdo->query("SELECT id, name FROM employees WHERE type = 'Teachers' AND status = 'Active' ORDER BY name ASC")->fetchAll();
 
 // -----------------------------------------------------------
@@ -72,10 +86,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_routine'])) {
 
     $qs = 'class_id=' . $class_id . '&shift_id=' . $shift_id . '&section_id=' . $section_id;
 
-    if (!$class_id || !$shift_id || !$section_id || !in_array($day, $week_days, true) || !$subject_id || !$teacher_id) {
-        $_SESSION['rd_err'] = 'Day, Subject, Teacher — এই ফিল্ডগুলো আবশ্যক।';
+    // Break/Tiffin পিরিয়ডে Subject/Teacher লাগে না (0 রাখা হয়)
+    if ($has_break) { $subject_id = 0; $teacher_id = 0; }
+
+    if (!$class_id || !$shift_id || !$section_id || !in_array($day, $week_days, true) || (!$has_break && (!$subject_id || !$teacher_id))) {
+        $_SESSION['rd_err'] = $has_break ? 'Day আবশ্যক।' : 'Day, Subject, Teacher — এই ফিল্ডগুলো আবশ্যক।';
         header('Location: index.php?page=routine_dynamic&' . $qs);
         exit();
+    }
+
+    // শিক্ষকের সময়-সংঘাত সতর্কতা (ব্লক করে না): একই শিক্ষক একই দিনে ওভারল্যাপিং সময়ে অন্য রুটিনে আছেন কিনা
+    $rd_warn = '';
+    if (!$has_break && $teacher_id && $start_time && $end_time) {
+        try {
+            $cq = $pdo->prepare("SELECT r.id, r.class_id, r.section_id, r.start_time, r.end_time, r.routine_days, c.class_name, sc.section_name
+                                 FROM routines r LEFT JOIN academic_classes c ON c.id = r.class_id LEFT JOIN academic_sections sc ON sc.id = r.section_id
+                                 WHERE r.teacher_id = ? AND r.status = 'Active' AND r.id <> ? AND r.start_time IS NOT NULL AND r.end_time IS NOT NULL
+                                   AND r.start_time < ? AND r.end_time > ?");
+            $cq->execute([$teacher_id, $id, $end_time, $start_time]);
+            foreach ($cq->fetchAll() as $cf) {
+                $cdays = array_map('trim', explode(',', (string) $cf['routine_days']));
+                $same_slot = ((int) $cf['class_id'] === $class_id && (int) $cf['section_id'] === $section_id);
+                if (in_array($day, $cdays, true) && !$same_slot) {
+                    $rd_warn = ' ⚠ সতর্কতা: এই শিক্ষক ' . $day . ' একই সময়ে ' . ($cf['class_name'] ?? '') . ' (' . ($cf['section_name'] ?? '') . ')-এও আছেন।';
+                    break;
+                }
+            }
+        } catch (Throwable $e) {}
     }
 
     if ($id > 0) {
@@ -84,14 +121,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_routine'])) {
         );
         $stmt->execute([$start_time ?: null, $end_time ?: null, $has_break, $subject_id, $teacher_id, $status, $id]);
         sec_log_activity($pdo, 'Routine', 'Update', "ক্লাস আইডি {$class_id}, দিন {$day} এর রুটিন পিরিয়ড আপডেট করা হয়েছে");
-        $_SESSION['rd_msg'] = 'রুটিন আপডেট করা হয়েছে।';
+        $_SESSION['rd_msg'] = 'রুটিন আপডেট করা হয়েছে।' . $rd_warn;
     } else {
         $stmt = $pdo->prepare(
-            "INSERT INTO routines (class_id, shift_id, section_id, routine_days, start_time, end_time, has_break, subject_id, teacher_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO routines (class_id, shift_id, section_id, routine_days, start_time, end_time, has_break, subject_id, teacher_id, status, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         );
-        $stmt->execute([$class_id, $shift_id, $section_id, $day, $start_time ?: null, $end_time ?: null, $has_break, $subject_id, $teacher_id, $status]);
+        // branch_id না বসালে রো NULL-branch হয়ে যেত, আর নিচের লিস্ট কোয়েরি (branch ফিল্টার) সেটা দেখাত না
+        $stmt->execute([$class_id, $shift_id, $section_id, $day, $start_time ?: null, $end_time ?: null, $has_break, $subject_id, $teacher_id, $status, $routine_destination_branch]);
         sec_log_activity($pdo, 'Routine', 'Create', "ক্লাস আইডি {$class_id}, দিন {$day} এর নতুন রুটিন পিরিয়ড যোগ করা হয়েছে");
-        $_SESSION['rd_msg'] = 'নতুন রুটিন পিরিয়ড যোগ করা হয়েছে।';
+        $_SESSION['rd_msg'] = 'নতুন রুটিন পিরিয়ড যোগ করা হয়েছে।' . $rd_warn;
     }
     header('Location: index.php?page=routine_dynamic&' . $qs);
     exit();
@@ -114,12 +152,12 @@ $sel_section = (int) ($_GET['section_id'] ?? 0);
 $day_entries = [];
 if ($sel_class && $sel_shift && $sel_section) {
     $stmt = $pdo->prepare(
-        "SELECT routines.*, academic_subjects.subject_name, teachers.name AS teacher_name
+        "SELECT routines.*, academic_subjects.subject_name, academic_subjects.religion AS subject_religion, teachers.name AS teacher_name
          FROM routines
          LEFT JOIN academic_subjects ON academic_subjects.id = routines.subject_id
          LEFT JOIN employees teachers ON teachers.id = routines.teacher_id
          WHERE routines.class_id = ? AND (routines.shift_id = ? OR routines.shift_id IS NULL) AND routines.section_id = ?" .
-        (branch_current_id() !== null ? " AND (routines.branch_id = ?)" : "")
+        (branch_current_id() !== null ? " AND (routines.branch_id = ? OR routines.branch_id IS NULL)" : "")
     );
     $rd_params = [$sel_class, $sel_shift, $sel_section];
     if (branch_current_id() !== null) { $rd_params[] = branch_current_id(); }
@@ -147,28 +185,69 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === '1') {
     exit();
 }
 
+/** 1st, 2nd, 3rd, 4th ... */
+function rd_ordinal(int $n): string
+{
+    $suf = 'th';
+    if ($n % 100 < 11 || $n % 100 > 13) { $suf = [1 => 'st', 2 => 'nd', 3 => 'rd'][$n % 10] ?? 'th'; }
+    return $n . $suf;
+}
+
 function render_routine_table(array $week_days, array $day_entries, int $sel_class, int $sel_shift, int $sel_section): void
 {
     if (!$sel_class || !$sel_shift || !$sel_section) {
         echo '<p class="text-muted">উপরে Class, Shift ও Section — তিনটাই বাছাই করুন।</p>';
         return;
     }
+    // প্রতিটা দিনের পিরিয়ড শুরুর সময় অনুযায়ী সাজানো; সময় না থাকলে শেষে
+    $max = 1; $day_slots = [];
+    foreach ($week_days as $day) {
+        usort($day_entries[$day], function ($x, $y) {
+            $sx = $x['start_time'] ?: '99:99:99'; $sy = $y['start_time'] ?: '99:99:99';
+            return $sx === $sy ? ((int) $x['id'] <=> (int) $y['id']) : strcmp($sx, $sy);
+        });
+        $day_slots[$day] = rg_slots(array_values($day_entries[$day])); // Parallel Period: একই সময়ের রো একই ঘরে
+        $max = max($max, count($day_slots[$day]));
+    }
+    $total_cols = $max + 1; // শেষ কলামটা শুধু "+" বাটনের জন্য (সবচেয়ে ভরা দিনেও জায়গা থাকে)
     ?>
-    <table class="table table-bordered align-middle">
-        <thead class="table-light"><tr><th style="width:180px;">Day</th><th>Periods</th></tr></thead>
+    <style>
+        .rd-grid { table-layout: fixed; min-width: <?php echo 120 + $total_cols * 175; ?>px; }
+        .rd-grid th, .rd-grid td { vertical-align: top; font-size: 13.5px; }
+        .rd-grid td.rd-day { width: 120px; font-weight: 700; background: #f8fafc; }
+        .rd-grid td.rd-cell { padding: 8px 10px; line-height: 1.45; }
+        .rd-grid .rd-sub { font-weight: 600; color: #1e293b; }
+        .rd-grid .rd-time { color: #64748b; font-size: 12.5px; }
+        .rd-grid .rd-act { margin-top: 5px; display: flex; gap: 4px; }
+        .rd-grid .rd-add { background: #22b8cf; color: #fff; width: 46px; height: 42px; border: 0; border-radius: 4px; }
+    </style>
+    <div class="table-responsive">
+    <table class="table table-bordered rd-grid mb-0">
+        <thead class="table-light">
+            <tr>
+                <th style="width:120px;">Day</th>
+                <?php for ($i = 1; $i <= $max; $i++): ?><th><?php echo rd_ordinal($i); ?> Class</th><?php endfor; ?>
+                <th></th>
+            </tr>
+        </thead>
         <tbody>
-            <?php foreach ($week_days as $day): ?>
+            <?php foreach ($week_days as $day): $list = $day_slots[$day]; $n = count($list); ?>
                 <tr>
-                    <td class="fw-bold"><?php echo $day; ?></td>
-                    <td>
-                        <div class="d-flex flex-wrap gap-2 align-items-center">
-                            <?php foreach ($day_entries[$day] as $entry): ?>
-                                <div class="border rounded px-2 py-1 small d-flex align-items-center gap-2" style="background:#f8fafc;">
-                                    <span>
-                                        <strong><?php echo rdv($entry['subject_name'] ?? '-'); ?></strong> — <?php echo rdv($entry['teacher_name'] ?? '-'); ?>
-                                        <?php if ($entry['start_time']): ?><br><span class="text-muted"><?php echo fmt_time_rd($entry['start_time']); ?> - <?php echo fmt_time_rd($entry['end_time']); ?></span><?php endif; ?>
-                                        <?php echo $entry['status'] === 'Inactive' ? ' <span class="badge bg-secondary">Inactive</span>' : ''; ?>
-                                    </span>
+                    <td class="rd-day"><?php echo $day; ?></td>
+                    <?php for ($i = 0; $i < $total_cols; $i++): ?>
+                        <?php if ($i < $n): $slot = $list[$i]; $first = $slot[0]; ?>
+                            <td class="rd-cell">
+                            <?php foreach ($slot as $si => $entry): $is_break = !empty($entry['has_break']) && empty($entry['subject_name']); ?>
+                            <div style="<?php echo $si > 0 ? 'border-top:1px dashed #cbd5e1;margin-top:8px;padding-top:8px;' : ''; ?><?php echo $entry['status'] === 'Inactive' ? 'opacity:.6;' : ''; ?>">
+                                <?php if ($is_break): ?>
+                                    <div class="rd-sub"><i class="fa-solid fa-mug-hot"></i> Break / Tiffin</div>
+                                <?php else: ?>
+                                    <div class="rd-sub"><?php echo rdv($entry['subject_name'] ?? '-'); ?><?php if (sr_norm($entry['subject_religion'] ?? '') !== ''): ?> <span class="badge bg-info text-dark"><?php echo rdv(sr_norm($entry['subject_religion'])); ?></span><?php endif; ?></div>
+                                    <div><?php echo rdv($entry['teacher_name'] ?? '-'); ?></div>
+                                <?php endif; ?>
+                                <?php if ($entry['start_time']): ?><div class="rd-time"><?php echo fmt_time_rd($entry['start_time']); ?> - <?php echo fmt_time_rd($entry['end_time']); ?></div><?php endif; ?>
+                                <?php echo $entry['status'] === 'Inactive' ? '<span class="badge bg-secondary">Inactive</span>' : ''; ?>
+                                <div class="rd-act">
                                     <button type="button" class="btn btn-sm btn-outline-primary py-0 px-1" title="Edit"
                                         onclick='openRoutineModal(<?php echo (int) $entry["id"]; ?>, "<?php echo $day; ?>", <?php echo json_encode($entry); ?>)'>
                                         <i class="fa-solid fa-pen"></i>
@@ -179,19 +258,28 @@ function render_routine_table(array $week_days, array $day_entries, int $sel_cla
                                         <input type="hidden" name="class_id" value="<?php echo $sel_class; ?>">
                                         <input type="hidden" name="shift_id" value="<?php echo $sel_shift; ?>">
                                         <input type="hidden" name="section_id" value="<?php echo $sel_section; ?>">
-                                        <button type="submit" name="delete_routine" class="btn btn-sm btn-outline-danger py-0 px-1"><i class="fa-solid fa-trash"></i></button>
+                                        <button type="submit" name="delete_routine" class="btn btn-sm btn-outline-danger py-0 px-1" title="Delete"><i class="fa-solid fa-trash"></i></button>
                                     </form>
                                 </div>
+                            </div>
                             <?php endforeach; ?>
-                            <button type="button" class="btn btn-sm text-white" style="background:#22b8cf; width:36px; height:36px;" onclick='openRoutineModal(0, "<?php echo $day; ?>", null)'>
-                                <i class="fa-solid fa-plus"></i>
-                            </button>
-                        </div>
-                    </td>
+                                <?php if (empty($first['has_break']) && !empty($first['start_time'])): ?>
+                                <div class="mt-2"><button type="button" class="btn btn-sm btn-outline-info py-0 px-1" style="font-size:12px;" title="একই সময়ে আরেকজন শিক্ষক/Subject (যেমন ইসলাম ও হিন্দু ধর্ম শিক্ষা)"
+                                    onclick='openRoutineModal(0, "<?php echo $day; ?>", <?php echo json_encode(['start_time' => $first['start_time'], 'end_time' => $first['end_time'], 'has_break' => 0, 'subject_id' => 0, 'teacher_id' => 0, 'status' => 'Active', 'parallel' => 1]); ?>)'>
+                                    <i class="fa-solid fa-plus"></i> একই সময়ে আরেকজন</button></div>
+                                <?php endif; ?>
+                            </td>
+                        <?php elseif ($i === $n): ?>
+                            <td class="rd-cell"><button type="button" class="rd-add" title="পিরিয়ড যোগ করুন" onclick='openRoutineModal(0, "<?php echo $day; ?>", null)'><i class="fa-solid fa-plus"></i></button></td>
+                        <?php else: ?>
+                            <td></td>
+                        <?php endif; ?>
+                    <?php endfor; ?>
                 </tr>
             <?php endforeach; ?>
         </tbody>
     </table>
+    </div>
     <?php
 }
 ?>
@@ -289,9 +377,7 @@ function render_routine_table(array $week_days, array $day_entries, int $sel_cla
                         <div class="col-sm-8">
                             <select name="subject_id" id="rmSubject" class="form-select" required>
                                 <option value="">Select Subject</option>
-                                <?php foreach ($subjects as $sub): if ((int) $sub['class_id'] !== $sel_class) continue; ?>
-                                    <option value="<?php echo (int) $sub['id']; ?>"><?php echo rdv($sub['subject_name']); ?></option>
-                                <?php endforeach; ?>
+                                <?php /* বাকি অপশন JS (filterRdSubjects) দিয়ে সিলেক্টেড Class অনুযায়ী ভরা হয় — Class AJAX-এ বদলালেও যেন সাবজেক্ট আসে */ ?>
                             </select>
                         </div>
                     </div>
@@ -379,8 +465,36 @@ function render_routine_table(array $week_days, array $day_entries, int $sel_cla
             select.value = '';
         }
     }
+    // ---------------- Class বদলালে সেই Class-এর Subject-ই Subject ড্রপডাউনে ----------------
+    const RD_ALL_SUBJECTS = <?php echo json_encode(array_map(function ($sb) { return ['id' => (int) $sb['id'], 'name' => (string) $sb['subject_name'], 'class_id' => (int) $sb['class_id'], 'group_id' => $sb['group_id'] !== null ? (int) $sb['group_id'] : 0, 'rel' => sr_norm($sb['religion'] ?? '')]; }, $subjects), JSON_UNESCAPED_UNICODE); ?>;
+    const RD_SECTION_GROUPS = <?php echo json_encode($rd_section_groups); ?>;
+    function filterRdSubjects(keepValue) {
+        const classId = parseInt(document.getElementById('rdClassSelect').value || '0', 10);
+        const sectionId = document.getElementById('rdSectionSelect').value || '';
+        const secGroups = RD_SECTION_GROUPS[sectionId] || [];   // এই Section-এর ছাত্রদের Group; না থাকলে ক্লাসের সব Subject
+        const sel = document.getElementById('rmSubject');
+        const cur = keepValue !== undefined ? String(keepValue) : sel.value;
+        sel.innerHTML = '';
+        const first = document.createElement('option');
+        first.value = ''; first.textContent = classId ? 'Select Subject' : 'Select Class first';
+        sel.appendChild(first);
+        const seen = {};
+        RD_ALL_SUBJECTS.forEach(function (sb) {
+            if (!classId || sb.class_id !== classId) return;
+            if (secGroups.length && sb.group_id && secGroups.indexOf(sb.group_id) === -1) return; // অন্য Group-এর Subject বাদ
+            const key = sb.name.trim().toLowerCase();
+            if (seen[key]) return;                                   // একই নামের Subject একবারই (Group ভেদে ডুপ্লিকেট নয়)
+            seen[key] = true;
+            const o = document.createElement('option');
+            o.value = sb.id; o.textContent = sb.name + (sb.rel ? ' [' + sb.rel + ']' : '');
+            sel.appendChild(o);
+        });
+        sel.value = cur;
+        if (sel.value !== cur) sel.value = '';
+    }
     filterRdSections();
     filterRdShifts();
+    filterRdSubjects();
 
     // ---------------- Class/Shift/Section বদলালে পুরো পেজ রিলোড ছাড়াই টেবিল আপডেট ----------------
     function loadRoutineTable() {
@@ -388,6 +502,7 @@ function render_routine_table(array $week_days, array $day_entries, int $sel_cla
         const shiftId = document.getElementById('rdShiftSelect').value;
         const sectionId = document.getElementById('rdSectionSelect').value;
 
+        filterRdSubjects('');
         document.getElementById('rmClassId').value = classId;
         document.getElementById('rmShiftId').value = shiftId;
         document.getElementById('rmSectionId').value = sectionId;
@@ -409,12 +524,27 @@ function render_routine_table(array $week_days, array $day_entries, int $sel_cla
             });
     }
 
+
+    // Break/Tiffin = YES হলে Subject ও Teacher লাগে না — ফিল্ড লুকিয়ে required বন্ধ করা হয়
+    function toggleRdBreak() {
+        const isBreak = document.getElementById('rmBreakYes').checked;
+        ['rmSubject', 'rmTeacher'].forEach(function (id) {
+            const el = document.getElementById(id);
+            el.required = !isBreak;
+            if (isBreak) { el.value = ''; }
+            el.closest('.row').style.display = isBreak ? 'none' : '';
+        });
+    }
+    document.getElementById('rmBreakYes').addEventListener('change', toggleRdBreak);
+    document.getElementById('rmBreakNo').addEventListener('change', toggleRdBreak);
+
     // ---------------- Modal Open (Add/Edit) ----------------
     function openRoutineModal(id, day, data) {
         document.getElementById('rmId').value = id;
         document.getElementById('rmDay').value = day;
-        document.getElementById('rmTitle').innerHTML = id ? '<i class="fa-solid fa-pen"></i> Edit Routine (' + day + ')' : '<i class="fa-solid fa-calendar-plus"></i> Create Routine (' + day + ')';
+        document.getElementById('rmTitle').innerHTML = (data && data.parallel) ? '<i class="fa-solid fa-code-branch"></i> Parallel Period (' + day + ') — একই সময়, আরেকজন শিক্ষক' : id ? '<i class="fa-solid fa-pen"></i> Edit Routine (' + day + ')' : '<i class="fa-solid fa-calendar-plus"></i> Create Routine (' + day + ')';
 
+        filterRdSubjects(''); // মডাল খোলার সময় বর্তমান Class অনুযায়ী Subject তালিকা নিশ্চিত করা
         if (data) {
             document.getElementById('rmStartValue').value = data.start_time || '';
             document.getElementById('rmEndValue').value = data.end_time || '';
@@ -422,15 +552,24 @@ function render_routine_table(array $week_days, array $day_entries, int $sel_cla
             document.getElementById('rmEndDisplay').value = data.end_time ? formatRd12Hour(...data.end_time.split(':')) : '';
             document.getElementById('rmBreakYes').checked = String(data.has_break) === '1';
             document.getElementById('rmBreakNo').checked = String(data.has_break) !== '1';
-            document.getElementById('rmSubject').value = data.subject_id || '';
+            (function () { // সম্পাদনার সময় আগের সেভ করা Subject (ডুপ্লিকেট-বাদ তালিকায় না থাকলেও) যেন ফাঁকা না দেখায়
+                const sel = document.getElementById('rmSubject'), sid = String(data.subject_id || '');
+                if (sid && !Array.from(sel.options).some(o => o.value === sid)) {
+                    const f = RD_ALL_SUBJECTS.find(x => String(x.id) === sid);
+                    if (f) { const o = document.createElement('option'); o.value = f.id; o.textContent = f.name + (f.rel ? ' [' + f.rel + ']' : ''); sel.appendChild(o); }
+                }
+                sel.value = sid;
+            })();
             document.getElementById('rmTeacher').value = data.teacher_id || '';
             document.getElementById('rmStatus').value = data.status || 'Active';
+            toggleRdBreak();
         } else {
             document.getElementById('routineModalForm').reset();
             document.getElementById('rmStartValue').value = '';
             document.getElementById('rmEndValue').value = '';
             document.getElementById('rmStartDisplay').value = '';
             document.getElementById('rmEndDisplay').value = '';
+            toggleRdBreak();
         }
 
         new bootstrap.Modal(document.getElementById('routineModal')).show();

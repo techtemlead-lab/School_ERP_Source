@@ -99,7 +99,7 @@ if ($searched) {
                 continue;
             }
 
-            $res = rc_student_result($defs, $marks_map, $att_map, $grade_bands);
+            $res = rc_student_result($defs, $marks_map, $att_map, $grade_bands, rc_excluded_subjects($pdo, $defs, $term_id, (int) $f_student_id));
             $term_results[] = [
                 'term_id' => $term_id, 'term_name' => $trm['term_name'], 'no_data' => false,
                 'total' => $res['obtained_total'], 'full_total' => $res['full_total'],

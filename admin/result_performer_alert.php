@@ -93,7 +93,7 @@ if ($searched && $f_class_id && $current_session_id) {
                 $att_map = [];
                 foreach ($at->fetchAll() as $r) { $att_map[$r['subject_id']][$r['part_id']] = $r['status']; }
 
-                $res = rc_student_result($defs, $marks_map, $att_map, $grade_bands);
+                $res = rc_student_result($defs, $marks_map, $att_map, $grade_bands, rc_excluded_subjects($pdo, $defs, $term_id, $stu_id));
                 $per_term[] = [
                     'term_name' => $trm['term_name'], 'pct' => $res['percentage'],
                     'gpa' => $res['overall_gpa'], 'fail' => $res['overall_fail'],

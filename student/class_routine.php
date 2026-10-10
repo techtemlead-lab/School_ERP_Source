@@ -5,8 +5,9 @@ $week_days = ['Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'
 $routine_rows = [];
 $routine_table_ready = true;
 try {
+    require_once __DIR__ . '/../config/subject_religion.php'; sr_ensure($pdo);
     $stmt = $pdo->prepare(
-        "SELECT routines.*, academic_subjects.subject_name, employees.name AS teacher_name
+        "SELECT routines.*, academic_subjects.subject_name, academic_subjects.religion AS subject_religion, employees.name AS teacher_name
          FROM routines
          LEFT JOIN academic_subjects ON academic_subjects.id = routines.subject_id
          LEFT JOIN employees ON employees.id = routines.teacher_id
@@ -25,10 +26,15 @@ try {
     $routine_table_ready = false;
 }
 
+require_once __DIR__ . '/../config/routine_grid.php';
+echo rg_css();
 function crt_time($t) { return $t ? date('h:i A', strtotime($t)) : ''; }
 ?>
 <div class="card-custom">
-    <h6 class="fw-bold mb-3" style="color:#0f766e;"><i class="fa-solid fa-table-cells-large me-2"></i>My Class Routine</h6>
+    <div class="d-flex justify-content-between align-items-center mb-3 no-print">
+        <h6 class="fw-bold mb-0" style="color:#0f766e;"><i class="fa-solid fa-table-cells-large me-2"></i>My Class Routine</h6>
+        <?php if ($routine_rows): ?><button type="button" class="btn btn-sm btn-outline-secondary" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button><?php endif; ?>
+    </div>
 
     <?php if (!$routine_table_ready || !$routine_rows): ?>
         <div class="text-center py-4">
@@ -36,22 +42,6 @@ function crt_time($t) { return $t ? date('h:i A', strtotime($t)) : ''; }
             <p class="text-muted mt-2 mb-0">এখনো আপনার ক্লাসের রুটিন সেট করা হয়নি।</p>
         </div>
     <?php else: ?>
-        <?php foreach ($week_days as $day): if (empty($routine_rows[$day])) { continue; } ?>
-            <h6 class="fw-bold mt-3 mb-2" style="font-size:13px;color:#334155;"><?php echo $day; ?></h6>
-            <div class="table-responsive mb-3">
-                <table class="table table-sm table-bordered align-middle" style="font-size:12.5px;">
-                    <thead class="table-light"><tr><th>Time</th><th>Subject</th><th>Teacher</th></tr></thead>
-                    <tbody>
-                        <?php foreach ($routine_rows[$day] as $r): ?>
-                            <tr>
-                                <td><?php echo crt_time($r['start_time']); ?> - <?php echo crt_time($r['end_time']); ?></td>
-                                <td><?php echo sp_e($r['subject_name'] ?: '—'); ?></td>
-                                <td><?php echo sp_e($r['teacher_name'] ?: '—'); ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        <?php endforeach; ?>
+        <?php echo rg_grid_html($week_days, $routine_rows, ['show_teacher' => true, 'highlight_day' => date('l'), 'viewer_religion' => (string) ($student['religion'] ?? '')]); ?>
     <?php endif; ?>
 </div>

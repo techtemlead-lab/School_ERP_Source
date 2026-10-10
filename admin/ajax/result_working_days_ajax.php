@@ -15,13 +15,17 @@ if (!isset($_SESSION['admin_logged'])) {
 }
 
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../config/portal_access.php';
+erp_portal_require_role($pdo, 'admin', 'result_working_days');
 require_once __DIR__ . '/../../config/permissions.php';
+require_once __DIR__ . '/../../config/academic_calendar_helpers.php';
 
 if (!perm_page_allowed($pdo, 'result_working_days')) {
     http_response_code(403);
     echo json_encode(['success' => false, 'message' => 'এই পেজ দেখার অনুমতি নেই।']);
     exit();
 }
+perm_write_guard($pdo, 'result_working_days'); // Read-only ইউজারের সেভ আটকায়
 
 $action = $_GET['action'] ?? '';
 if ($action !== 'preview') {
@@ -37,9 +41,8 @@ function calculate_working_days(PDO $pdo, string $start, string $end, array $wee
     $e = strtotime($end);
     if (!$s || !$e || $e < $s) return 0;
 
-    $stmt = $pdo->prepare("SELECT start_date, end_date FROM academic_holidays WHERE status='Active' AND start_date <= ? AND end_date >= ?");
-    $stmt->execute([$end, $start]);
-    $holiday_ranges = $stmt->fetchAll();
+    // শুধু "ছুটি ধরা হবে" Category-র এন্ট্রি বাদ যাবে (Exam/Event ইত্যাদি কাজের দিন থেকে যাবে)
+    $holiday_ranges = ac_holiday_ranges($pdo, $start, $end);
 
     $total = 0;
     for ($t = $s; $t <= $e; $t += 86400) {

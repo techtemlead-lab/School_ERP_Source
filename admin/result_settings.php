@@ -267,7 +267,7 @@ $other_sessions = $other_sessions->fetchAll();
 $tb_sessions = $pdo->query("SELECT id, session_name FROM academic_sessions ORDER BY id DESC")->fetchAll();
 $tb_classes  = $pdo->query("SELECT id, class_name FROM academic_classes WHERE status = 'Active' ORDER BY rank ASC, class_name ASC")->fetchAll();
 $tb_subjects = [];
-foreach ($pdo->query("SELECT id, class_id, subject_name FROM academic_subjects WHERE status = 'Active' ORDER BY subject_name ASC")->fetchAll() as $sb) {
+foreach ($pdo->query("SELECT id, class_id, subject_name FROM academic_subjects WHERE status = 'Active' ORDER BY sort_order ASC, id ASC")->fetchAll() as $sb) {
     $tb_subjects[(int) $sb['class_id']][] = ['id' => (int) $sb['id'], 'n' => $sb['subject_name']];
 }
 

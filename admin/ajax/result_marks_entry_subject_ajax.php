@@ -9,7 +9,7 @@
 require_once __DIR__ . '/../../config/runtime.php';
 erp_session_start();
 
-if (!isset($_SESSION['admin_logged'])) {
+if (!isset($_SESSION['admin_logged']) && empty($_SESSION['teacher_logged'])) {
     http_response_code(403);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode(['success' => false, 'message' => 'Session শেষ হয়ে গেছে, আবার লগইন করুন।']);
@@ -17,21 +17,42 @@ if (!isset($_SESSION['admin_logged'])) {
 }
 
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../config/portal_access.php';
+$result_ajax_role = erp_portal_link_role(['admin','teacher']);
+erp_portal_require_role($pdo, $result_ajax_role, 'result_marks_entry_subject');
+require_once __DIR__ . '/../../config/subject_rank.php'; subject_rank_ensure($pdo);
 require_once __DIR__ . '/../../config/branch_scope.php';
 require_once __DIR__ . '/../../config/permissions.php';
+require_once __DIR__ . '/../../config/exam_att_grid.php';
 
-if (!perm_page_allowed($pdo, 'result_marks_entry_subject')) {
+
+// Teacher Portal থেকে এলে নিজের branch-এ লক (teacher/_bootstrap.php-এর tp_apply_branch_scope-এর মতো)
+if ($result_ajax_role === 'teacher' && !defined('PORTAL_BRANCH_ID')) {
+    try {
+        if (!branch_multi_branch_mode($pdo)) {
+            define('PORTAL_BRANCH_ID', null);
+        } else {
+            $__bst = $pdo->prepare("SELECT branch_id FROM employees WHERE id = ? LIMIT 1");
+            $__bst->execute([(int) $_SESSION['teacher_id']]);
+            $__b = $__bst->fetchColumn();
+            define('PORTAL_BRANCH_ID', ($__b === false || $__b === null || $__b === '') ? null : (int) $__b);
+        }
+    } catch (\Throwable $e) { define('PORTAL_BRANCH_ID', null); }
+}
+
+if ($result_ajax_role === 'admin' && !perm_page_allowed($pdo, 'result_marks_entry_subject')) {
     http_response_code(403);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode(['success' => false, 'message' => 'এই পেজ দেখার অনুমতি নেই।']);
     exit();
 }
+perm_write_guard($pdo, 'result_marks_entry_subject'); // Read-only ইউজারের সেভ আটকায়
 
 function mev($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 
 // এই পেজ Admin ও Teacher Portal দুই জায়গা থেকেই include হয় (মূল ফাইলের কমেন্ট দেখুন)।
 // Teacher Portal থেকে এলে শুধু নিজের অ্যাক্সেসযোগ্য Class/Subject-এই সীমাবদ্ধ থাকবে।
-$is_teacher_ctx = !empty($_SESSION['teacher_logged']);
+$is_teacher_ctx = $result_ajax_role === 'teacher';
 $me_teacher_id  = $is_teacher_ctx ? (int) ($_SESSION['teacher_id'] ?? 0) : 0;
 
 function teacher_allowed_class_subjects(PDO $pdo, int $teacher_id): array {
@@ -66,7 +87,9 @@ if ($action === 'sections') {
     foreach ($sections as $s) {
         $result[] = ['id' => (int) $s['id'], 'name' => $s['section_name']];
     }
-    echo json_encode(['success' => true, 'sections' => $result], JSON_UNESCAPED_UNICODE);
+    $groups = [];
+    foreach (($class_id > 0 ? ee_groups_of_class($pdo, $class_id) : []) as $gid => $gn) { $groups[] = ['id' => (int) $gid, 'name' => $gn]; }
+    echo json_encode(['success' => true, 'sections' => $result, 'groups' => $groups], JSON_UNESCAPED_UNICODE);
     exit();
 }
 
@@ -90,17 +113,19 @@ if ($action === 'subjects') {
             $allowed_subject_ids = array_values(array_unique($allowed_subject_ids));
             if ($allowed_subject_ids) {
                 $in_ph = implode(',', array_fill(0, count($allowed_subject_ids), '?'));
-                $subj_stmt = $pdo->prepare("SELECT id, subject_name FROM academic_subjects WHERE class_id=? AND status='Active' AND id IN ($in_ph) ORDER BY subject_name ASC");
+                $subj_stmt = $pdo->prepare("SELECT id, subject_name, group_id FROM academic_subjects WHERE class_id=? AND status='Active' AND id IN ($in_ph) ORDER BY sort_order ASC, id ASC");
                 $subj_stmt->execute(array_merge([$class_id], $allowed_subject_ids));
                 $subjects_list = $subj_stmt->fetchAll();
             }
         } else {
-            $subj_stmt = $pdo->prepare("SELECT id, subject_name FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY subject_name ASC");
+            $subj_stmt = $pdo->prepare("SELECT id, subject_name, group_id FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY sort_order ASC, id ASC");
             $subj_stmt->execute([$class_id]);
             $subjects_list = $subj_stmt->fetchAll();
         }
     }
 
+    $gsel = (int) ($_GET['group_id'] ?? 0);
+    if ($gsel > 0) { $GS = $gsel; $subjects_list = array_values(array_filter($subjects_list, function ($r) use ($GS) { $g = (int) ($r['group_id'] ?? 0); return $g === 0 || $g === $GS; })); }
     $result = [];
     foreach ($subjects_list as $s) {
         $result[] = ['id' => (int) $s['id'], 'name' => $s['subject_name']];
@@ -212,15 +237,20 @@ if ($action === 'table') {
     $sel_term    = (int) ($_GET['term_id'] ?? 0);
     $sel_part    = (int) ($_GET['part_id'] ?? 0);
     $sel_subject = (int) ($_GET['subject_id'] ?? 0);
+    $sel_group   = (int) ($_GET['group_id'] ?? 0);
+    $mg_groups   = $sel_class > 0 ? ee_groups_of_class($pdo, $sel_class) : [];
+    if ($mg_groups && !isset($mg_groups[$sel_group])) $sel_group = 0;
 
     $all_selected = ($sel_class > 0 && $sel_shift > 0 && $sel_section > 0 && $sel_term > 0 && $sel_part > 0 && $sel_subject > 0);
+    $need_group = ($all_selected && $mg_groups && $sel_group <= 0);
+    if ($need_group) $all_selected = false;
     $students = [];
     $full_mark_exam = 100;
     $assign_missing = false;
 
     if ($all_selected) {
-        $assign_stmt = $pdo->prepare("SELECT full_mark_exam FROM exam_assign_subjects WHERE term_id=? AND part_id=? AND subject_id=? LIMIT 1");
-        $assign_stmt->execute([$sel_term, $sel_part, $sel_subject]);
+        $assign_stmt = $pdo->prepare("SELECT full_mark_exam FROM exam_assign_subjects WHERE class_id=? AND term_id=? AND part_id=? AND subject_id=? AND status='Active' ORDER BY id DESC LIMIT 1");
+        $assign_stmt->execute([$sel_class, $sel_term, $sel_part, $sel_subject]);
         $assign_row = $assign_stmt->fetch();
         if ($assign_row) {
             $full_mark_exam = (float) $assign_row['full_mark_exam'];
@@ -230,6 +260,7 @@ if ($action === 'table') {
 
         $mes_where = ['s.class_id=?', 's.shift_id=?', 's.section_id=?', "s.status='Active'"];
         $mes_params = [$sel_term, $sel_part, $sel_subject, $sel_term, $sel_part, $sel_subject, $sel_class, $sel_shift, $sel_section];
+        if ($mg_groups) { $mes_where[] = 's.group_id=?'; $mes_params[] = $sel_group; }
         branch_apply_filter($mes_where, $mes_params, 's.branch_id');
         $stu_stmt = $pdo->prepare(
             "SELECT s.id, s.student_id, s.roll_no, s.name_en, s.photo_path,
@@ -245,7 +276,9 @@ if ($action === 'table') {
         $students = $stu_stmt->fetchAll();
     }
     ?>
-    <?php if (!$all_selected): ?>
+    <?php if ($need_group): ?>
+        <?php echo ea_group_need_msg('Mark Entry'); ?>
+    <?php elseif (!$all_selected): ?>
         <div class="text-center text-muted py-4">উপরে Class, Shift, Section, Exam Term, Exam Part এবং Subject সিলেক্ট করুন — তাহলে স্টুডেন্ট লিস্ট এখানে দেখাবে।</div>
     <?php elseif ($assign_missing): ?>
         <div class="text-center text-muted py-4">
@@ -255,61 +288,7 @@ if ($action === 'table') {
     <?php elseif (!$students): ?>
         <div class="text-center text-muted py-4">এই Class/Shift/Section এ কোনো Active Student পাওয়া যায়নি।</div>
     <?php else: ?>
-        <form method="POST" action="index.php?page=result_marks_entry_subject" id="marksForm">
-            <?php echo csrf_field(); ?>
-            <input type="hidden" name="class_id" value="<?php echo $sel_class; ?>">
-            <input type="hidden" name="shift_id" value="<?php echo $sel_shift; ?>">
-            <input type="hidden" name="section_id" value="<?php echo $sel_section; ?>">
-            <input type="hidden" name="term_id" value="<?php echo $sel_term; ?>">
-            <input type="hidden" name="part_id" value="<?php echo $sel_part; ?>">
-            <input type="hidden" name="subject_id" value="<?php echo $sel_subject; ?>">
-            <input type="hidden" name="full_mark_exam" value="<?php echo mev($full_mark_exam); ?>">
-
-            <div class="table-responsive">
-                <table class="table table-bordered align-middle m-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th style="width:50px;">Sl.</th>
-                            <th>Student ID</th>
-                            <th>Name</th>
-                            <th style="width:90px;">Roll</th>
-                            <th style="width:150px;" class="text-end">
-                                Mark<br>
-                                <span class="text-warning fw-bold small">(<?php echo mev(rtrim(rtrim(number_format($full_mark_exam, 2), '0'), '.')); ?>/<?php echo mev(rtrim(rtrim(number_format($full_mark_exam, 2), '0'), '.')); ?>)</span>
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php $srl = 1; foreach ($students as $stu):
-                            $is_absent = ($stu['attendance_status'] ?? '') === 'Absent';
-                        ?>
-                            <tr>
-                                <td><?php echo $srl++; ?></td>
-                                <td class="text-primary fw-bold"><?php echo mev($stu['student_id']); ?></td>
-                                <td>
-                                    <?php if (!empty($stu['photo_path'])): ?>
-                                        <img src="../<?php echo mev($stu['photo_path']); ?>" style="width:26px;height:26px;object-fit:cover;border-radius:50%;margin-right:6px;">
-                                    <?php endif; ?>
-                                    <?php echo mev($stu['name_en']); ?>
-                                    <?php if ($is_absent): ?><span class="badge bg-danger ms-1">Absent</span><?php endif; ?>
-                                </td>
-                                <td><?php echo mev($stu['roll_no']); ?></td>
-                                <td>
-                                    <input type="number" step="0.01" min="0" max="<?php echo mev($full_mark_exam); ?>"
-                                           name="marks[<?php echo (int) $stu['id']; ?>]" class="form-control form-control-sm text-end"
-                                           value="<?php echo $stu['saved_mark'] !== null ? mev(rtrim(rtrim(number_format((float) $stu['saved_mark'], 2), '0'), '.')) : ''; ?>"
-                                           placeholder="0">
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="d-flex justify-content-center mt-4">
-                <button type="submit" name="save_marks" class="btn btn-primary px-5 fw-bold" style="background-color:#1e3a8a;border-color:#1e3a8a;">Save Marks</button>
-            </div>
-        </form>
+        <?php mes_render_subject_form($pdo, $sel_class, $sel_shift, $sel_section, $sel_term, $sel_part, $sel_subject, $sel_group, (float) $full_mark_exam, $students); ?>
     <?php endif; ?>
     <?php
     exit();

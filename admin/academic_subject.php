@@ -4,6 +4,11 @@ $sub_err = $_SESSION['sub_err'] ?? '';
 $sub_msg = $_SESSION['sub_msg'] ?? '';
 unset($_SESSION['sub_err'], $_SESSION['sub_msg']);
 
+require_once __DIR__ . '/../config/subject_rank.php';
+subject_rank_ensure($pdo); // বিষয়ের Rank (sort_order) কলাম নিশ্চিত করা
+require_once __DIR__ . '/../config/subject_religion.php';
+sr_ensure($pdo); // academic_subjects.religion কলাম (ফাঁকা = সবার জন্য)
+
 // optional_count কলাম না থাকলে (পুরনো ডাটাবেস) যোগ করা
 try {
     if (!$pdo->query("SHOW COLUMNS FROM academic_subjects LIKE 'optional_count'")->fetch()) {
@@ -14,6 +19,49 @@ try {
 // -----------------------------------------------------------
 // POST Handlers (Create / Update / Delete)
 // -----------------------------------------------------------
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quick_subject'])) {
+    // ডান পাশের প্যানেল থেকে দ্রুত Edit / ওপরে-নিচে (AJAX, JSON রেসপন্স)
+    while (ob_get_level() > 0) { ob_end_clean(); }
+    header('Content-Type: application/json; charset=utf-8');
+    if (!csrf_verify($_POST['csrf_token'] ?? null)) { echo json_encode(['ok' => false, 'msg' => 'সেশন শেষ, পেজ রিলোড করুন']); exit(); }
+    $qid = (int) ($_POST['id'] ?? 0);
+    $qrow = $pdo->prepare("SELECT * FROM academic_subjects WHERE id = ?");
+    $qrow->execute([$qid]);
+    $q = $qrow->fetch();
+    if (!$q) { echo json_encode(['ok' => false, 'msg' => 'Subject পাওয়া যায়নি']); exit(); }
+    $act = $_POST['quick_subject'];
+    if ($act === 'save') {
+        $nm = trim((string) ($_POST['subject_name'] ?? ''));
+        $fm = (int) ($_POST['full_marks'] ?? 0);
+        $ty = $_POST['subject_type'] ?? 'Compulsory';
+        if (!in_array($ty, ['Compulsory', 'Optional', 'Continuous Assessment'], true)) $ty = 'Compulsory';
+        if ($nm === '' || $fm <= 0) { echo json_encode(['ok' => false, 'msg' => 'নাম ও পূর্ণমান দিন']); exit(); }
+        $dup = $pdo->prepare("SELECT id FROM academic_subjects WHERE class_id <=> ? AND group_id <=> ? AND subject_name = ? AND id <> ?");
+        $dup->execute([$q['class_id'], $q['group_id'], $nm, $qid]);
+        if ($dup->fetch()) { echo json_encode(['ok' => false, 'msg' => 'এই নামের বিষয় এই Class/Group-এ আগে থেকেই আছে']); exit(); }
+        $oc = $ty === 'Optional' ? ($q['optional_count'] !== null ? (int) $q['optional_count'] : 2) : null;
+        $pdo->prepare("UPDATE academic_subjects SET subject_name=?, full_marks=?, subject_type=?, optional_count=? WHERE id=?")->execute([$nm, $fm, $ty, $oc, $qid]);
+        sec_log_activity($pdo, 'Academic', 'Update', "Subject দ্রুত আপডেট: {$nm}");
+        echo json_encode(['ok' => true, 'n' => $nm, 'f' => $fm, 't' => $ty]); exit();
+    }
+    if ($act === 'up' || $act === 'down') {
+        $dir = $act === 'up' ? -1 : 1;
+        subject_rank_normalize($pdo, (int) $q['class_id']);
+        $sib = $pdo->prepare("SELECT id, sort_order FROM academic_subjects WHERE class_id <=> ? AND group_id <=> ? ORDER BY sort_order ASC, id ASC");
+        $sib->execute([$q['class_id'], $q['group_id']]);
+        $list = $sib->fetchAll(); $moved = false; $with = 0; $rk_me = 0; $rk_o = 0;
+        foreach ($list as $i => $r) {
+            if ((int) $r['id'] === $qid && isset($list[$i + $dir])) {
+                $o = $list[$i + $dir]; $u = $pdo->prepare("UPDATE academic_subjects SET sort_order = ? WHERE id = ?");
+                $u->execute([(int) $o['sort_order'], $qid]); $u->execute([(int) $r['sort_order'], (int) $o['id']]); $moved = true;
+                $with = (int) $o['id']; $rk_me = (int) $o['sort_order']; $rk_o = (int) $r['sort_order']; break;
+            }
+        }
+        echo json_encode(['ok' => true, 'moved' => $moved, 'with' => $with, 'rank_me' => $rk_me, 'rank_with' => $rk_o]); exit();
+    }
+    echo json_encode(['ok' => false, 'msg' => 'অজানা অ্যাকশন']); exit();
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_verify($_POST['csrf_token'] ?? null)) {
         $_SESSION['sub_err'] = 'ফর্মের মেয়াদ শেষ হয়ে গেছে, পেজ রিলোড করে আবার চেষ্টা করুন।';
@@ -31,6 +79,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $group_names_sel  = array_values(array_unique(array_filter(array_map('trim', (array) ($_POST['group_names'] ?? [])), 'strlen')));
         $group_all        = empty($group_names_sel) || in_array('__all__', $group_names_sel, true);
         $full_marks       = (int) ($_POST['full_marks'] ?? 100);
+        $rank_in          = trim((string) ($_POST['sort_order'] ?? ''));   // Edit ভিউ: Rank (ক্রম) — ফাঁকা থাকলে বদলাবে না
         $subject_type     = $_POST['subject_type'] ?? 'Compulsory';
         $status           = ($_POST['status'] ?? 'Active') === 'Inactive' ? 'Inactive' : 'Active';
         // Optional subject-এ GP থেকে যত বাদ যাবে (ডিফল্ট ২)। Optional না হলে NULL।
@@ -51,6 +100,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $subject_type = 'Compulsory';
         }
         $optional_param = $subject_type === 'Optional' ? $optional_deduct : null;
+        $religion_param = sr_norm($_POST['religion'] ?? '');       // '' = সবার জন্য
+        $religion_param = $religion_param === '' ? null : $religion_param;
 
         if (empty($class_ids) || $subject_name === '') {
             $_SESSION['sub_err'] = 'Class Name, Subject Name — এই ফিল্ডগুলো আবশ্যক।';
@@ -61,9 +112,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $combined_param = $combined_with_id > 0 ? $combined_with_id : null;
                 $group_param = $resolve_group_id($class_id);
                 $stmt = $pdo->prepare(
-                    "UPDATE academic_subjects SET class_id=?, subject_name=?, combined_with_id=?, group_id=?, full_marks=?, subject_type=?, optional_count=?, status=? WHERE id=?"
+                    "UPDATE academic_subjects SET class_id=?, subject_name=?, combined_with_id=?, group_id=?, full_marks=?, subject_type=?, optional_count=?, status=?, religion=? WHERE id=?"
                 );
-                $stmt->execute([$class_id, $subject_name, $combined_param, $group_param, $full_marks, $subject_type, $optional_param, $status, $id]);
+                $stmt->execute([$class_id, $subject_name, $combined_param, $group_param, $full_marks, $subject_type, $optional_param, $status, $religion_param, $id]);
+                if ($rank_in !== '' && (int) $rank_in > 0) {
+                    // নতুন Rank বসাতে চাইলে: ওই ক্রমে ঢুকিয়ে বাকিদের সরিয়ে দেওয়া (প্রতি Class-এ ১..n)
+                    $ids = $pdo->prepare("SELECT id FROM academic_subjects WHERE class_id = ? AND id <> ? ORDER BY sort_order ASC, id ASC");
+                    $ids->execute([$class_id, $id]);
+                    $order = $ids->fetchAll(PDO::FETCH_COLUMN);
+                    array_splice($order, max(0, min(count($order), (int) $rank_in - 1)), 0, [$id]);
+                    $upr = $pdo->prepare("UPDATE academic_subjects SET sort_order = ? WHERE id = ?");
+                    foreach ($order as $i => $sid) { $upr->execute([$i + 1, (int) $sid]); }
+                }
                 sec_log_activity($pdo, 'Academic', 'Update', "Subject আপডেট করা হয়েছে: {$subject_name}");
                 $_SESSION['sub_msg'] = 'Subject আপডেট করা হয়েছে।';
             } else {
@@ -104,14 +164,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $chk = $pdo->prepare("SELECT id FROM academic_subjects WHERE class_id=? AND subject_name=? AND (group_id <=> ?)");
                 $ins = $pdo->prepare(
-                    "INSERT INTO academic_subjects (class_id, subject_name, combined_with_id, group_id, full_marks, subject_type, optional_count, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                    "INSERT INTO academic_subjects (class_id, subject_name, combined_with_id, group_id, full_marks, subject_type, optional_count, status, sort_order, religion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 );
                 $created = 0;
                 $skipped = 0;
                 foreach ($targets as [$cid, $gid]) {
                     $chk->execute([$cid, $subject_name, $gid]);
                     if ($chk->fetch()) { $skipped++; continue; } // আগে থেকেই থাকলে বাদ
-                    $ins->execute([$cid, $subject_name, $combined_param, $gid, $full_marks, $subject_type, $optional_param, $status]);
+                    $ins->execute([$cid, $subject_name, $combined_param, $gid, $full_marks, $subject_type, $optional_param, $status, subject_rank_next($pdo, $cid), $religion_param]);
                     $created++;
                 }
                 if ($created > 0) {
@@ -124,23 +184,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         }
+    } elseif (isset($_POST['move_subject'])) {
+        // ▲▼ — একই Class + Group-এর ওপরের/নিচের বিষয়ের সাথে Rank বদল
+        $id = (int) ($_POST['id'] ?? 0);
+        $dir = ($_POST['dir'] ?? '') === 'up' ? -1 : 1;
+        $me = $pdo->prepare("SELECT class_id, group_id FROM academic_subjects WHERE id = ?");
+        $me->execute([$id]);
+        $m = $me->fetch();
+        if ($m) {
+            subject_rank_normalize($pdo, (int) $m['class_id']); // ১..n নিশ্চিত
+            $sib = $pdo->prepare("SELECT id, sort_order FROM academic_subjects WHERE class_id <=> ? AND group_id <=> ? ORDER BY sort_order ASC, id ASC");
+            $sib->execute([$m['class_id'], $m['group_id']]);
+            $list = $sib->fetchAll();
+            foreach ($list as $i => $r) {
+                if ((int) $r['id'] === $id && isset($list[$i + $dir])) {
+                    $o = $list[$i + $dir];
+                    $u = $pdo->prepare("UPDATE academic_subjects SET sort_order = ? WHERE id = ?");
+                    $u->execute([(int) $o['sort_order'], $id]);
+                    $u->execute([(int) $r['sort_order'], (int) $o['id']]);
+                    break;
+                }
+            }
+        }
+        $q = $_POST['back'] ?? '';
+        header('Location: index.php?page=academic_subject' . ($q !== '' ? '&' . preg_replace('/[^A-Za-z0-9_=&%.\-]/', '', $q) : ''));
+        exit();
     } elseif (isset($_POST['delete_subject'])) {
         $id = (int) ($_POST['id'] ?? 0);
         $del_stmt = $pdo->prepare("SELECT subject_name FROM academic_subjects WHERE id = ?");
         $del_stmt->execute([$id]);
         $del_name = $del_stmt->fetchColumn();
         $pdo->prepare("DELETE FROM academic_subjects WHERE id = ?")->execute([$id]);
+        // Subject মুছলে এর সাথে যুক্ত Exam সেটআপ/ডাটাও মুছে ফেলা — নইলে exam_assign_subjects-এ এতিম রেকর্ড থেকে
+        // রিপোর্ট কার্ডে নামহীন ব্ল্যাংক সাবজেক্ট দেখা যেত
+        foreach (['exam_assign_subjects', 'exam_marks', 'exam_eligibility', 'exam_attendance_subject', 'teacher_subject_assignments', 'result_merit_tiebreakers'] as $_t) {
+            try { $pdo->prepare("DELETE FROM `$_t` WHERE subject_id = ?")->execute([$id]); } catch (Throwable $e) { /* টেবিল না থাকলে এড়িয়ে যাওয়া */ }
+        }
         sec_log_activity($pdo, 'Academic', 'Delete', "Subject মুছে ফেলা হয়েছে: " . ($del_name ?: "#$id"));
         $_SESSION['sub_msg'] = 'Subject মুছে ফেলা হয়েছে।';
     }
 
+    if (isset($_POST['save_subject']) && (int) ($_POST['id'] ?? 0) === 0) {
+        // নতুন Subject তৈরির পর (বা এরর হলে) একই Add ফর্মেই থাকা — সিলেক্ট করা Class বহাল, ডানের তালিকা আপডেট
+        $back_sel = implode(',', array_filter(array_map('intval', $_POST['class_ids'] ?? [])));
+        header('Location: index.php?page=academic_subject&view=add' . ($back_sel !== '' ? '&sel=' . $back_sel : ''));
+        exit();
+    }
     header('Location: index.php?page=academic_subject');
     exit();
 }
 
 $view = $_GET['view'] ?? 'list';
 $classes = $pdo->query("SELECT id, class_name, has_group FROM academic_classes WHERE status = 'Active' ORDER BY rank ASC, class_name ASC")->fetchAll();
-$all_subjects = $pdo->query("SELECT id, subject_name, class_id FROM academic_subjects ORDER BY subject_name ASC")->fetchAll();
+$all_subjects = $pdo->query("SELECT id, subject_name, class_id FROM academic_subjects ORDER BY sort_order ASC, id ASC")->fetchAll();
 $groups = $pdo->query("SELECT id, group_name, class_id FROM academic_groups WHERE status = 'Active' ORDER BY group_name ASC")->fetchAll();
 // Group ড্রপডাউনে নামের ভিত্তিতে ইউনিক লিস্ট — প্রতিটা নামের সাথে কোন কোন Class-এ এই নামের
 // Group আছে তার তালিকা রাখা হচ্ছে (JS ফিল্টারিং আর মাল্টি-ক্লাস রেজোলিউশনের জন্য)
@@ -157,6 +253,7 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
 <?php if ($view === 'add' || $view === 'edit'): ?>
     <?php
     // ------------------- ADD / EDIT FORM VIEW -------------------
+    $sel_ids = array_filter(array_map('intval', explode(',', (string) ($_GET['sel'] ?? ''))));
     $edit_row = null;
     if ($view === 'edit') {
         $edit_id = (int) ($_GET['id'] ?? 0);
@@ -166,16 +263,17 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
     }
     $d = $edit_row ?: [
         'id' => 0, 'class_id' => '', 'subject_name' => '', 'combined_with_id' => '', 'current_group_name' => '',
-        'full_marks' => 100, 'subject_type' => 'Compulsory', 'status' => 'Active', 'optional_count' => null,
+        'full_marks' => 100, 'subject_type' => 'Compulsory', 'status' => 'Active', 'optional_count' => null, 'religion' => '',
     ];
     // ডান পাশের প্যানেলের জন্য: Class অনুযায়ী আগে থেকে তৈরি Subject-গুলো (Group সহ)
     $subj_by_class = [];
     if ($view === 'add') {
-        $ps = $pdo->query("SELECT s.class_id, s.subject_name, s.subject_type, s.status, g.group_name
+        $ps = $pdo->query("SELECT s.id, s.class_id, s.subject_name, s.subject_type, s.full_marks, s.status, g.group_name
                            FROM academic_subjects s LEFT JOIN academic_groups g ON g.id = s.group_id
-                           ORDER BY s.class_id ASC, s.group_id ASC, s.id ASC");
+                           ORDER BY s.class_id ASC, s.group_id ASC, s.sort_order ASC, s.id ASC");
         foreach ($ps->fetchAll() as $pr) {
             $subj_by_class[(int) $pr['class_id']][] = [
+                'i' => (int) $pr['id'], 'f' => (int) $pr['full_marks'],
                 'n' => $pr['subject_name'], 't' => $pr['subject_type'],
                 'g' => $pr['group_name'] ?? '', 'a' => $pr['status'] === 'Active' ? 1 : 0,
             ];
@@ -185,6 +283,7 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
     foreach ($classes as $c) { $class_name_map[(int) $c['id']] = $c['class_name']; }
     ?>
     <div class="card-custom">
+        <?php if ($sub_msg): ?><div class="alert alert-success py-2"><?php echo htmlspecialchars($sub_msg); ?></div><?php endif; ?>
         <?php if ($sub_err): ?><div class="alert alert-danger py-2"><?php echo htmlspecialchars($sub_err); ?></div><?php endif; ?>
 
         <a href="index.php?page=academic_subject" class="d-inline-block bg-warning bg-opacity-75 p-2 mb-4 text-decoration-none" style="width:40px;border-radius:4px;" title="তালিকায় ফিরে যান (Back to List)">
@@ -212,7 +311,7 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
                                 </div>
                                 <?php foreach ($classes as $c): ?>
                                     <label class="ms-item" for="subjClass<?php echo (int) $c['id']; ?>">
-                                        <input type="checkbox" name="class_ids[]" id="subjClass<?php echo (int) $c['id']; ?>" value="<?php echo (int) $c['id']; ?>" data-has-group="<?php echo (int) $c['has_group']; ?>" data-label="<?php echo sjv($c['class_name']); ?>" class="form-check-input subject-class-input">
+                                        <input type="checkbox" name="class_ids[]" id="subjClass<?php echo (int) $c['id']; ?>" value="<?php echo (int) $c['id']; ?>" data-has-group="<?php echo (int) $c['has_group']; ?>" data-label="<?php echo sjv($c['class_name']); ?>" class="form-check-input subject-class-input" <?php echo in_array((int) $c['id'], $sel_ids, true) ? 'checked' : ''; ?>>
                                         <span><?php echo sjv($c['class_name']); ?></span>
                                         <?php if ((int) $c['has_group'] === 1): ?><span class="badge bg-light text-secondary border ms-auto">Group</span><?php endif; ?>
                                     </label>
@@ -286,6 +385,16 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
                 <div class="col-sm-6"><input type="text" name="subject_name" class="form-control" value="<?php echo sjv($d['subject_name']); ?>" placeholder="e.g. Bangla 1st Paper" required></div>
             </div>
 
+            <?php if ($view === 'edit'): ?>
+            <div class="row mb-3 align-items-center">
+                <label class="col-sm-3 col-form-label fw-bold text-end">Rank (ক্রম)</label>
+                <div class="col-sm-3">
+                    <input type="number" min="1" name="sort_order" class="form-control" value="<?php echo (int) ($d['sort_order'] ?? 0) ?: ''; ?>" placeholder="যেমন ১">
+                    <small class="text-muted">মার্কশিট/মার্ক এন্ট্রিতে বিষয় এই ক্রমে দেখাবে (১ = সবার ওপরে)।</small>
+                </div>
+            </div>
+            <?php endif; ?>
+
             <div class="row mb-3 align-items-center" id="combinedWithRow">
                 <label class="col-sm-3 col-form-label fw-bold text-end">Combined With</label>
                 <div class="col-sm-6">
@@ -335,6 +444,19 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
                 </div>
             </div>
 
+            <div class="row mb-3 align-items-center">
+                <label class="col-sm-3 col-form-label fw-bold text-end">ধর্ম (Religion)</label>
+                <div class="col-sm-6">
+                    <select name="religion" class="form-select">
+                        <option value="">সবার জন্য (কমন Subject)</option>
+                        <?php $cur_rel = sr_norm($d['religion'] ?? ''); foreach (sr_options() as $rk => $rl): ?>
+                            <option value="<?php echo $rk; ?>" <?php echo $cur_rel === $rk ? 'selected' : ''; ?>>শুধু <?php echo htmlspecialchars($rl, ENT_QUOTES, 'UTF-8'); ?> শিক্ষার্থীর জন্য</option>
+                        <?php endforeach; ?>
+                    </select>
+                    <small class="text-muted d-block mt-1">ধর্ম শিক্ষার মতো Subject-এ বাছুন (যেমন "ইসলাম শিক্ষা" → Islam, "হিন্দু ধর্ম শিক্ষা" → Hinduism)। মার্কস এন্ট্রি, রেজাল্ট ও রুটিনে শুধু ঐ ধর্মের শিক্ষার্থী আসবে। সব ধর্মের জন্য আলাদা Subject তৈরি করুন; ফাঁকা রাখলে সবার জন্য।</small>
+                </div>
+            </div>
+
             <div class="row mb-4 align-items-center">
                 <label class="col-sm-3 col-form-label fw-bold text-end">Status <span class="text-danger">*</span></label>
                 <div class="col-sm-6">
@@ -376,6 +498,15 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
             .ss-item { display: flex; align-items: center; gap: 6px; font-size: 13.5px; padding: 3px 0 3px 6px; border-bottom: 1px dashed #e6e9f0; }
             .ss-item.ss-off { color: #9aa3b5; text-decoration: line-through; }
             .ss-item.ss-dup { background: #fff1f0; color: #b42318; font-weight: 700; border-radius: 4px; }
+            .ss-sl { min-width: 24px; color: #64748b; font-weight: 600; font-variant-numeric: tabular-nums; }
+            .ss-total { display: flex; justify-content: space-between; font-weight: 700; font-size: 13.5px; color: #1e3a8a; background: #eef2ff; border-radius: 6px; padding: 5px 8px; margin-top: 6px; }
+            .ss-total.ss-grand { background: #1e3a8a; color: #fff; margin-top: 12px; }
+            .ss-fm { color: #94a3b8; font-size: 12px; }
+            .ss-act { display: inline-flex; gap: 2px; }
+            .ss-btn { border: 0; background: transparent; color: #64748b; padding: 1px 5px; font-size: 12px; cursor: pointer; border-radius: 4px; }
+            .ss-btn:hover { background: #e2e8f0; color: #1e3a8a; }
+            .ss-edit { background: #fffbea; border: 1px solid #fde68a; border-radius: 6px; padding: 6px; margin: 3px 0; }
+            .ss-err { color: #b42318; font-size: 12px; margin-top: 3px; }
             .ss-none { font-size: 13px; color: #9aa3b5; padding: 4px 6px; }
             .ms-footer { position: sticky; bottom: 0; background: #fff; border-top: 1px solid #eef0f4; padding: 8px 12px 4px; margin-top: 4px; text-align: right; }
         </style>
@@ -558,6 +689,42 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
             const sideBody = document.getElementById('subjSideBody');
             const nameInput = document.querySelector('#subjForm input[name="subject_name"]');
             function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+            let editingId = null;
+            const CSRF = <?php echo json_encode(csrf_token()); ?>;
+            function post(data) {
+                const fd = new FormData(); fd.append('csrf_token', CSRF);
+                Object.keys(data).forEach(k => fd.append(k, data[k]));
+                return fetch('index.php?page=academic_subject', {method: 'POST', body: fd, credentials: 'same-origin'}).then(r => r.json());
+            }
+            function moveSub(cid, sb, d) {
+                const list = SUBJ_BY_CLASS[cid] || [], i = list.indexOf(sb), j = i + d;
+                if (j < 0 || j >= list.length || (list[j].g || '') !== (sb.g || '')) return; // শুধু একই Group-এর ভেতরে
+                post({quick_subject: d < 0 ? 'up' : 'down', id: sb.i}).then(r => {
+                    if (r.ok) { list[i] = list[j]; list[j] = sb; renderSide(); } else { alert(r.msg || 'সম্ভব হয়নি'); }
+                }).catch(() => alert('নেটওয়ার্ক সমস্যা'));
+            }
+            function editorRow(sb, cid) {
+                const row = el('div', 'ss-edit');
+                const nm = el('input', 'form-control form-control-sm'); nm.value = sb.n; nm.maxLength = 150;
+                const fm = el('input', 'form-control form-control-sm'); fm.type = 'number'; fm.min = 1; fm.value = sb.f; fm.title = 'Full Marks';
+                const ty = el('select', 'form-select form-select-sm');
+                [['Compulsory', 'Compulsory'], ['Optional', 'Optional'], ['Continuous Assessment', 'CA']].forEach(o => { const op = el('option', '', o[1]); op.value = o[0]; if (o[0] === sb.t) op.selected = true; ty.appendChild(op); });
+                const msg = el('div', 'ss-err');
+                const bs = el('button', 'btn btn-sm btn-success', 'Save'); bs.type = 'button';
+                const bc = el('button', 'btn btn-sm btn-outline-secondary', 'Cancel'); bc.type = 'button';
+                bc.addEventListener('click', () => { editingId = null; renderSide(); });
+                bs.addEventListener('click', () => {
+                    bs.disabled = true;
+                    post({quick_subject: 'save', id: sb.i, subject_name: nm.value, full_marks: fm.value, subject_type: ty.value}).then(r => {
+                        if (r.ok) { sb.n = r.n; sb.f = r.f; sb.t = r.t; editingId = null; renderSide(); }
+                        else { msg.textContent = r.msg || 'সেভ হয়নি'; bs.disabled = false; }
+                    }).catch(() => { msg.textContent = 'নেটওয়ার্ক সমস্যা'; bs.disabled = false; });
+                });
+                const r2 = el('div', 'd-flex gap-1'); r2.appendChild(fm); r2.appendChild(ty);
+                const r3 = el('div', 'd-flex gap-1 mt-1'); r3.appendChild(bs); r3.appendChild(bc);
+                row.appendChild(nm); row.appendChild(r2); row.appendChild(r3); row.appendChild(msg);
+                return row;
+            }
             function renderSide() {
                 const typed = nameInput.value.trim().toLowerCase();
                 const checked = inputs.filter(i => i.checked);
@@ -565,6 +732,7 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
                 // Class সিলেক্ট না থাকলে প্যানেলটাই দেখানো হয় না
                 document.getElementById('subjSide').style.display = checked.length ? '' : 'none';
                 if (!checked.length) { return; }
+                let grandTotal = 0;
                 checked.forEach(inp => {
                     const cid = inp.value, list = SUBJ_BY_CLASS[cid] || [];
                     const box = el('div', 'ss-class');
@@ -575,19 +743,42 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
                     if (!list.length) {
                         box.appendChild(el('div', 'ss-none', 'এখনো কোনো Subject নেই।'));
                     } else {
-                        let lastGroup = null;
+                        let lastGroup = null, serial = 0;
                         list.forEach(sb => {
                             const g = sb.g || '';
                             if (g !== lastGroup) { box.appendChild(el('div', 'ss-group', g ? g : 'No Group')); lastGroup = g; }
                             const row = el('div', 'ss-item' + (sb.a ? '' : ' ss-off') + (typed && sb.n.trim().toLowerCase() === typed ? ' ss-dup' : ''));
-                            row.appendChild(el('span', '', sb.n));
-                            if (sb.t === 'Optional') row.appendChild(el('span', 'badge bg-warning text-dark ms-auto', 'Optional'));
-                            else if (sb.t === 'Continuous Assessment') row.appendChild(el('span', 'badge bg-info text-dark ms-auto', 'CA'));
+                            serial++;
+                            if (editingId === sb.i) { box.appendChild(editorRow(sb, cid)); return; }
+                            row.appendChild(el('span', 'ss-sl', serial + '.'));
+                            row.appendChild(el('span', 'ss-nm', sb.n));
+                            row.appendChild(el('span', 'ss-fm', '(' + sb.f + ')'));
+                            if (sb.t === 'Optional') row.appendChild(el('span', 'badge bg-warning text-dark', 'Optional'));
+                            else if (sb.t === 'Continuous Assessment') row.appendChild(el('span', 'badge bg-info text-dark', 'CA'));
+                            const act = el('span', 'ss-act ms-auto');
+                            [['fa-arrow-up', 'ওপরে নিন', () => moveSub(cid, sb, -1)], ['fa-arrow-down', 'নিচে নিন', () => moveSub(cid, sb, 1)], ['fa-pen', 'Edit', () => { editingId = sb.i; renderSide(); }]].forEach(a => {
+                                const b = el('button', 'ss-btn'); b.type = 'button'; b.title = a[1];
+                                const ic = el('i', 'fa-solid ' + a[0]); b.appendChild(ic); b.addEventListener('click', a[2]); act.appendChild(b);
+                            });
+                            row.appendChild(act);
                             box.appendChild(row);
                         });
+                        const act = list.filter(x => x.a).length;
+                        const foot = el('div', 'ss-total');
+                        foot.appendChild(el('span', '', 'মোট Subject'));
+                        const tm = list.reduce((t, x) => t + (x.a ? (+x.f || 0) : 0), 0);
+                        foot.appendChild(el('span', '', list.length + ' টি' + (act !== list.length ? ' (সক্রিয় ' + act + ')' : '') + ' · মোট নম্বর ' + tm));
+                        box.appendChild(foot);
                     }
+                    grandTotal += list.length;
                     sideBody.appendChild(box);
                 });
+                if (checked.length > 1) {
+                    const gt = el('div', 'ss-total ss-grand');
+                    gt.appendChild(el('span', '', 'সব Class মিলিয়ে মোট (' + checked.length + 'টি Class)'));
+                    gt.appendChild(el('span', '', grandTotal + ' টি'));
+                    sideBody.appendChild(gt);
+                }
             }
             document.getElementById('subjForm').addEventListener('change', renderSide);
             nameInput.addEventListener('input', renderSide);
@@ -634,7 +825,7 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
     if ($where) $sql .= " WHERE " . implode(' AND ', $where);
     // Class অনুযায়ী সিরিয়াল (Class-এর rank অনুযায়ী: Three, Four, Five...), প্রতিটা Class-এর ভেতরে যে ক্রমে সাবজেক্ট যোগ হয়েছে সেই ক্রমে
     // Class → Group (No Group আগে, তারপর Group তৈরির ক্রমে) → Subject যোগ হওয়ার ক্রমে
-    $sql .= " ORDER BY academic_classes.rank ASC, academic_classes.class_name ASC, academic_subjects.class_id ASC, academic_subjects.group_id ASC, academic_subjects.id ASC";
+    $sql .= " ORDER BY academic_classes.rank ASC, academic_classes.class_name ASC, academic_subjects.class_id ASC, academic_subjects.group_id ASC, academic_subjects.sort_order ASC, academic_subjects.id ASC";
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
@@ -661,6 +852,7 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
                     <thead class="table-light">
                         <tr>
                             <th>Srl.</th>
+                            <th>Rank (ক্রম)</th>
                             <th>Class Name</th>
                             <th>Subject Name</th>
                             <th>Full Marks</th>
@@ -671,6 +863,7 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
                             <th>Actions</th>
                         </tr>
                         <tr>
+                            <th></th>
                             <th></th>
                             <th>
                                 <select name="f_class" class="form-select form-select-sm" onchange="this.form.submit()">
@@ -714,25 +907,32 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
                         <?php if ($rows): $srl = 1; $prev_key = null;
                             // প্রতিটা (Class + Group)-এর subject count আগে বের করা, হেডার সারিতে দেখানোর জন্য
                             $grp_counts = [];
-                            foreach ($rows as $r0) { $k0 = (int) $r0['class_id'] . '|' . (int) $r0['group_id']; $grp_counts[$k0] = ($grp_counts[$k0] ?? 0) + 1; }
+                            $grp_marks = []; $grand_marks = 0;
+                            foreach ($rows as $r0) { $k0 = (int) $r0['class_id'] . '|' . (int) $r0['group_id']; $grp_counts[$k0] = ($grp_counts[$k0] ?? 0) + 1; $grp_marks[$k0] = ($grp_marks[$k0] ?? 0) + (int) $r0['full_marks']; $grand_marks += (int) $r0['full_marks']; }
                             foreach ($rows as $row):
                                 $cur_key = (int) $row['class_id'] . '|' . (int) $row['group_id'];
                                 if ($cur_key !== $prev_key): $prev_key = $cur_key; ?>
                             <tr class="table-secondary">
-                                <td colspan="9" class="fw-bold">
+                                <td colspan="10" class="fw-bold">
                                     <i class="fa-solid fa-layer-group me-1"></i>
                                     <?php echo sjv($row['class_name'] ?? '-'); ?> &mdash; <?php echo $row['group_name'] ? sjv($row['group_name']) : 'No Group (সব শিক্ষার্থী)'; ?>
                                     <span class="badge bg-dark ms-2"><?php echo (int) $grp_counts[$cur_key]; ?> Subject</span>
+                                    <span class="badge bg-primary ms-1">মোট নম্বর: <?php echo (int) $grp_marks[$cur_key]; ?></span>
                                 </td>
                             </tr>
                             <?php endif; ?>
-                            <tr>
-                                <td><?php echo $srl++; ?></td>
+                            <tr data-sid="<?php echo (int) $row['id']; ?>" data-grp="<?php echo sjv($cur_key); ?>">
+                                <td class="sj-srl"><?php echo $srl++; ?></td>
+                                <td class="text-nowrap">
+                                    <span class="badge bg-primary me-1 sj-rank"><?php echo (int) $row['sort_order']; ?></span>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" title="ওপরে নিন" onclick="sjMove(<?php echo (int) $row['id']; ?>,'up')"><i class="fa-solid fa-arrow-up"></i></button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" title="নিচে নিন" onclick="sjMove(<?php echo (int) $row['id']; ?>,'down')"><i class="fa-solid fa-arrow-down"></i></button>
+                                </td>
                                 <td><?php echo sjv($row['class_name'] ?? '-'); ?></td>
                                 <td><?php echo sjv($row['subject_name']); ?></td>
                                 <td><?php echo (int) $row['full_marks']; ?></td>
                                 <td><?php echo $row['group_name'] ? sjv($row['group_name']) : 'No Group'; ?></td>
-                                <td><?php echo sjv($row['subject_type']); ?></td>
+                                <td><?php echo sjv($row['subject_type']); ?><?php if (sr_norm($row['religion'] ?? '') !== ''): ?> <span class="badge bg-info text-dark"><?php echo htmlspecialchars(sr_norm($row['religion']), ENT_QUOTES, 'UTF-8'); ?></span><?php endif; ?></td>
                                 <td><?php echo ($row['subject_type'] === 'Optional') ? 'GP − ' . ($row['optional_count'] !== null ? (int) $row['optional_count'] : 2) : '-'; ?></td>
                                 <td><?php echo $row['status'] === 'Active' ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>'; ?></td>
                                 <td class="text-nowrap">
@@ -742,9 +942,18 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
                                 </td>
                             </tr>
                         <?php endforeach; else: ?>
-                            <tr><td colspan="9" class="text-center text-muted py-3">No data found</td></tr>
+                            <tr><td colspan="10" class="text-center text-muted py-3">No data found</td></tr>
                         <?php endif; ?>
                     </tbody>
+                    <?php if ($rows): ?>
+                    <tfoot>
+                        <tr class="table-primary fw-bold">
+                            <td colspan="4" class="text-end">সর্বমোট (<?php echo count($rows); ?> টি Subject)</td>
+                            <td><?php echo (int) $grand_marks; ?></td>
+                            <td colspan="5"><?php echo count($grp_marks) > 1 ? 'মোট Full Marks — ' . count($grp_marks) . 'টি Class/Group মিলিয়ে' : 'মোট Full Marks'; ?></td>
+                        </tr>
+                    </tfoot>
+                    <?php endif; ?>
                 </table>
             </div>
         </form>
@@ -757,7 +966,44 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
             <input type="hidden" name="id" id="sjDeleteId">
             <input type="hidden" name="delete_subject" value="1">
         </form>
+        <form method="POST" action="index.php?page=academic_subject" id="sjMoveForm" class="d-none">
+            <?php echo csrf_field(); ?>
+            <input type="hidden" name="id" id="sjMoveId">
+            <input type="hidden" name="dir" id="sjMoveDir">
+            <input type="hidden" name="back" value="<?php echo sjv(http_build_query(array_filter(['f_class' => $f_class !== 'All' ? $f_class : '', 'f_name' => $f_name, 'f_group' => $f_group !== 'All' ? $f_group : '', 'f_type' => $f_type !== 'All' ? $f_type : '', 'f_status' => $f_status !== 'All' ? $f_status : ''], 'strlen'))); ?>">
+            <input type="hidden" name="move_subject" value="1">
+        </form>
         <script>
+            function sjMove(id, dir) {
+                // রিলোড ছাড়াই (AJAX): সারি অদলবদল + Rank/Srl. আপডেট; কিছু ভুল হলে পুরনো পদ্ধতিতে রিলোড
+                const tr = document.querySelector('tr[data-sid="' + id + '"]');
+                const fallback = function () {
+                    document.getElementById('sjMoveId').value = id;
+                    document.getElementById('sjMoveDir').value = dir;
+                    document.getElementById('sjMoveForm').submit();
+                };
+                if (!tr) { fallback(); return; }
+                const fd = new FormData();
+                fd.append('csrf_token', document.querySelector('#sjMoveForm input[name="csrf_token"]').value);
+                fd.append('quick_subject', dir); fd.append('id', id);
+                fetch('index.php?page=academic_subject', {method: 'POST', body: fd, credentials: 'same-origin'})
+                    .then(function (r) { return r.json(); })
+                    .then(function (r) {
+                        if (!r.ok) { fallback(); return; }
+                        if (!r.moved) { return; } // সবার ওপরে/নিচে — কিছু বদলায়নি
+                        const other = document.querySelector('tr[data-sid="' + r.with + '"]');
+                        if (!other || other.dataset.grp !== tr.dataset.grp) { location.reload(); return; } // ফিল্টারের কারণে প্রতিবেশী দেখা যাচ্ছে না
+                        const up = dir === 'up';
+                        if (up) { other.parentNode.insertBefore(tr, other); } else { other.parentNode.insertBefore(other, tr); }
+                        tr.querySelector('.sj-rank').textContent = r.rank_me;
+                        other.querySelector('.sj-rank').textContent = r.rank_with;
+                        let n = 0;
+                        document.querySelectorAll('tr[data-sid] .sj-srl').forEach(function (td) { td.textContent = ++n; });
+                        tr.style.transition = 'background .6s'; tr.style.background = '#fff3cd';
+                        setTimeout(function () { tr.style.background = ''; }, 700);
+                    })
+                    .catch(fallback);
+            }
             function sjDeleteRow(id) {
                 if (!confirm('মুছে ফেলবেন?')) return;
                 document.getElementById('sjDeleteId').value = id;

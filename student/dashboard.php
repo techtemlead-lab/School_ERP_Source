@@ -99,7 +99,7 @@ try {
             $r_att_map = [];
             foreach ($r_at->fetchAll() as $row) { $r_att_map[$row['subject_id']][$row['part_id']] = $row['status']; }
 
-            $r_result = rc_student_result($r_defs, $r_marks_map, $r_att_map, $r_grade_bands);
+            $r_result = rc_student_result($r_defs, $r_marks_map, $r_att_map, $r_grade_bands, rc_excluded_subjects($pdo, $r_defs, (int) $rterm['id'], (int) $student['id']));
             $result_gpa = $r_result['overall_fail'] ? 0.0 : $r_result['overall_gpa'];
             $result_percentage = $r_result['percentage'];
             $result_fail = $r_result['overall_fail'];

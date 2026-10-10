@@ -16,8 +16,12 @@ if (!isset($_SESSION['admin_logged'])) {
 }
 
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../config/portal_access.php';
+erp_portal_require_role($pdo, 'admin', 'result_attendance_exam');
+require_once __DIR__ . '/../../config/subject_rank.php'; subject_rank_ensure($pdo);
 require_once __DIR__ . '/../../config/branch_scope.php';
 require_once __DIR__ . '/../../config/permissions.php';
+require_once __DIR__ . '/../../config/exam_att_grid.php';
 
 if (!perm_page_allowed($pdo, 'result_attendance_exam')) {
     http_response_code(403);
@@ -25,6 +29,7 @@ if (!perm_page_allowed($pdo, 'result_attendance_exam')) {
     echo json_encode(['success' => false, 'message' => 'এই পেজ দেখার অনুমতি নেই।']);
     exit();
 }
+perm_write_guard($pdo, 'result_attendance_exam'); // Read-only ইউজারের সেভ আটকায়
 
 function axv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 
@@ -50,7 +55,9 @@ if ($action === 'sections') {
     foreach ($sections as $s) {
         $result[] = ['id' => (int) $s['id'], 'name' => $s['section_name']];
     }
-    echo json_encode(['success' => true, 'sections' => $result], JSON_UNESCAPED_UNICODE);
+    $groups = [];
+    foreach (($class_id > 0 ? ee_groups_of_class($pdo, $class_id) : []) as $gid => $gn) { $groups[] = ['id' => (int) $gid, 'name' => $gn]; }
+    echo json_encode(['success' => true, 'sections' => $result, 'groups' => $groups], JSON_UNESCAPED_UNICODE);
     exit();
 }
 
@@ -101,107 +108,7 @@ if ($action === 'table') {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
 
-    $current_session = $pdo->query("SELECT * FROM academic_sessions WHERE is_current_session = 1 LIMIT 1")->fetch();
-    $current_session_id = $current_session ? (int) $current_session['id'] : 0;
-
-    $sel_class   = (int) ($_GET['class_id'] ?? 0);
-    $sel_shift   = (int) ($_GET['shift_id'] ?? 0);
-    $sel_section = (int) ($_GET['section_id'] ?? 0);
-    $sel_term    = (int) ($_GET['term_id'] ?? 0);
-    $sel_part    = (int) ($_GET['part_id'] ?? 0);
-
-    $all_selected = ($sel_class > 0 && $sel_shift > 0 && $sel_section > 0 && $sel_term > 0 && $sel_part > 0);
-    $subjects = [];
-    $students = [];
-    $existing = []; // [student_id][subject_id] = status
-
-    if ($all_selected) {
-        $sub_stmt = $pdo->prepare("SELECT id, subject_name FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY subject_name ASC");
-        $sub_stmt->execute([$sel_class]);
-        $subjects = $sub_stmt->fetchAll();
-
-        $rae_where = ['class_id=?', 'shift_id=?', 'section_id=?', "status='Active'"];
-        $rae_params = [$sel_class, $sel_shift, $sel_section];
-        branch_apply_filter($rae_where, $rae_params);
-        $stu_stmt = $pdo->prepare(
-            "SELECT id, roll_no, name_en FROM students
-             WHERE " . implode(' AND ', $rae_where) . "
-             ORDER BY (roll_no + 0) ASC, roll_no ASC"
-        );
-        $stu_stmt->execute($rae_params);
-        $students = $stu_stmt->fetchAll();
-
-        if ($subjects && $students) {
-            $ex_stmt = $pdo->prepare("SELECT student_id, subject_id, status FROM exam_attendance_subject WHERE term_id=? AND part_id=? AND class_id=? AND shift_id=? AND section_id=?");
-            $ex_stmt->execute([$sel_term, $sel_part, $sel_class, $sel_shift, $sel_section]);
-            foreach ($ex_stmt->fetchAll() as $row) {
-                $existing[(int) $row['student_id']][(int) $row['subject_id']] = $row['status'];
-            }
-        }
-    }
-    ?>
-    <?php if (!$all_selected): ?>
-        <div class="text-center text-muted py-4">উপরে Class, Shift, Section, Exam Term এবং Exam Part সিলেক্ট করুন — তাহলে স্টুডেন্ট লিস্ট এখানে দেখাবে।</div>
-    <?php elseif (!$subjects): ?>
-        <div class="text-center text-muted py-4">এই ক্লাসের জন্য কোনো Subject পাওয়া যায়নি।</div>
-    <?php elseif (!$students): ?>
-        <div class="text-center text-muted py-4">এই Class/Shift/Section এ কোনো Active Student পাওয়া যায়নি।</div>
-    <?php else: ?>
-        <form method="POST" action="index.php?page=result_attendance_exam">
-            <?php echo csrf_field(); ?>
-            <input type="hidden" name="class_id" value="<?php echo $sel_class; ?>">
-            <input type="hidden" name="shift_id" value="<?php echo $sel_shift; ?>">
-            <input type="hidden" name="section_id" value="<?php echo $sel_section; ?>">
-            <input type="hidden" name="term_id" value="<?php echo $sel_term; ?>">
-            <input type="hidden" name="part_id" value="<?php echo $sel_part; ?>">
-            <?php foreach ($subjects as $sub): ?>
-                <input type="hidden" name="grid_subject_id[]" value="<?php echo (int) $sub['id']; ?>">
-            <?php endforeach; ?>
-
-            <div class="table-responsive">
-                <table class="table table-bordered align-middle text-center">
-                    <thead class="table-light">
-                        <tr>
-                            <th>Sl.</th>
-                            <th>Roll</th>
-                            <th class="text-start">Name</th>
-                            <?php foreach ($subjects as $sub): ?>
-                                <th>
-                                    <div class="small text-muted mb-1">All</div>
-                                    <input type="checkbox" class="form-check-input axcol-all" data-subject="<?php echo (int) $sub['id']; ?>" onclick="toggleAxColumn(<?php echo (int) $sub['id']; ?>, this)">
-                                </th>
-                            <?php endforeach; ?>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php $srl = 1; foreach ($students as $stu): $stid = (int) $stu['id']; ?>
-                            <tr>
-                                <td><?php echo $srl++; ?></td>
-                                <td><?php echo axv($stu['roll_no']); ?></td>
-                                <td class="text-start"><?php echo axv($stu['name_en']); ?></td>
-                                <input type="hidden" name="student_id[]" value="<?php echo $stid; ?>">
-                                <?php foreach ($subjects as $sub):
-                                    $sid = (int) $sub['id'];
-                                    $status = $existing[$stid][$sid] ?? 'Absent';
-                                    $checked = $status === 'Present';
-                                ?>
-                                    <td>
-                                        <div class="small text-muted mb-1"><?php echo axv($sub['subject_name']); ?></div>
-                                        <input type="checkbox" class="form-check-input ax-cb ax-col-<?php echo $sid; ?>" name="present[<?php echo $stid; ?>][<?php echo $sid; ?>]" value="1" <?php echo $checked ? 'checked' : ''; ?>>
-                                    </td>
-                                <?php endforeach; ?>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="d-flex justify-content-center mt-4">
-                <button type="submit" name="save_attendance" class="btn btn-primary px-5 fw-bold" style="background-color:#1e3a8a;border-color:#1e3a8a;">Save Attendance</button>
-            </div>
-        </form>
-    <?php endif; ?>
-    <?php
+    ea_render_grid($pdo, (int) ($_GET['class_id'] ?? 0), (int) ($_GET['shift_id'] ?? 0), (int) ($_GET['section_id'] ?? 0), (int) ($_GET['term_id'] ?? 0), (int) ($_GET['part_id'] ?? 0), (int) ($_GET['group_id'] ?? 0));
     exit();
 }
 

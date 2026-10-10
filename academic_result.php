@@ -8,6 +8,7 @@
 require_once __DIR__ . '/config/runtime.php';
 erp_session_start();
 require_once __DIR__ . '/config/db.php';
+require_once __DIR__ . '/config/subject_rank.php'; subject_rank_ensure($pdo);
 require_once __DIR__ . '/config/lang.php';
 
 // রেজাল্ট মডিউলের টেবিলগুলো (exam_terms, exam_parts ইত্যাদি) শুধু তখনই তৈরি হয় যখন
@@ -46,10 +47,19 @@ function calc_student_result(PDO $pdo, array $student, int $term_id, int $part_i
          FROM exam_assign_subjects eas
          LEFT JOIN academic_subjects asub ON asub.id = eas.subject_id
          WHERE eas.class_id = ? AND eas.term_id = ? AND eas.part_id = ? AND eas.status = 'Active'
-         ORDER BY asub.subject_name ASC"
+         ORDER BY asub.sort_order ASC, asub.id ASC"
     );
     $subj_stmt->execute([(int) $student['class_id'], $term_id, $part_id]);
     $subject_cols = $subj_stmt->fetchAll();
+    // ধর্মভিত্তিক Subject (ইসলাম/হিন্দু ধর্ম শিক্ষা ইত্যাদি): ভিন্ন ধর্মের শিক্ষার্থীর জন্য বাদ — GPA ভাগও সেই অনুযায়ী
+    require_once __DIR__ . '/config/subject_religion.php';
+    if ($subject_cols) {
+        $sr_map = sr_subject_map($pdo, array_column($subject_cols, 'subject_id'));
+        $stu_r = (string) ($student['religion'] ?? '');
+        $subject_cols = array_values(array_filter($subject_cols, function ($c) use ($sr_map, $stu_r) {
+            return sr_applicable($sr_map[(int) $c['subject_id']] ?? '', $stu_r);
+        }));
+    }
 
     $grade_stmt = $pdo->prepare("SELECT grade_letter, gpa, mark_from, mark_to FROM exam_grade_points WHERE session_id = ? ORDER BY mark_from DESC");
     $grade_stmt->execute([$session_id]);

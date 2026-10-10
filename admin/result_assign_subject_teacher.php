@@ -143,7 +143,7 @@ $class_subjects = [];
 $assigned_subject_ids = [];
 $routine_subject_ids = [];
 if ($selected_teacher && $sel_class > 0) {
-    $subj_stmt = $pdo->prepare("SELECT id, subject_name FROM academic_subjects WHERE class_id = ? AND status = 'Active' ORDER BY subject_name ASC");
+    $subj_stmt = $pdo->prepare("SELECT id, subject_name FROM academic_subjects WHERE class_id = ? AND status = 'Active' ORDER BY sort_order ASC, id ASC");
     $subj_stmt->execute([$sel_class]);
     $class_subjects = $subj_stmt->fetchAll();
 

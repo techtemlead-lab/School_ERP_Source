@@ -25,6 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['claim_action'])) {
         $c_stmt = $pdo->prepare("SELECT * FROM exam_fee_online_claims WHERE id = ? AND status = 'Pending' LIMIT 1");
         $c_stmt->execute([$claim_id]);
         $claim = $c_stmt->fetch();
+        if ($claim && !branch_student_ok($pdo, (int) $claim['student_id'])) { $claim = false; }
 
         if (!$claim) {
             $_SESSION['efc_err'] = 'এই সাবমিশন আর Pending নেই।';
@@ -62,7 +63,7 @@ $pending_stmt = $pdo->query(
      LEFT JOIN students ON students.id = exam_fee_online_claims.student_id
      LEFT JOIN exam_terms ON exam_terms.id = exam_fee_online_claims.term_id
      LEFT JOIN finance_account_heads ON finance_account_heads.id = exam_fee_online_claims.ac_head_id
-     WHERE exam_fee_online_claims.status = 'Pending'
+     WHERE exam_fee_online_claims.status = 'Pending'" . branch_sql_inline('students.branch_id') . "
      ORDER BY exam_fee_online_claims.submitted_at DESC"
 );
 $pending_list = $pending_stmt->fetchAll();
@@ -72,7 +73,7 @@ $recent_stmt = $pdo->query(
      FROM exam_fee_online_claims
      LEFT JOIN students ON students.id = exam_fee_online_claims.student_id
      LEFT JOIN exam_terms ON exam_terms.id = exam_fee_online_claims.term_id
-     WHERE exam_fee_online_claims.status != 'Pending'
+     WHERE exam_fee_online_claims.status != 'Pending'" . branch_sql_inline('students.branch_id') . "
      ORDER BY exam_fee_online_claims.verified_at DESC LIMIT 20"
 );
 $recent_list = $recent_stmt->fetchAll();

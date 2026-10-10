@@ -9,14 +9,16 @@
 if (!function_exists('rc_get_subject_defs')) {
 function rc_get_subject_defs(PDO $pdo, int $class_id, int $term_id, int $part_id): array
 {
+    require_once __DIR__ . '/subject_rank.php'; subject_rank_ensure($pdo);
     $sql = "SELECT eas.part_id, eas.subject_id, eas.full_mark_exam, eas.pass_mark_exam, eas.pass_individual, eas.fail_on_absent,
                    asub.subject_name, asub.subject_type, asub.optional_count
             FROM exam_assign_subjects eas
-            LEFT JOIN academic_subjects asub ON asub.id = eas.subject_id
+            INNER JOIN academic_subjects asub ON asub.id = eas.subject_id
             WHERE eas.class_id = ? AND eas.term_id = ? AND eas.status = 'Active'";
+    // INNER JOIN: Subject মুছে ফেলার পরেও exam_assign_subjects-এ পড়ে থাকা "এতিম" রেকর্ড (নামহীন ব্ল্যাংক সাবজেক্ট) রিপোর্ট কার্ডে আসবে না
     $params = [$class_id, $term_id];
     if ($part_id) { $sql .= " AND eas.part_id = ?"; $params[] = $part_id; }
-    $sql .= " ORDER BY asub.subject_name ASC, eas.part_id ASC";
+    $sql .= " ORDER BY asub.sort_order ASC, asub.id ASC, eas.part_id ASC";
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
 
@@ -46,6 +48,7 @@ function rc_calc_subject_totals(array $parts_def, array $marks_by_part, array $a
     $full = 0.0; $obtained = 0.0; $fail = false;
     foreach ($parts_def as $pid => $pinfo) {
         $pfull = (float) $pinfo['full_mark_exam'];
+        if ($pfull <= 0) { continue; } // Full Mark 0 মানে এই Part এই সাবজেক্টে নেই (যেমন MCQ 0) — Fail/Total এ ধরা হবে না
         $full += $pfull;
         $mark = $marks_by_part[$pid] ?? null;
         $att_status = $att_by_part[$pid] ?? 'Present';
@@ -88,8 +91,67 @@ function rc_apply_optional_bonus(float $base_gpa, float $base_gl_gpa_add, array 
 }
 }
 
+if (!function_exists('rc_excluded_subjects')) {
+/**
+ * এই শিক্ষার্থীর জন্য যেসব Subject রেজাল্টে ধরা হবে না তার তালিকা [subject_id => true]।
+ *  ১) Subject-এর Group শিক্ষার্থীর Group-এর সাথে না মিললে (যেমন Humanities-এর স্টুডেন্টের জন্য Science Group-এর Subject)
+ *     — Group-ছাড়া কমন/Class-wise Subject সবসময় থাকে।
+ *  ২) ধর্মভিত্তিক Subject (academic_subjects.religion) শিক্ষার্থীর ধর্মের সাথে না মিললে।
+ *  ৩) Exam Eligibility-তে এই Term-এ এই Subject-এ Eligible = No (is_eligible = 0) সেভ করা থাকলে।
+ */
+function rc_excluded_subjects(PDO $pdo, array $defs, int $term_id, int $student_id): array
+{
+    $stu_group = []; $sub_group = []; $elig = [];
+    $ex = [];
+    if (!$defs || $student_id <= 0) { return $ex; }
+
+    if (!array_key_exists($student_id, $stu_group)) {
+        try {
+            $q = $pdo->prepare("SELECT group_id FROM students WHERE id = ?");
+            $q->execute([$student_id]);
+            $stu_group[$student_id] = (int) $q->fetchColumn();
+        } catch (Throwable $e) { $stu_group[$student_id] = 0; }
+    }
+    $missing = [];
+    foreach (array_keys($defs) as $sid) { if (!array_key_exists((int) $sid, $sub_group)) { $missing[] = (int) $sid; } }
+    if ($missing) {
+        try {
+            $in = implode(',', $missing);
+            foreach ($pdo->query("SELECT id, group_id FROM academic_subjects WHERE id IN ($in)")->fetchAll() as $r) {
+                $sub_group[(int) $r['id']] = (int) $r['group_id'];
+            }
+        } catch (Throwable $e) {}
+        foreach ($missing as $m) { if (!array_key_exists($m, $sub_group)) { $sub_group[$m] = 0; } }
+    }
+    $ek = $term_id . '_' . $student_id;
+    if (!isset($elig[$ek])) {
+        $elig[$ek] = [];
+        try {
+            $q = $pdo->prepare("SELECT subject_id FROM exam_eligibility WHERE term_id = ? AND student_id = ? AND is_eligible = 0");
+            $q->execute([$term_id, $student_id]);
+            foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $x) { $elig[$ek][(int) $x] = true; }
+        } catch (Throwable $e) {}
+    }
+
+    // ৩) ধর্মভিত্তিক Subject: Subject-এর religion ফাঁকা না হলে শুধু ঐ ধর্মের শিক্ষার্থীর জন্য
+    require_once __DIR__ . '/subject_religion.php';
+    $sub_rel = sr_subject_map($pdo, array_keys($defs));
+    $stu_rel = sr_student_religion($pdo, [$student_id])[$student_id] ?? '';
+
+    $tg = $stu_group[$student_id];
+    foreach (array_keys($defs) as $sid) {
+        $sid = (int) $sid;
+        $sg = $sub_group[$sid] ?? 0;
+        if ($sg !== 0 && $tg !== 0 && $sg !== $tg) { $ex[$sid] = true; continue; }
+        if (!sr_applicable($sub_rel[$sid] ?? '', $stu_rel)) { $ex[$sid] = true; continue; }
+        if (!empty($elig[$ek][$sid])) { $ex[$sid] = true; }
+    }
+    return $ex;
+}
+}
+
 if (!function_exists('rc_student_result')) {
-function rc_student_result(array $defs, array $marks_map, array $att_map, array $grade_bands): array
+function rc_student_result(array $defs, array $marks_map, array $att_map, array $grade_bands, array $exclude = []): array
 {
     // Compulsory / Continuous Assessment subject-গুলোই Total, % ও মূল GPA নির্ধারণ করে।
     // Optional subject-এর মার্ক Total-এ যোগ হয় না — শুধু (Optional GP − deduct) মূল GPA-তে যোগ হয়,
@@ -101,6 +163,7 @@ function rc_student_result(array $defs, array $marks_map, array $att_map, array 
     $opt_full = 0.0; $opt_obt = 0.0;
 
     foreach ($defs as $sid => $def) {
+        if (!empty($exclude[$sid])) { continue; } // অন্য Group-এর / Not Eligible Subject রেজাল্টে আসবে না
         $is_opt = (($def['subject_type'] ?? 'Compulsory') === 'Optional');
 
         // Optional subject শিক্ষার্থী নেয়নি (কোনো Part-এ মার্কই এন্ট্রি নেই, Absent-ও না) — সারি থাকে কিন্তু হিসাবে ধরা হয় না
@@ -111,7 +174,7 @@ function rc_student_result(array $defs, array $marks_map, array $att_map, array 
             }
             if (!$taken) {
                 $subject_rows[] = [
-                    'sl' => $srl++, 'name' => $def['name'], 'gl' => '-', 'gp' => 0.00,
+                    'sl' => $srl++, 'subject_id' => (int) $sid, 'name' => $def['name'], 'gl' => '-', 'gp' => 0.00,
                     'fail' => false, 'absent' => false, 'obtained' => 0.0, 'full' => 0.0,
                     'optional' => true, 'not_taken' => true, 'opt_gp_add' => 0.0,
                 ];
@@ -145,7 +208,7 @@ function rc_student_result(array $defs, array $marks_map, array $att_map, array 
         }
 
         $subject_rows[] = [
-            'sl' => $srl++, 'name' => $def['name'], 'gl' => $subj_gl, 'gp' => $subj_gp,
+            'sl' => $srl++, 'subject_id' => (int) $sid, 'name' => $def['name'], 'gl' => $subj_gl, 'gp' => $subj_gp,
             'fail' => $sfail, 'absent' => false, 'obtained' => $sobt, 'full' => $sfull,
             'optional' => $is_opt, 'not_taken' => false, 'opt_gp_add' => $opt_add,
         ];
@@ -432,7 +495,7 @@ function rc_aggregate_terms_result(PDO $pdo, int $student_id, array $term_ids, i
         $att_map = [];
         foreach ($at->fetchAll() as $r) { $att_map[$r['subject_id']][$r['part_id']] = $r['status']; }
 
-        $res = rc_student_result($defs, $marks_map, $att_map, $grade_bands);
+        $res = rc_student_result($defs, $marks_map, $att_map, $grade_bands, rc_excluded_subjects($pdo, $defs, (int) $term_id, (int) $student_id));
 
         $per_term[$term_id] = [
             'obtained_total' => $res['obtained_total'], 'full_total' => $res['full_total'],
@@ -440,9 +503,10 @@ function rc_aggregate_terms_result(PDO $pdo, int $student_id, array $term_ids, i
             'opt_gpa_add' => $res['optional_gpa_add'] ?? 0.0,
         ];
 
-        $i = 0;
+        $sr_map = array_column($res['subject_rows'], null, 'subject_id');
         foreach ($defs as $sid => $def) {
-            $sr = $res['subject_rows'][$i++];
+            $sr = $sr_map[$sid] ?? null;
+            if ($sr === null) { continue; } // Group-এর নয় / Not Eligible
             if (!empty($sr['not_taken'])) { continue; } // এই Term-এ Optional subject নেয়নি
             if (!isset($subject_union[$sid])) { $subject_union[$sid] = ['name' => $def['name'], 'entries' => [], 'optional' => !empty($sr['optional'])]; }
             $part_entries = [];

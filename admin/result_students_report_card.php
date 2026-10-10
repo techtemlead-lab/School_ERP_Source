@@ -81,6 +81,9 @@ $pdo->exec(
 
 // Master Setting-এর টগলগুলো (না থাকলে সেফ ডিফল্ট — সব On)
 $rc_settings = $pdo->query("SELECT * FROM exam_result_settings WHERE id = 1")->fetch() ?: [];
+// Student/Guardian পোর্টাল (student/report_card.php) এই পেজটাই include করে; তখন ফিল্টার ফর্ম লুকানো থাকে
+// আর ছাত্র শুধু নিজের Report Card দেখে (student/report_card.php আগেই $_GET ফিক্স করে দেয়)।
+$RC_STUDENT_VIEW = !empty($GLOBALS['SP_RC_STUDENT_VIEW']);
 function rcs(array $s, string $key, $default = 1): bool
 {
     return isset($s[$key]) ? ((int) $s[$key] === 1) : ((int) $default === 1);
@@ -110,7 +113,7 @@ $rc_template = $rc_settings['report_card_template'] ?? 'Govt. / MPO';
 $current_session = $pdo->query("SELECT * FROM academic_sessions WHERE is_current_session = 1 LIMIT 1")->fetch();
 $current_session_id = $current_session ? (int) $current_session['id'] : 0;
 
-$institute = $pdo->query("SELECT institute_name, logo_path, banner_path, phone_number, eiin_no FROM institute_settings WHERE id = 1")->fetch();
+$institute = $pdo->query("SELECT * FROM institute_settings WHERE id = 1")->fetch();
 $fr_bid2 = branch_current_id();
 if ($fr_bid2 !== null) {
     $branch_stmt2 = $pdo->prepare("SELECT * FROM branches WHERE id = ? LIMIT 1");
@@ -133,6 +136,7 @@ $sections = $pdo->query("SELECT id, section_name, class_id, shift_id FROM academ
 $groups   = $pdo->query("SELECT id, group_name, class_id FROM academic_groups WHERE status = 'Active' ORDER BY group_name ASC")->fetchAll();
 $asr_where = ["status = 'Active'"]; $asr_params = [];
 branch_apply_filter($asr_where, $asr_params);
+if (function_exists('ct_scope_active') && ct_scope_active()) { ct_scope_apply_where($asr_where); }
 $asr_stmt = $pdo->prepare("SELECT id, student_id, roll_no, name_en, class_id, shift_id, section_id FROM students WHERE " . implode(' AND ', $asr_where) . " ORDER BY name_en ASC");
 $asr_stmt->execute($asr_params);
 $all_students = $asr_stmt->fetchAll();
@@ -144,6 +148,15 @@ $parts = $current_session_id
     ? $pdo->prepare("SELECT id, part_name FROM exam_parts WHERE session_id = ? AND status = 'Active' ORDER BY rank ASC")
     : null;
 if ($parts) { $parts->execute([$current_session_id]); $parts = $parts->fetchAll(); } else { $parts = []; }
+
+
+// Class Teacher স্কোপ (Teacher Portal > My Class): শুধু নিজের Class/Section, শুধু Publish হওয়া Term
+if (function_exists('ct_scope_active') && ct_scope_active()) {
+    $classes  = ct_scope_filter_classes($classes);
+    $sections = ct_scope_filter_sections($sections);
+    $terms    = ct_scope_published_terms($pdo, $terms);
+    ct_scope_sanitize_get(array_map(fn($t) => (int) $t['id'], $terms));
+}
 
 // -----------------------------------------------------------
 // GET ফিল্টার
@@ -158,6 +171,11 @@ $f_part_id    = (int) ($_GET['part_id'] ?? 0);
 $f_student_id = (int) ($_GET['student_id'] ?? 0);
 $show_merit   = isset($_GET['search_result']) ? isset($_GET['show_merit']) : true;
 $searched     = isset($_GET['search_result']);
+// Class Teacher স্কোপে অন্য ক্লাসের স্টুডেন্ট আইডি দিলে ব্লক
+if ($f_student_id && function_exists('ct_scope_active') && ct_scope_active()
+    && !in_array($f_student_id, array_map('intval', array_column($all_students, 'id')), true)) {
+    $f_student_id = -1;
+}
 
 $reports = [];
 $no_subjects_assigned = false;
@@ -192,6 +210,7 @@ if ($searched && $f_class_id && $f_term_id) {
             $rc_bf_where = []; $rc_bf_params = [];
             branch_apply_filter($rc_bf_where, $rc_bf_params);
             if ($rc_bf_where) { $sql .= ' AND ' . implode(' AND ', $rc_bf_where); $params = array_merge($params, $rc_bf_params); }
+            if (function_exists('ct_scope_active') && ct_scope_active()) { $sql .= ' AND ' . ct_scope_sql(''); }
             $sql .= " ORDER BY roll_no ASC, name_en ASC";
             $tgt = $pdo->prepare($sql);
             $tgt->execute($params);
@@ -234,7 +253,7 @@ if ($searched && $f_class_id && $f_term_id) {
                 $stu_row = $stu_info_stmt->fetch();
                 if (!$stu_row) { continue; }
 
-                $result = rc_student_result($defs, $marks_all[$sid_target] ?? [], $att_all[$sid_target] ?? [], $grade_bands);
+                $result = rc_student_result($defs, $marks_all[$sid_target] ?? [], $att_all[$sid_target] ?? [], $grade_bands, rc_excluded_subjects($pdo, $defs, (int) $f_term_id, (int) $sid_target));
 
                 // "Show Working Days & Attend Absent" টগলের জন্য — অটো হিসাব, ম্যানুয়াল এন্ট্রির
                 // দরকার নেই। student_daily_attendance টেবিল থেকে Present/Absent কাউন্ট করে
@@ -289,7 +308,7 @@ if ($searched && $f_class_id && $f_term_id) {
 
                         $totals = [];
                         foreach ($cls_stu_ids as $csid) {
-                            $cres = rc_student_result($defs, $marks_cls[$csid] ?? [], $att_cls[$csid] ?? [], $grade_bands);
+                            $cres = rc_student_result($defs, $marks_cls[$csid] ?? [], $att_cls[$csid] ?? [], $grade_bands, rc_excluded_subjects($pdo, $defs, (int) $f_term_id, (int) $csid));
                             $totals[$csid] = ['total' => $cres['obtained_total'], 'gpa' => $cres['overall_gpa'], 'fail' => $cres['overall_fail']];
                         }
                         $class_total_count = count($totals);
@@ -330,9 +349,9 @@ if ($searched) {
 } else {
     $term_name = '';
 }
+
 ?>
 <style>
-    @media print { .no-print { display: none !important; } body { background: #fff; } }
     .rc-wrap { border: 2px solid #333; padding: 24px; max-width: 950px; margin: 0 auto; }
     .rc-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
     .rc-center { text-align: center; flex: 1; }
@@ -380,8 +399,66 @@ if ($searched) {
     .rc-remarks.rc-pass { border-color: #16a34a; color: #16a34a; }
     .rc-remarks.rc-fail { border-color: #dc2626; color: #dc2626; }
     .rc-blank-box { border: 1px dashed #999; border-radius: 4px; padding: 10px 12px; margin-top: 12px; font-size: 13px; min-height: 34px; }
+
+    /* ---- Print: must stay LAST so it overrides the base rules above ---- */
+    @media print {
+        @page { size: <?php echo $rc_template === 'School (Classic)' ? 'A4 landscape' : 'A4 portrait'; ?>; margin: 8mm; }
+        * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        html, body { background: #fff !important; height: auto !important; overflow: visible !important; }
+        .no-print, .sidebar, .sticky-top-area, .top-navbar, .breadcrumb-bar, footer, .alert { display: none !important; }
+        .main-wrapper, .main-wrapper.expanded { margin-left: 0 !important; width: 100% !important; min-height: 0 !important; padding: 0 !important; }
+        .content-body { padding: 0 !important; margin: 0 !important; }
+        .card-custom { box-shadow: none !important; border: none !important; padding: 0 !important; margin: 0 !important; }
+        .rc-wrap { page-break-inside: avoid; break-inside: avoid; }
+        .rc-wrap + .rc-wrap { page-break-before: always; }
+        .sc-sheet { margin: 0 auto !important; page-break-inside: avoid; }
+        .rc-wrap { max-width: none !important; width: 100%; box-sizing: border-box; padding: 10px 12px !important; margin: 0 !important; overflow: hidden; }
+        .rc-top { gap: 8px; }
+        .rc-center h4 { font-size: 18px; margin-bottom: 2px; }
+        .rc-center .addr, .rc-center .phone, .rc-center .web { font-size: 11px; margin-bottom: 1px; line-height: 1.25; }
+        .rc-center img { max-height: 46px !important; }
+        .rc-badge { margin: 3px 0 4px; padding: 3px 12px; font-size: 12px; }
+        .rc-photo-block img.rc-photo { width: 70px; height: 70px; }
+        .rc-scale table { font-size: 9.5px; line-height: 1.15; }
+        .rc-scale th, .rc-scale td { padding: 1px 4px; }
+        .rc-info { font-size: 12px; margin: 6px 0; line-height: 1.25; }
+        .rc-info .row-line { margin-bottom: 2px; }
+        .rc-info .lbl { width: 120px; }
+        .rc-subj-table { table-layout: auto; margin-top: 4px; }
+        .rc-subj-table th, .rc-subj-table td { padding: 3px 4px; font-size: 11px; line-height: 1.2; width: auto !important; }
+        .rc-subj-table thead { display: table-header-group; }
+        .rc-subj-table tr { page-break-inside: avoid; break-inside: avoid; }
+        .rc-extra-row, .rc-summary-box, .rc-remarks, .rc-blank-box { margin-top: 6px; font-size: 11px; padding: 4px 8px; min-height: 0; gap: 6px; }
+        .rc-extra-row { padding: 0; }
+        .rc-signatures { margin-top: 28px; font-size: 11px; page-break-inside: avoid; }
+        .rc-position { margin-top: 6px; font-size: 12px; }
+    }
+    /* same compact sizing while JS measures height (beforeprint) */
+    body.rc-printing .rc-wrap { width: 194mm; }
+    body.rc-printing .rc-wrap { max-width: none !important; width: 100%; box-sizing: border-box; padding: 10px 12px !important; margin: 0 !important; overflow: hidden; }
+    body.rc-printing .rc-top { gap: 8px; }
+    body.rc-printing .rc-center h4 { font-size: 18px; margin-bottom: 2px; }
+    body.rc-printing .rc-center .addr,body.rc-printing .rc-center .phone,body.rc-printing .rc-center .web { font-size: 11px; margin-bottom: 1px; line-height: 1.25; }
+    body.rc-printing .rc-center img { max-height: 46px !important; }
+    body.rc-printing .rc-badge { margin: 3px 0 4px; padding: 3px 12px; font-size: 12px; }
+    body.rc-printing .rc-photo-block img.rc-photo { width: 70px; height: 70px; }
+    body.rc-printing .rc-scale table { font-size: 9.5px; line-height: 1.15; }
+    body.rc-printing .rc-scale th,body.rc-printing .rc-scale td { padding: 1px 4px; }
+    body.rc-printing .rc-info { font-size: 12px; margin: 6px 0; line-height: 1.25; }
+    body.rc-printing .rc-info .row-line { margin-bottom: 2px; }
+    body.rc-printing .rc-info .lbl { width: 120px; }
+    body.rc-printing .rc-subj-table { table-layout: auto; margin-top: 4px; }
+    body.rc-printing .rc-subj-table th,body.rc-printing .rc-subj-table td { padding: 3px 4px; font-size: 11px; line-height: 1.2; width: auto !important; }
+    body.rc-printing .rc-subj-table thead { display: table-header-group; }
+    body.rc-printing .rc-subj-table tr { page-break-inside: avoid; break-inside: avoid; }
+    body.rc-printing .rc-extra-row,body.rc-printing .rc-summary-box,body.rc-printing .rc-remarks,body.rc-printing .rc-blank-box { margin-top: 6px; font-size: 11px; padding: 4px 8px; min-height: 0; gap: 6px; }
+    body.rc-printing .rc-extra-row { padding: 0; }
+    body.rc-printing .rc-signatures { margin-top: 28px; font-size: 11px; page-break-inside: avoid; }
+    body.rc-printing .rc-position { margin-top: 6px; font-size: 12px; }
+    body.rc-printing .rc-wrap { width: 194mm; }
 </style>
 
+<?php if (!$RC_STUDENT_VIEW): ?>
 <div class="card-custom no-print">
     <form method="GET" action="index.php" id="rcFilterForm">
         <input type="hidden" name="page" value="result_students_report_card">
@@ -500,8 +577,9 @@ if ($searched) {
         </div>
     </form>
 </div>
+<?php endif; ?>
 
-<?php if (!$terms): ?>
+<?php if (!$terms && !$RC_STUDENT_VIEW): ?>
     <div class="alert alert-warning mt-3 no-print">
         এই সেশনের জন্য কোনো <strong>Exam Term</strong> সেট করা নেই। রেজাল্ট দেখার আগে
         <a href="index.php?page=result_exam_terms">Exam Terms</a> পেজ থেকে একটা Term যোগ করুন।
@@ -509,7 +587,9 @@ if ($searched) {
 <?php endif; ?>
 
 <?php if ($searched): ?>
-    <?php if ($no_subjects_assigned): ?>
+    <?php if ($RC_STUDENT_VIEW && ($no_subjects_assigned || empty($grade_bands))): ?>
+        <div class="alert alert-info mt-3 no-print">এই পরীক্ষার ফলাফল এখনো প্রস্তুত হয়নি। কিছুদিন পর আবার দেখুন।</div>
+    <?php elseif ($no_subjects_assigned): ?>
         <div class="alert alert-warning mt-3 no-print">
             এই Class/Term<?php echo $f_part_id ? '/Part' : ''; ?>-এর জন্য কোনো Subject Assign করা নেই। আগে
             <a href="index.php?page=result_assign_exams">Assign Exam</a> পেজ থেকে Subject Assign করুন।
@@ -578,7 +658,7 @@ if ($searched) {
                     <h4><?php echo rcv($inst_display_name); ?></h4>
                     <?php if ($addr_line !== ''): ?><p class="addr">(<?php echo rcv($addr_line); ?>)</p><?php endif; ?>
                     <?php if ($inst_phone !== ''): ?><p class="phone">Phone: <?php echo rcv($inst_phone); ?></p><?php endif; ?>
-                    <p class="web">www.yourschool.com</p>
+                    <?php if (!empty($institute['website'])): ?><p class="web"><?php echo htmlspecialchars((string) $institute['website']); ?></p><?php endif; ?>
                     <div class="rc-badge">Academic Transcript : <?php echo rcv($term_name); ?> <?php echo rcv($sheet_session_name); ?></div>
                 </div>
 
@@ -631,7 +711,7 @@ if ($searched) {
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($subject_rows as $sr): ?>
+                    <?php $rc_gi = 0; $rc_n = count($subject_rows); foreach ($subject_rows as $sr): ?>
                         <tr>
                             <td><?php echo (int) $sr['sl']; ?></td>
                             <td><?php echo rcv($sr['name']); ?></td>
@@ -642,18 +722,21 @@ if ($searched) {
                             <?php if ($RC_SUBJ_GP): ?>
                             <td><?php echo number_format($sr['gp'], 2); ?></td>
                             <?php endif; ?>
-                            <?php if ($RC_FINAL_GL_GP): ?>
-                            <td><?php echo $overall_fail ? '0' : rcv(rtrim(rtrim(number_format($overall_gpa, 2), '0'), '.')); ?></td>
-                            <td><?php echo $overall_fail ? '0' : rcv(rtrim(rtrim(number_format($overall_gpa, 2), '0'), '.')); ?></td>
+                            <?php if ($RC_FINAL_GL_GP && $rc_gi === 0): // মোট GPA একবারই — সব সারি জুড়ে একটা মার্জ করা ঘরে ?>
+                            <td rowspan="<?php echo max(1, $rc_n); ?>" style="vertical-align:middle;font-weight:700;font-size:16px;"><?php echo $overall_fail ? '0.00' : number_format($overall_gpa, 2); ?></td>
+                            <td rowspan="<?php echo max(1, $rc_n); ?>" style="vertical-align:middle;font-weight:700;font-size:16px;"><?php echo $overall_fail ? '0.00' : number_format($overall_gpa, 2); ?><div style="font-size:12px;font-weight:600;"><?php echo $overall_fail ? 'F' : rcv($overall_gl); ?></div></td>
                             <?php endif; ?>
                         </tr>
-                    <?php endforeach; ?>
+                    <?php $rc_gi++; endforeach; ?>
                 </tbody>
             </table>
 
             <div class="rc-extra-row">
                 <?php if ($RC_PART_PERCENT): ?>
                     <div class="rc-extra-item"><b>Marks Obtained</b><?php echo rcv(number_format($obtained_total, 2)); ?> / <?php echo rcv(number_format($full_total, 2)); ?> (<?php echo rcv(number_format($percentage, 2)); ?>%)</div>
+                <?php endif; ?>
+                <?php if ($RC_FINAL_GL_GP): ?>
+                    <div class="rc-extra-item"><b>Total GPA</b><?php echo $overall_fail ? '0.00 (F)' : rcv(number_format($overall_gpa, 2)) . ' (' . rcv($overall_gl) . ')'; ?></div>
                 <?php endif; ?>
                 <?php if ($RC_FAIL_COUNT): ?>
                     <div class="rc-extra-item"><b>Total Failed Subject(s)</b><?php echo (int) $fail_subject_count; ?></div>
@@ -723,6 +806,30 @@ if ($searched) {
         <?php endif; ?>
         <?php endforeach; ?>
 
+
+        <script>
+        (function () {
+            var PX = 96 / 25.4, availH = (297 - 16) * PX - 6;
+            function fit() {
+                document.body.classList.add('rc-printing');
+                document.querySelectorAll('.rc-wrap').forEach(function (w) {
+                    w.style.zoom = 1; w.style.width = '';
+                    var h = w.scrollHeight;
+                    if (h > availH) {
+                        var z = Math.max(0.5, availH / h);
+                        w.style.zoom = z;
+                        w.style.width = (100 / z) + '%';
+                    }
+                });
+            }
+            function reset() {
+                document.body.classList.remove('rc-printing');
+                document.querySelectorAll('.rc-wrap').forEach(function (w) { w.style.zoom = ''; w.style.width = ''; });
+            }
+            window.addEventListener('beforeprint', fit);
+            window.addEventListener('afterprint', reset);
+        })();
+        </script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
         <script>
             window.addEventListener('load', function () {
@@ -738,6 +845,7 @@ if ($searched) {
 <?php endif; ?>
 
 
+<?php if (!$RC_STUDENT_VIEW): ?>
 <script>
     function filterRcDependents() {
         const classId = document.getElementById('rcClassSelect').value;
@@ -777,3 +885,4 @@ if ($searched) {
     }
     filterRcDependents();
 </script>
+<?php endif; ?>

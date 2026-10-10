@@ -62,7 +62,7 @@
     .sc-sign-row div { flex: 1; }
     .sc-sign-row .sc-line { border-top: 1px solid #231f1a; margin-top: 34px; padding-top: 5px; color: #6b6154; }
     .sc-qr-eiin { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 10px; color: #6b6154; }
-    @media print { .sc-sheet { box-shadow: none; } @page { size: A4 landscape; margin: 6mm; } }
+    @media print { .sc-sheet { box-shadow: none; width: 100%; box-sizing: border-box; } }
 </style>
 
 <div class="sc-sheet"<?php echo ($rc_idx < count($reports) - 1) ? ' style="page-break-after: always;"' : ''; ?>>

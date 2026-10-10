@@ -52,6 +52,7 @@ $pdo->exec(
 $current_session = $pdo->query("SELECT * FROM academic_sessions WHERE is_current_session = 1 LIMIT 1")->fetch();
 $current_session_id = $current_session ? (int) $current_session['id'] : 0;
 
+require_once __DIR__ . '/../config/exam_att_grid.php';
 function asv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 
 // -----------------------------------------------------------
@@ -81,9 +82,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_attendance'])) {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE status = VALUES(status)"
         );
-        $count = 0;
+        $count = 0; $blocked = 0;
+        $gate = ea_subject_gate($pdo, $class_id, $term_id, $part_id, $subject_id, $shift_id, $section_id);
+        $del = $pdo->prepare("DELETE FROM exam_attendance_subject WHERE term_id=? AND part_id=? AND subject_id=? AND student_id=?");
         foreach ($statuses as $stid => $st) {
             $stid = (int) $stid;
+            if ($stid > 0 && (!$gate['assigned'] || empty($gate['ids'][$stid]))) {
+                $del->execute([$term_id, $part_id, $subject_id, $stid]); $blocked++; continue;
+            }
             $st = ($st === 'Present') ? 'Present' : 'Absent';
             if ($stid > 0) {
                 $stmt->execute([$current_session_id, $term_id, $part_id, $subject_id, $class_id, $shift_id, $section_id, $stid, $st]);
@@ -91,10 +97,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_attendance'])) {
             }
         }
         sec_log_activity($pdo, 'Result', 'Update', "ক্লাস আইডি {$class_id}, টার্ম আইডি {$term_id}, সাবজেক্ট আইডি {$subject_id} এর {$count} জন শিক্ষার্থীর Exam Attendance সংরক্ষণ করা হয়েছে");
-        $_SESSION['as_msg'] = $count . ' জন শিক্ষার্থীর Exam Attendance সেভ করা হয়েছে।';
+        $_SESSION['as_msg'] = $count . ' জন শিক্ষার্থীর Exam Attendance সেভ করা হয়েছে।' . ($blocked ? " ({$blocked} জন Eligible নয় বলে বাদ)" : '');
     }
 
-    header('Location: index.php?page=result_attendance_subject&class_id=' . $class_id . '&shift_id=' . $shift_id . '&section_id=' . $section_id . '&term_id=' . $term_id . '&part_id=' . $part_id . '&subject_id=' . $subject_id);
+    header('Location: index.php?page=result_attendance_subject&class_id=' . $class_id . '&shift_id=' . $shift_id . '&section_id=' . $section_id . '&term_id=' . $term_id . '&part_id=' . $part_id . '&subject_id=' . $subject_id . '&group_id=' . (int) ($_POST['group_id'] ?? 0));
     exit();
 }
 
@@ -107,6 +113,9 @@ $sel_section = (int) ($_GET['section_id'] ?? 0);
 $sel_term    = (int) ($_GET['term_id'] ?? 0);
 $sel_part    = (int) ($_GET['part_id'] ?? 0);
 $sel_subject = (int) ($_GET['subject_id'] ?? 0);
+$sel_group   = (int) ($_GET['group_id'] ?? 0);
+$as_groups   = $sel_class > 0 ? ee_groups_of_class($pdo, $sel_class) : [];
+if ($as_groups && !isset($as_groups[$sel_group])) $sel_group = 0;
 
 $classes = $pdo->query("SELECT id, class_name FROM academic_classes WHERE status='Active' ORDER BY rank ASC, class_name ASC")->fetchAll();
 $shifts  = $pdo->query("SELECT id, shift_name FROM academic_shifts WHERE status='Active' ORDER BY shift_name ASC")->fetchAll();
@@ -128,20 +137,24 @@ $parts = $parts_stmt->fetchAll();
 
 $subjects_list = [];
 if ($sel_class > 0) {
-    $subj_stmt = $pdo->prepare("SELECT id, subject_name FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY subject_name ASC");
+    $subj_stmt = $pdo->prepare("SELECT id, subject_name, group_id FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY sort_order ASC, id ASC");
     $subj_stmt->execute([$sel_class]);
     $subjects_list = $subj_stmt->fetchAll();
+    if ($sel_group > 0) { $subjects_list = array_values(array_filter($subjects_list, function ($r) use ($sel_group) { $g = (int) ($r['group_id'] ?? 0); return $g === 0 || $g === $sel_group; })); }
 }
 
 // -----------------------------------------------------------
 // সিলেক্টেড কম্বিনেশনের জন্য Student লিস্ট + বিদ্যমান Attendance
 // -----------------------------------------------------------
 $all_selected = ($sel_class > 0 && $sel_shift > 0 && $sel_section > 0 && $sel_term > 0 && $sel_part > 0 && $sel_subject > 0);
+$need_group = ($all_selected && $as_groups && $sel_group <= 0);
+if ($need_group) $all_selected = false;
 $students = [];
 
 if ($all_selected) {
     $ras_where = ['s.class_id=?', 's.shift_id=?', 's.section_id=?', "s.status='Active'"];
     $ras_params = [$sel_term, $sel_part, $sel_subject, $sel_class, $sel_shift, $sel_section];
+    if ($as_groups) { $ras_where[] = 's.group_id=?'; $ras_params[] = $sel_group; }
     branch_apply_filter($ras_where, $ras_params, 's.branch_id');
     $stu_stmt = $pdo->prepare(
         "SELECT s.id, s.student_id, s.roll_no, s.name_en, s.photo_path, ea.status AS saved_status
@@ -152,6 +165,8 @@ if ($all_selected) {
     );
     $stu_stmt->execute($ras_params);
     $students = $stu_stmt->fetchAll();
+    $gate = ea_subject_gate($pdo, $sel_class, $sel_term, $sel_part, $sel_subject, $sel_shift, $sel_section);
+    $students = $gate['assigned'] ? array_values(array_filter($students, function ($x) use ($gate) { return !empty($gate['ids'][(int) $x['id']]); })) : [];
 }
 ?>
 
@@ -210,6 +225,20 @@ if ($all_selected) {
             </div>
         </div>
 
+        <div class="row mb-3 g-3" id="ras_group_row" <?php echo $as_groups ? '' : 'style="display:none;"'; ?>>
+            <div class="col-md-4">
+                <div class="d-flex align-items-center gap-2">
+                    <label class="fw-bold text-nowrap mb-0" style="min-width:95px;">Group <span class="text-danger">*</span></label>
+                    <select name="group_id" id="ras_group" class="form-select">
+                        <option value="0">-- Select --</option>
+                        <?php foreach ($as_groups as $gid => $gname): ?>
+                            <option value="<?php echo (int) $gid; ?>" <?php echo $sel_group === (int) $gid ? 'selected' : ''; ?>><?php echo asv($gname); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+        </div>
+
         <div class="row mb-3 g-3">
             <div class="col-md-4">
                 <div class="d-flex align-items-center gap-2">
@@ -264,10 +293,12 @@ if ($all_selected) {
     </div>
 
     <div id="ras_result_wrap">
-        <?php if (!$all_selected): ?>
+        <?php if ($need_group): ?>
+            <?php echo ea_group_need_msg(); ?>
+        <?php elseif (!$all_selected): ?>
             <div class="text-center text-muted py-4">উপরে Class, Shift, Section, Exam Term, Exam Part এবং Subject সিলেক্ট করুন — তাহলে স্টুডেন্ট লিস্ট এখানে দেখাবে।</div>
         <?php elseif (!$students): ?>
-            <div class="text-center text-muted py-4">এই Class/Shift/Section এ কোনো Active Student পাওয়া যায়নি।</div>
+            <?php echo ea_subject_msg($gate); ?>
         <?php else: ?>
             <form method="POST" action="index.php?page=result_attendance_subject" id="attendanceForm">
                 <?php echo csrf_field(); ?>
@@ -277,6 +308,7 @@ if ($all_selected) {
                 <input type="hidden" name="term_id" value="<?php echo $sel_term; ?>">
                 <input type="hidden" name="part_id" value="<?php echo $sel_part; ?>">
                 <input type="hidden" name="subject_id" value="<?php echo $sel_subject; ?>">
+                <input type="hidden" name="group_id" value="<?php echo (int) $sel_group; ?>">
 
                 <div class="table-responsive">
                     <table class="table table-bordered align-middle m-0">
@@ -349,6 +381,13 @@ function toggleAll() {
     var elTerm    = document.getElementById('ras_term');
     var elPart    = document.getElementById('ras_part');
     var elSubject = document.getElementById('ras_subject');
+    var elGroup   = document.getElementById('ras_group');
+    var elGroupRow = document.getElementById('ras_group_row');
+    function setGroups(list) {
+        elGroup.innerHTML = '<option value="0">-- Select --</option>';
+        list.forEach(function (g) { var o = document.createElement('option'); o.value = g.id; o.textContent = g.name; elGroup.appendChild(o); });
+        elGroupRow.style.display = list.length ? '' : 'none';
+    }
     var elSectionHint = document.getElementById('ras_section_hint');
     var elSubjectHint = document.getElementById('ras_subject_hint');
     var elWrap    = document.getElementById('ras_result_wrap');
@@ -366,6 +405,7 @@ function toggleAll() {
     function loadSections() {
         var classId = elClass.value, shiftId = elShift.value;
         elSection.innerHTML = '<option value="0">-- Select --</option>';
+        setGroups([]);
         clearTable();
 
         if (classId == '0' || shiftId == '0') {
@@ -384,6 +424,7 @@ function toggleAll() {
                     opt.textContent = s.name;
                     elSection.appendChild(opt);
                 });
+                setGroups(data.groups || []);
             })
             .catch(function () { /* নেটওয়ার্ক সমস্যা হলে চুপচাপ থেমে যাওয়া, ইউজার আবার সিলেক্ট করলে রিট্রাই হবে */ });
     }
@@ -400,7 +441,7 @@ function toggleAll() {
         }
         elSubjectHint.style.display = 'none';
 
-        fetch(rasAjaxUrl('subjects', { class_id: classId }))
+        fetch(rasAjaxUrl('subjects', { class_id: classId, group_id: elGroup.value }))
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (!data.success) return;
@@ -425,7 +466,7 @@ function toggleAll() {
 
         elWrap.innerHTML = '<div class="text-center text-muted py-4"><i class="fa-solid fa-spinner fa-spin me-2"></i>লোড হচ্ছে...</div>';
 
-        fetch(rasAjaxUrl('table', { class_id: classId, shift_id: shiftId, section_id: sectionId, term_id: termId, part_id: partId, subject_id: subjectId }))
+        fetch(rasAjaxUrl('table', { class_id: classId, shift_id: shiftId, section_id: sectionId, term_id: termId, part_id: partId, subject_id: subjectId, group_id: elGroup.value }))
             .then(function (r) { return r.text(); })
             .then(function (html) { elWrap.innerHTML = html; })
             .catch(function () {
@@ -442,5 +483,6 @@ function toggleAll() {
     elTerm.addEventListener('change', loadTable);
     elPart.addEventListener('change', loadTable);
     elSubject.addEventListener('change', loadTable);
+    elGroup.addEventListener('change', function () { loadSubjects(); });
 })();
 </script>

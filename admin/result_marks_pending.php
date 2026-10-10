@@ -50,7 +50,7 @@ if ($searched && $f_term_id) {
     $asg_sql = "SELECT eas.class_id, eas.part_id, eas.subject_id, ac.class_name, asub.subject_name
                 FROM exam_assign_subjects eas
                 LEFT JOIN academic_classes ac ON ac.id = eas.class_id
-                LEFT JOIN academic_subjects asub ON asub.id = eas.subject_id
+                INNER JOIN academic_subjects asub ON asub.id = eas.subject_id
                 WHERE eas.term_id = ? AND eas.status = 'Active'";
     $asg_params = [$f_term_id];
     if ($f_part_id) { $asg_sql .= " AND eas.part_id = ?"; $asg_params[] = $f_part_id; }
@@ -70,6 +70,14 @@ if ($searched && $f_term_id) {
         $where = ["status = 'Active'", 'session_id = ?', 'class_id = ?'];
         $params = [$current_session_id, $class_id];
         branch_apply_filter($where, $params, 'branch_id');
+        // ধর্মভিত্তিক Subject হলে শুধু ঐ ধর্মের শিক্ষার্থী গোনা হবে
+        require_once __DIR__ . '/../config/subject_religion.php';
+        $a_rel = sr_subject_map($pdo, [$subject_id])[$subject_id] ?? '';
+        if ($a_rel !== '') {
+            $variants = ['Islam' => ['islam','muslim','ইসলাম','মুসলিম'], 'Hinduism' => ['hinduism','hindu','হিন্দু','হিন্দুধর্ম'], 'Buddhism' => ['buddhism','buddhist','বৌদ্ধ'], 'Christianity' => ['christianity','christian','খ্রিস্টান','খ্রীস্টান'], 'Others' => ['others','other','অন্যান্য']][$a_rel] ?? [];
+            $where[] = 'LOWER(TRIM(religion)) IN (' . implode(',', array_fill(0, count($variants), '?')) . ')';
+            foreach ($variants as $vv) { $params[] = $vv; }
+        }
         $sc = $pdo->prepare("SELECT COUNT(*) FROM students WHERE " . implode(' AND ', $where));
         $sc->execute($params);
         $total_students = (int) $sc->fetchColumn();

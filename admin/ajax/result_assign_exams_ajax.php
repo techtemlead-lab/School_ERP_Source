@@ -15,6 +15,9 @@ if (!isset($_SESSION['admin_logged'])) {
 }
 
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../config/portal_access.php';
+erp_portal_require_role($pdo, 'admin', 'result_assign_exams');
+require_once __DIR__ . '/../../config/subject_rank.php'; subject_rank_ensure($pdo);
 require_once __DIR__ . '/../../config/permissions.php';
 
 if (!perm_page_allowed($pdo, 'result_assign_exams')) {
@@ -23,6 +26,7 @@ if (!perm_page_allowed($pdo, 'result_assign_exams')) {
     echo json_encode(['success' => false, 'message' => 'এই পেজ দেখার অনুমতি নেই।']);
     exit();
 }
+perm_write_guard($pdo, 'result_assign_exams'); // Read-only ইউজারের সেভ আটকায়
 
 function aev($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 
@@ -65,7 +69,7 @@ if ($action === 'table') {
     $subjects = [];
     $existing = [];
     if ($sel_class > 0) {
-        $sstmt = $pdo->prepare("SELECT id, subject_name, subject_code, full_marks FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY subject_name ASC");
+        $sstmt = $pdo->prepare("SELECT id, subject_name, subject_code, full_marks FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY sort_order ASC, id ASC");
         $sstmt->execute([$sel_class]);
         $subjects = $sstmt->fetchAll();
     }
@@ -73,6 +77,18 @@ if ($action === 'table') {
         $estmt = $pdo->prepare("SELECT * FROM exam_assign_subjects WHERE class_id=? AND term_id=? AND part_id=?");
         $estmt->execute([$sel_class, $sel_term, $sel_part]);
         foreach ($estmt->fetchAll() as $er) { $existing[(int) $er['subject_id']] = $er; }
+    }
+    // অন্য Part-এ (একই Class + Term) প্রতিটা Subject-এর যে Full Mark (Exam) আগে সেভ আছে — মোট নম্বর সীমা যাচাইয়ের জন্য
+    $others = []; $others_txt = [];
+    if ($sel_class > 0 && $sel_term > 0 && $sel_part > 0) {
+        $ostmt = $pdo->prepare("SELECT eas.subject_id, eas.full_mark_exam, p.part_name FROM exam_assign_subjects eas LEFT JOIN exam_parts p ON p.id = eas.part_id
+                                WHERE eas.class_id=? AND eas.term_id=? AND eas.part_id<>? AND eas.status='Active'");
+        $ostmt->execute([$sel_class, $sel_term, $sel_part]);
+        foreach ($ostmt->fetchAll() as $orow) {
+            $k = (int) $orow['subject_id'];
+            $others[$k] = ($others[$k] ?? 0) + (float) $orow['full_mark_exam'];
+            $others_txt[$k][] = ($orow['part_name'] ?: 'Part') . ' ' . (float) $orow['full_mark_exam'];
+        }
     }
     ?>
     <?php if ($sel_class <= 0 || $sel_term <= 0 || $sel_part <= 0): ?>
@@ -105,8 +121,9 @@ if ($action === 'table') {
                             $ex = $existing[$sid] ?? null;
                             $full_mark_subject     = $ex ? $ex['full_mark_subject']     : $sub['full_marks'];
                             $mark_for_term_percent  = $ex ? $ex['mark_for_term_percent'] : 100;
-                            $full_mark_exam         = $ex ? $ex['full_mark_exam']        : $sub['full_marks'];
-                            $pass_mark_exam         = $ex ? $ex['pass_mark_exam']         : round($sub['full_marks'] * 0.33);
+                            $oth_sum = (float) ($others[$sid] ?? 0);
+                            $full_mark_exam         = $ex ? $ex['full_mark_exam']        : max(0, (float) $sub['full_marks'] - $oth_sum); // নতুন হলে বাকি নম্বরটুকু ডিফল্ট
+                            $pass_mark_exam         = $ex ? $ex['pass_mark_exam']         : round($full_mark_exam * 0.33);
                             $pass_individual        = $ex ? (int) $ex['pass_individual']  : 1;
                             $fail_on_absent         = $ex ? (int) $ex['fail_on_absent']   : 1;
                             $pi_hid = 'pi_' . $sid; $fa_hid = 'fa_' . $sid;
@@ -117,9 +134,13 @@ if ($action === 'table') {
                                     <?php echo aev($sub['subject_name']); ?>
                                     <?php if ($sub['subject_code']): ?><span class="text-muted small">(<?php echo aev($sub['subject_code']); ?>)</span><?php endif; ?>
                                 </td>
-                                <td style="max-width:90px;"><input type="number" step="0.01" name="full_mark_subject[<?php echo $sid; ?>]" class="form-control form-control-sm" value="<?php echo aev($full_mark_subject); ?>"></td>
+                                <td style="max-width:90px;"><input type="number" step="0.01" min="0" name="full_mark_subject[<?php echo $sid; ?>]" class="form-control form-control-sm ae-fm" data-sid="<?php echo $sid; ?>" value="<?php echo aev($full_mark_subject); ?>"></td>
                                 <td style="max-width:100px;"><input type="number" step="0.01" name="mark_for_term_percent[<?php echo $sid; ?>]" class="form-control form-control-sm" value="<?php echo aev($mark_for_term_percent); ?>"></td>
-                                <td style="max-width:100px;"><input type="number" step="0.01" name="full_mark_exam[<?php echo $sid; ?>]" class="form-control form-control-sm" value="<?php echo aev($full_mark_exam); ?>"></td>
+                                <td style="max-width:130px;">
+                                        <input type="number" step="0.01" min="0" name="full_mark_exam[<?php echo $sid; ?>]" class="form-control form-control-sm ae-fe" data-sid="<?php echo $sid; ?>" data-others="<?php echo aev($oth_sum); ?>" value="<?php echo aev($full_mark_exam); ?>">
+                                        <?php if ($oth_sum > 0): ?><div class="small text-muted ae-oth" title="<?php echo aev(implode(', ', $others_txt[$sid] ?? [])); ?>">অন্য Part: <?php echo aev(rtrim(rtrim(number_format($oth_sum, 2, '.', ''), '0'), '.')); ?></div><?php endif; ?>
+                                        <div class="small text-danger fw-bold ae-err" style="display:none"></div>
+                                    </td>
                                 <td style="max-width:100px;"><input type="number" step="0.01" name="pass_mark_exam[<?php echo $sid; ?>]" class="form-control form-control-sm" value="<?php echo aev($pass_mark_exam); ?>"></td>
                                 <td class="text-center">
                                     <input type="hidden" name="pass_individual[<?php echo $sid; ?>]" id="<?php echo $pi_hid; ?>" value="<?php echo $pass_individual ? '1' : '0'; ?>">
@@ -138,7 +159,8 @@ if ($action === 'table') {
             <hr>
             <div class="row">
                 <div class="col-sm-6 offset-sm-3">
-                    <button type="submit" name="save_assign" class="btn btn-primary px-4 fw-bold" style="background-color:#1e3a8a;border-color:#1e3a8a;">Create</button>
+                    <div id="aeTotalWarn" class="alert alert-danger py-2 mb-3" style="display:none"></div>
+                    <button type="submit" id="aeSaveBtn" name="save_assign" class="btn btn-primary px-4 fw-bold" style="background-color:#1e3a8a;border-color:#1e3a8a;">Create</button>
                     <a href="index.php?page=result_assign_exams" class="btn btn-danger px-4 fw-bold ms-2">Cancel</a>
                 </div>
             </div>

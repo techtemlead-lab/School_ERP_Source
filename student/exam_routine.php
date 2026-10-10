@@ -35,6 +35,12 @@ if ($er_table_ready && $sel_term && $sel_part) {
         );
         $stmt->execute([(int) $student['class_id'], (int) $student['section_id'], $sel_term, $sel_part]);
         $exam_rows = $stmt->fetchAll();
+        // ধর্মভিত্তিক Subject: ভিন্ন ধর্মের পরীক্ষা নিজের রুটিনে আসবে না
+        require_once __DIR__ . '/../config/subject_religion.php';
+        $er_rel = sr_subject_map($pdo, array_column($exam_rows, 'subject_id'));
+        $exam_rows = array_values(array_filter($exam_rows, function ($x) use ($er_rel, $student) {
+            return sr_applicable($er_rel[(int) $x['subject_id']] ?? '', $student['religion'] ?? '');
+        }));
     } catch (\Throwable $e) { /* skip */ }
 }
 ?>

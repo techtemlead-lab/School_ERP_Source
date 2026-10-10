@@ -11,7 +11,7 @@ unset($_SESSION['bab_err']);
 $current_session = $pdo->query("SELECT * FROM academic_sessions WHERE is_current_session = 1 LIMIT 1")->fetch();
 $current_session_id = $current_session ? (int) $current_session['id'] : 0;
 
-$institute = $pdo->query("SELECT institute_name, logo_path, phone_number FROM institute_settings WHERE id = 1")->fetch();
+$institute = $pdo->query("SELECT * FROM institute_settings WHERE id = 1")->fetch();
 $fr_bid2 = branch_current_id();
 if ($fr_bid2 !== null) {
     $branch_stmt2 = $pdo->prepare("SELECT * FROM branches WHERE id = ? LIMIT 1");
@@ -161,7 +161,7 @@ $view = $_GET['view'] ?? 'config';
             <h4><?php echo babv($inst_display_name); ?></h4>
             <?php if ($addr_line !== ''): ?><p class="addr">(<?php echo babv($addr_line); ?>)</p><?php endif; ?>
             <?php if ($inst_phone !== ''): ?><p class="phone">Phone: <?php echo babv($inst_phone); ?></p><?php endif; ?>
-            <p class="web">www.yourschool.com</p>
+            <?php if (!empty($institute['website'])): ?><p class="web"><?php echo htmlspecialchars((string) $institute['website']); ?></p><?php endif; ?>
             <p class="meta">
                 Class : <?php echo babv($class_name); ?>, Shift : <?php echo babv($shift_name); ?>, Section : <?php echo babv($section_name); ?>
                 <?php if ($room_no !== ''): ?>, Room : <?php echo babv($room_no); ?><?php endif; ?>

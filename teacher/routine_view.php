@@ -17,6 +17,7 @@
  * (শুধু এই টিচারের ২য় ক্লাস না)।
  */
 
+require_once __DIR__ . '/../config/routine_grid.php';
 function trv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 function trv_time($t): string { return $t ? date('h:i A', strtotime($t)) : ''; }
 
@@ -57,8 +58,9 @@ if ($sel_class)   { $where[] = 'routines.class_id = ?';   $params[] = $sel_class
 if ($sel_section) { $where[] = 'routines.section_id = ?'; $params[] = $sel_section; }
 if (branch_current_id() !== null) { $where[] = 'routines.branch_id = ?'; $params[] = branch_current_id(); }
 
+require_once __DIR__ . '/../config/subject_religion.php'; sr_ensure($pdo);
 $stmt = $pdo->prepare(
-    "SELECT routines.*, academic_subjects.subject_name, academic_classes.class_name,
+    "SELECT routines.*, academic_subjects.subject_name, academic_subjects.religion AS subject_religion, academic_classes.class_name,
             academic_shifts.shift_name, academic_sections.section_name
      FROM routines
      LEFT JOIN academic_subjects ON academic_subjects.id = routines.subject_id
@@ -161,9 +163,10 @@ foreach ($all_stmt2->fetchAll() as $r) {
 }
 asort($my_classes);
 ?>
+<?php echo rg_css(); ?>
 <style>
     @media print {
-        @page { size: A4 portrait; margin: 10mm; }
+        @page { size: A4 landscape; margin: 10mm; }
         .no-print { display: none !important; }
         .sidebar, .sticky-top-area, .top-navbar, .breadcrumb-bar { display: none !important; }
         .main-wrapper, .main-wrapper.expanded { margin-left: 0 !important; }
@@ -263,46 +266,8 @@ asort($my_classes);
             <?php echo ($sel_class || $sel_section || $sel_day !== '') ? 'এই ফিল্টারে কোনো রুটিন পাওয়া যায়নি।' : 'আপনার নামে এখনো কোনো ক্লাস রুটিন সেট করা হয়নি।'; ?>
         </h6>
     <?php else: ?>
-        <div class="table-responsive">
-            <table class="table table-bordered align-middle mb-0">
-                <thead class="table-dark">
-                    <tr><th style="width:150px;">Day</th><th>Periods</th><th style="width:110px;" class="text-center">Total</th></tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($week_days as $day): ?>
-                        <?php if ($sel_day !== '' && $day !== $sel_day) { continue; } ?>
-                        <?php if (!$day_entries[$day]) { continue; } ?>
-                        <tr class="<?php echo $day === $today_day ? 'trv-today' : ''; ?>">
-                            <td class="fw-bold">
-                                <?php echo $day; ?>
-                                <?php if ($day === $today_day): ?><br><span class="badge bg-success">আজ</span><?php endif; ?>
-                            </td>
-                            <td>
-                                <div class="d-flex flex-column gap-2">
-                                    <?php foreach ($day_entries[$day] as $e): ?>
-                                        <div class="trv-period">
-                                            <span class="pno">Period <?php echo $e['period_no'] ?: '—'; ?></span>
-                                            <span class="text-muted">›</span>
-                                            <strong><?php echo trv($e['class_name'] ?: '—'); ?></strong><?php if ($e['section_name']): ?> <span class="text-muted">(<?php echo trv($e['section_name']); ?>)</span><?php endif; ?>
-                                            <span class="text-muted">›</span>
-                                            <strong style="color:#0f766e;"><?php echo trv($e['subject_name'] ?: '—'); ?></strong>
-                                            <span class="text-muted ms-2" style="font-size:12.5px;">
-                                                <i class="fa-regular fa-clock"></i> <?php echo trv_time($e['start_time']); ?> - <?php echo trv_time($e['end_time']); ?>
-                                                <?php if (!empty($e['shift_name'])): ?> · <?php echo trv($e['shift_name']); ?><?php endif; ?>
-                                            </span>
-                                        </div>
-                                    <?php endforeach; ?>
-                                </div>
-                            </td>
-                            <td class="text-center">
-                                <span class="badge bg-primary"><?php echo $day_stats[$day]['classes']; ?> ক্লাস</span><br>
-                                <span class="badge bg-secondary mt-1"><?php echo $day_stats[$day]['subjects']; ?> সাবজেক্ট</span>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
+        <?php echo rg_grid_html($week_days, $day_entries, ['show_teacher' => false, 'show_class' => true, 'by_period' => true, 'only_day' => $sel_day, 'highlight_day' => $today_day]); ?>
+        <p class="text-muted small mt-2 mb-0 no-print">কলাম নম্বর = ওই ক্লাসের সেদিনের পিরিয়ড নম্বর; ফাঁকা ঘর মানে ওই পিরিয়ডে আপনার ক্লাস নেই।</p>
     <?php endif; ?>
 </div>
 

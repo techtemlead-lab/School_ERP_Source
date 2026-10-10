@@ -63,6 +63,15 @@ if ($current_session_id) {
     $p->execute([$current_session_id]); $parts = $p->fetchAll();
 }
 
+
+// Class Teacher স্কোপ (Teacher Portal > My Class): শুধু নিজের Class/Section, শুধু Publish হওয়া Term
+if (function_exists('ct_scope_active') && ct_scope_active()) {
+    $classes  = ct_scope_filter_classes($classes);
+    $sections = ct_scope_filter_sections($sections);
+    $terms    = ct_scope_published_terms($pdo, $terms);
+    ct_scope_sanitize_get(array_map(fn($t) => (int) $t['id'], $terms));
+}
+
 // part_id => part_name (Rank অনুযায়ী অর্ডার) — সাবজেক্টের Part সাব-কলাম হেডার বানাতে লাগবে
 $part_name_map = [];
 foreach ($parts as $p) { $part_name_map[(int) $p['id']] = $p['part_name']; }
@@ -125,6 +134,7 @@ if ($searched && $f_class_id && $f_term_id) {
         if ($f_section_id) { $where[] = 's.section_id = ?'; $params[] = $f_section_id; }
         if ($f_group_id)   { $where[] = 's.group_id = ?';   $params[] = $f_group_id; }
         branch_apply_filter($where, $params, 's.branch_id');
+        if (function_exists('ct_scope_active') && ct_scope_active()) { ct_scope_apply_where($where, 's'); }
         $st = $pdo->prepare(
             "SELECT s.id, s.student_id, s.roll_no, s.name_en
              FROM students s WHERE " . implode(' AND ', $where) . "
@@ -156,13 +166,17 @@ if ($searched && $f_class_id && $f_term_id) {
 
             foreach ($students as $stu) {
                 $sid_stu = (int) $stu['id'];
-                $res = rc_student_result($defs, $marks_all[$sid_stu] ?? [], $att_all[$sid_stu] ?? [], $grade_bands);
+                $res = rc_student_result($defs, $marks_all[$sid_stu] ?? [], $att_all[$sid_stu] ?? [], $grade_bands, rc_excluded_subjects($pdo, $defs, (int) $f_term_id, $sid_stu));
 
                 // rc_student_result সাবজেক্ট-রো $defs এর ক্রমেই দেয় — subject_id দিয়ে ম্যাপ করা হলো
                 $by_subj = [];
-                $i = 0;
+                $sr_map = array_column($res['subject_rows'], null, 'subject_id');
                 foreach ($defs as $subj_id => $def) {
-                    $sr = $res['subject_rows'][$i++];
+                    $sr = $sr_map[$subj_id] ?? null;
+                    if ($sr === null) { // এই শিক্ষার্থীর Group-এর নয় / Not Eligible — হিসাবে ধরা হবে না
+                        $by_subj[$subj_id] = ['sl' => 0, 'subject_id' => (int) $subj_id, 'name' => $def['name'], 'gl' => '-', 'gp' => 0.00, 'fail' => false, 'absent' => false, 'obtained' => 0.0, 'full' => 0.0, 'optional' => false, 'not_taken' => true, 'opt_gp_add' => 0.0];
+                        continue;
+                    }
                     $absent = false;
                     foreach ((array) ($att_all[$sid_stu][$subj_id] ?? []) as $ast) { if ($ast === 'Absent') { $absent = true; } }
                     $sr['absent'] = $absent;

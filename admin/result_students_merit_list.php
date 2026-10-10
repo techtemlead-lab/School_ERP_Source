@@ -55,7 +55,7 @@ unset($_SESSION['ml_err'], $_SESSION['ml_msg']);
 $current_session = $pdo->query("SELECT * FROM academic_sessions WHERE is_current_session = 1 LIMIT 1")->fetch();
 $current_session_id = $current_session ? (int) $current_session['id'] : 0;
 
-$institute = $pdo->query("SELECT institute_name, logo_path, phone_number FROM institute_settings WHERE id = 1")->fetch();
+$institute = $pdo->query("SELECT * FROM institute_settings WHERE id = 1")->fetch();
 $fr_bid2 = branch_current_id();
 if ($fr_bid2 !== null) {
     $branch_stmt2 = $pdo->prepare("SELECT * FROM branches WHERE id = ? LIMIT 1");
@@ -119,7 +119,7 @@ $classes  = $pdo->query("SELECT id, class_name, has_group FROM academic_classes 
 $shifts   = $pdo->query("SELECT id, shift_name FROM academic_shifts WHERE status = 'Active' ORDER BY shift_name ASC")->fetchAll();
 $sections = $pdo->query("SELECT id, section_name, class_id, shift_id FROM academic_sections WHERE status = 'Active' ORDER BY section_name ASC")->fetchAll();
 $groups   = $pdo->query("SELECT id, group_name, class_id FROM academic_groups WHERE status = 'Active' ORDER BY group_name ASC")->fetchAll();
-$subjects_all = $pdo->query("SELECT id, subject_name, class_id FROM academic_subjects WHERE status = 'Active' ORDER BY subject_name ASC")->fetchAll();
+$subjects_all = $pdo->query("SELECT id, subject_name, class_id FROM academic_subjects WHERE status = 'Active' ORDER BY sort_order ASC, id ASC")->fetchAll();
 $terms    = $current_session_id
     ? $pdo->prepare("SELECT id, term_name FROM exam_terms WHERE session_id = ? AND status = 'Active' ORDER BY rank ASC")
     : null;
@@ -217,12 +217,13 @@ if ($searched && $f_class_id && $f_shift_id && $f_section_id && $f_term_id) {
         foreach ($raw_students as $stu) {
             $sid = $stu['id'];
             // rc_student_result() — Report Card/Tabulation Sheet-এর সাথে হুবহু একই শেয়ার্ড হিসাব
-            $res = rc_student_result($defs, $marks_all[$sid] ?? [], $att_all[$sid] ?? [], $grade_bands);
+            $res = rc_student_result($defs, $marks_all[$sid] ?? [], $att_all[$sid] ?? [], $grade_bands, rc_excluded_subjects($pdo, $defs, (int) $f_term_id, (int) $sid));
 
             $subject_marks = [];
-            $i = 0;
+            $sr_map = array_column($res['subject_rows'], null, 'subject_id');
             foreach ($defs as $subj_id => $def) {
-                $sr = $res['subject_rows'][$i++];
+                $sr = $sr_map[$subj_id] ?? null;
+                if ($sr === null) { $subject_marks[$subj_id] = ['mark' => null, 'absent' => false, 'fail' => false]; continue; } // Group-এর নয় / Not Eligible
                 $absent = false;
                 foreach ((array) ($att_all[$sid][$subj_id] ?? []) as $ast) { if ($ast === 'Absent') { $absent = true; } }
                 $subject_marks[$subj_id] = ['mark' => $absent ? null : $sr['obtained'], 'absent' => $absent, 'fail' => $sr['fail']];
@@ -432,7 +433,7 @@ $result_map_json = mlv(json_encode(array_reduce($students_report, function ($car
                     <h4><?php echo mlv($inst_display_name); ?></h4>
                     <?php if ($addr_line !== ''): ?><p class="addr">(<?php echo mlv($addr_line); ?>)</p><?php endif; ?>
                     <?php if ($inst_phone !== ''): ?><p class="phone">Phone: <?php echo mlv($inst_phone); ?></p><?php endif; ?>
-                    <p class="web">www.yourschool.com</p>
+                    <?php if (!empty($institute['website'])): ?><p class="web"><?php echo htmlspecialchars((string) $institute['website']); ?></p><?php endif; ?>
                     <p class="meta1"><?php echo $group_name !== '' ? mlv($group_name) : 'Combined'; ?> (<?php echo mlv($class_name); ?>)</p>
                     <p class="meta2">(Shift : <?php echo mlv($shift_name); ?>, Section : <?php echo mlv($section_name); ?>)</p>
                     <p class="stats">

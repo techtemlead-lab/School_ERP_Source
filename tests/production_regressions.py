@@ -18,9 +18,15 @@ class Browser:
   hdr={'Host':self.host+':'+str(self.port)};hdr.update(headers or {})
   if isinstance(data,dict):data=urllib.parse.urlencode(data).encode()
   req=urllib.request.Request('http://127.0.0.1:'+str(self.port)+path,data=data,headers=hdr)
-  try:r=self.op.open(req,timeout=120)
-  except urllib.error.HTTPError as e:r=e
-  return r.code,r.read(),r.headers
+  for attempt in range(31):
+   try:r=self.op.open(req,timeout=120)
+   except urllib.error.HTTPError as e:r=e
+   raw=r.read()
+   if r.code!=503 or b'All demo sessions are busy' not in raw or attempt==30:
+    return r.code,raw,r.headers
+   # Additional academic tests consume more than the initial five pools.
+   # Wait only for the real worker's pre-allocation busy response.
+   time.sleep(2)
 def token(raw):return re.search(rb'name="csrf_token"[^>]*value="([^"]+)"',raw)[1].decode()
 def captcha(raw):return ''.join(x.decode() for x in re.findall(rb'<text[^>]*>([0-9])</text>',raw))
 def login(browser,username,password):
