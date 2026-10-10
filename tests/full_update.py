@@ -79,6 +79,15 @@ php(connect+"$p->exec('UPDATE routines SET branch_id=2 WHERE id=1');")
 check(b.get('/admin/index.php?page=routine_general&view=edit&id=1')[0] == 404, 'foreign branch routine edit denied')
 status, raw = b.get('/admin/index.php?page=routine_dynamic' + criteria)
 check(b.get('/admin/index.php?page=routine_dynamic', {'delete_routine':'1','id':'1','csrf_token':csrf(raw),'class_id':'1','shift_id':'1','section_id':'1'})[0] == 404, 'foreign branch routine delete denied')
+fields = {'save_routine':'1','id':'0','csrf_token':csrf(raw),'class_id':'1','shift_id':'1','section_id':'1','day':'Sunday','start_time':'14:13','end_time':'14:57','has_break':'NO','subject_id':'1','teacher_id':'1','status':'Active'}
+check(b.get('/admin/index.php?page=routine_dynamic', fields)[0] == 302, 'authorized routine creation succeeds')
+created = json.loads(php(connect+"echo json_encode($p->query('SELECT id,branch_id,class_id,section_id FROM routines ORDER BY id DESC LIMIT 1')->fetch());"))
+check(int(created['branch_id']) == 1 and int(created['class_id']) == 1, 'new routine retains destination section branch')
+fields.update({'id':str(created['id']),'class_id':'2','section_id':'2','subject_id':'4','teacher_id':'4'})
+check(b.get('/admin/index.php?page=routine_dynamic', fields)[0] == 422, 'dynamic edit cannot forge a different routine class/section')
+fields['routine_days[]'] = 'Sunday'
+check(b.get('/admin/index.php?page=routine_general', fields)[0] == 302, 'general routine editor can move an authorized period')
+check(php(connect+"echo $p->query('SELECT CONCAT(branch_id,\":\",class_id,\":\",section_id) FROM routines WHERE id="+str(created['id'])+"')->fetchColumn();") == b'1:2:2', 'moved routine branch and class remain consistent')
 for role, pages in [('teacher',['routine_view','result_marks_entry_subject','lesson_plan','teacher_questions']),('student',['class_routine','exam_routine','result','dashboard','lesson_plan','scholarship_apply'])]:
     check(b.get('/'+role+'/')[0] == 200, 'preserved ' + role + ' demo login')
     for page in pages:

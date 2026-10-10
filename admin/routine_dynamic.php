@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../config/routine_access.php';
-erp_routine_access($pdo, 'routine_dynamic');
+$routine_destination_branch = erp_routine_access($pdo, 'routine_dynamic');
 // admin/routine_dynamic.php - Dynamic Routine (স্ক্রিনশট অনুযায়ী)
 // একই routines টেবিল ব্যবহার করে, তাই General Routine-এ যোগ করা এন্ট্রিও এখানে দেখা যাবে (আর উল্টোটাও)
 
@@ -127,7 +127,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_routine'])) {
             "INSERT INTO routines (class_id, shift_id, section_id, routine_days, start_time, end_time, has_break, subject_id, teacher_id, status, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         );
         // branch_id না বসালে রো NULL-branch হয়ে যেত, আর নিচের লিস্ট কোয়েরি (branch ফিল্টার) সেটা দেখাত না
-        $stmt->execute([$class_id, $shift_id, $section_id, $day, $start_time ?: null, $end_time ?: null, $has_break, $subject_id, $teacher_id, $status, branch_id_for_insert()]);
+        $stmt->execute([$class_id, $shift_id, $section_id, $day, $start_time ?: null, $end_time ?: null, $has_break, $subject_id, $teacher_id, $status, $routine_destination_branch]);
         sec_log_activity($pdo, 'Routine', 'Create', "ক্লাস আইডি {$class_id}, দিন {$day} এর নতুন রুটিন পিরিয়ড যোগ করা হয়েছে");
         $_SESSION['rd_msg'] = 'নতুন রুটিন পিরিয়ড যোগ করা হয়েছে।' . $rd_warn;
     }

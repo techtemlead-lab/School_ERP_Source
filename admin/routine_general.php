@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../config/routine_access.php';
-erp_routine_access($pdo, 'routine_general');
+$routine_destination_branch = erp_routine_access($pdo, 'routine_general');
 // admin/routine_general.php - General Routine (স্ক্রিনশট অনুযায়ী)
 $rt_err = $_SESSION['rt_err'] ?? '';
 $rt_msg = $_SESSION['rt_msg'] ?? '';
@@ -62,16 +62,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_routine'])) {
     } else {
         if ($id > 0) {
             $stmt = $pdo->prepare(
-                "UPDATE routines SET class_id=?, shift_id=?, section_id=?, routine_days=?, start_time=?, end_time=?, has_break=?, subject_id=?, teacher_id=?, status=? WHERE id=?"
+                "UPDATE routines SET class_id=?, shift_id=?, section_id=?, routine_days=?, start_time=?, end_time=?, has_break=?, subject_id=?, teacher_id=?, status=?, branch_id=? WHERE id=?"
             );
-            $stmt->execute([$class_id ?: null, $shift_id ?: null, $section_id, $days ?: null, $start_time ?: null, $end_time ?: null, $has_break, $subject_id, $teacher_id, $status, $id]);
+            $stmt->execute([$class_id ?: null, $shift_id ?: null, $section_id, $days ?: null, $start_time ?: null, $end_time ?: null, $has_break, $subject_id, $teacher_id, $status, $routine_destination_branch, $id]);
             sec_log_activity($pdo, 'Routine', 'Update', "Section আইডি {$section_id} এর রুটিন আপডেট করা হয়েছে");
             $_SESSION['rt_msg'] = 'রুটিন আপডেট করা হয়েছে।';
         } else {
             $stmt = $pdo->prepare(
                 "INSERT INTO routines (class_id, shift_id, section_id, routine_days, start_time, end_time, has_break, subject_id, teacher_id, status, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             );
-            $stmt->execute([$class_id ?: null, $shift_id ?: null, $section_id, $days ?: null, $start_time ?: null, $end_time ?: null, $has_break, $subject_id, $teacher_id, $status, branch_id_for_insert()]);
+            $stmt->execute([$class_id ?: null, $shift_id ?: null, $section_id, $days ?: null, $start_time ?: null, $end_time ?: null, $has_break, $subject_id, $teacher_id, $status, $routine_destination_branch]);
             sec_log_activity($pdo, 'Routine', 'Create', "Section আইডি {$section_id} এর জন্য নতুন রুটিন যোগ করা হয়েছে");
             $_SESSION['rt_msg'] = 'নতুন রুটিন যোগ করা হয়েছে।';
         }
