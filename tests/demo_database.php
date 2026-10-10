@@ -17,6 +17,12 @@ check((int)$scoped->query('SELECT COUNT(*) FROM exam_marks')->fetchColumn()===72
 check((int)$scoped->query("SELECT COUNT(*) FROM employees")->fetchColumn()===24,'24 fictional teachers');
 check((int)$scoped->query("SELECT COUNT(*) FROM scholarship_applications")->fetchColumn()===12,'12 fictional scholarship applications');
 check((int)$scoped->query("SELECT COUNT(*) FROM teacher_question_papers")->fetchColumn()===15,'15 fictional question papers');
+foreach($pdo->query('SELECT db_name FROM demo_sandboxes WHERE ready=1 AND token_hash IS NULL AND hour_key='.demo_hour())->fetchAll(PDO::FETCH_COLUMN) as $readyDb){
+ $q=$pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME='academic_subjects' AND COLUMN_NAME IN ('sort_order','religion')");$q->execute([$readyDb]);
+ check((int)$q->fetchColumn()===2,'academic columns installed in every unused demo pool');
+ $q=$pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=? AND TABLE_NAME='academic_calendar_categories'");$q->execute([$readyDb]);
+ check((int)$q->fetchColumn()===1,'calendar configuration installed in every unused demo pool');
+}
 check((int)$scoped->query("SELECT COUNT(*) FROM elearning_lesson_plans")->fetchColumn()===18,'18 fictional lesson plans');
 check((int)$scoped->query("SELECT COUNT(*) FROM elearning_lesson_plans WHERE status='Approved' AND branch_id=1")->fetchColumn()===15,'15 approved class and subject examples');
 check((int)$scoped->query("SELECT COUNT(*) FROM student_daily_attendance WHERE attendance_date='".date('Y-m-d')."'")->fetchColumn()===240,'sample attendance uses target reset day');

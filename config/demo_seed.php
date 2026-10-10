@@ -30,6 +30,7 @@ function demo_seed_database(PDO $pdo,?int $anchor=null): void {
  require_once __DIR__.'/lesson_plan_helpers.php';lp_ensure_tables($pdo);
  require_once __DIR__.'/scholarship_application_helpers.php';sa_ensure_tables($pdo);
  require_once __DIR__.'/teacher_question_helpers.php';tq_ensure_tables($pdo);
+ require_once __DIR__.'/academic_update_schema.php';erp_academic_update_schema($pdo);
  require_once __DIR__.'/branch_scope.php';branch_ensure_column($pdo,'academic_sections');
  $pdo->beginTransaction();
  $hash=password_hash('DemoAccess!2026',PASSWORD_DEFAULT);

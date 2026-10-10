@@ -11,7 +11,7 @@ unset($_SESSION['mb_err']);
 $current_session = $pdo->query("SELECT * FROM academic_sessions WHERE is_current_session = 1 LIMIT 1")->fetch();
 $current_session_id = $current_session ? (int) $current_session['id'] : 0;
 
-$institute = $pdo->query("SELECT institute_name, logo_path, phone_number FROM institute_settings WHERE id = 1")->fetch();
+$institute = $pdo->query("SELECT * FROM institute_settings WHERE id = 1")->fetch();
 $fr_bid2 = branch_current_id();
 if ($fr_bid2 !== null) {
     $branch_stmt2 = $pdo->prepare("SELECT * FROM branches WHERE id = ? LIMIT 1");
@@ -66,7 +66,7 @@ $classes  = $pdo->query("SELECT id, class_name, has_group FROM academic_classes 
 $shifts   = $pdo->query("SELECT id, shift_name FROM academic_shifts WHERE status = 'Active' ORDER BY shift_name ASC")->fetchAll();
 $sections = $pdo->query("SELECT id, section_name, class_id, shift_id FROM academic_sections WHERE status = 'Active' ORDER BY section_name ASC")->fetchAll();
 $groups   = $pdo->query("SELECT id, group_name, class_id FROM academic_groups WHERE status = 'Active' ORDER BY group_name ASC")->fetchAll();
-$subjects = $pdo->query("SELECT id, subject_name, class_id FROM academic_subjects WHERE status = 'Active' ORDER BY subject_name ASC")->fetchAll();
+$subjects = $pdo->query("SELECT id, subject_name, class_id FROM academic_subjects WHERE status = 'Active' ORDER BY sort_order ASC, id ASC")->fetchAll();
 $terms    = $current_session_id
     ? $pdo->prepare("SELECT id, term_name FROM exam_terms WHERE session_id = ? AND status = 'Active' ORDER BY rank ASC")
     : null;
@@ -182,7 +182,7 @@ $view = $_GET['view'] ?? 'config';
             <h4><?php echo mbv($inst_display_name); ?></h4>
             <?php if ($addr_line !== ''): ?><p class="addr">(<?php echo mbv($addr_line); ?>)</p><?php endif; ?>
             <?php if ($inst_phone !== ''): ?><p class="phone">Phone: <?php echo mbv($inst_phone); ?></p><?php endif; ?>
-            <p class="web">www.yourschool.com</p>
+            <?php if (!empty($institute['website'])): ?><p class="web"><?php echo htmlspecialchars((string) $institute['website']); ?></p><?php endif; ?>
             <p class="meta">
                 Class : <?php echo mbv($class_name); ?>, Shift : <?php echo mbv($shift_name); ?>, Section : <?php echo mbv($section_name); ?>
             </p>

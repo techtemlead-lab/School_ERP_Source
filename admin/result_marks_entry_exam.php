@@ -5,6 +5,8 @@
 // যে সাবজেক্টের জন্য এই Term/Part-এ এখনো "Assign Exam" পেজ থেকে Full Mark সেট করা হয়নি,
 // সেই কলাম disabled/grey দেখাবে (স্ক্রিনশট অনুযায়ী) — আগে Assign Exam পেজে সেট করতে হবে।
 require_once __DIR__ . '/../config/report_card_helpers.php';
+require_once __DIR__ . '/../config/exam_att_grid.php';
+
 $mx_err = $_SESSION['mx_err'] ?? '';
 $mx_msg = $_SESSION['mx_msg'] ?? '';
 unset($_SESSION['mx_err'], $_SESSION['mx_msg']);
@@ -83,7 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_marks'])) {
     } else {
         // এই Term/Part-এ এই Class-এর কোন কোন Subject আসলে assign করা আছে (full mark সহ), সার্ভার-সাইডে যাচাই
         $assign_stmt = $pdo->prepare(
-            "SELECT subject_id, full_mark_exam FROM exam_assign_subjects WHERE term_id = ? AND part_id = ? AND class_id = ?"
+            "SELECT subject_id, full_mark_exam FROM exam_assign_subjects WHERE term_id = ? AND part_id = ? AND class_id = ? AND status = 'Active'"
         );
         $assign_stmt->execute([$term_id, $part_id, $class_id]);
         $assigned = [];
@@ -98,8 +100,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_marks'])) {
              ON DUPLICATE KEY UPDATE marks_obtained = VALUES(marks_obtained)"
         );
 
+        // Eligibility + Attendance (Present) গেট — ব্রাউজার এড়িয়ে POST করলেও সার্ভার আটকাবে
+        $post_stids = [];
+        foreach ($marks as $_sj => $_sm) { foreach ((array) $_sm as $_st => $_v) { $post_stids[(int) $_st] = true; } }
+        $gate = ea_mark_states($pdo, $class_id, $shift_id, $section_id, $term_id, $part_id, array_keys($post_stids), array_keys($assigned));
+
         $count = 0;
         $bad_range = 0;
+        $blocked = 0;
         foreach ($marks as $subj_id => $stu_marks) {
             $subj_id = (int) $subj_id;
             if (!isset($assigned[$subj_id])) { continue; } // এই সাবজেক্ট assign করা নেই — বাদ
@@ -108,6 +116,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_marks'])) {
                 $stid = (int) $stid;
                 $m = trim((string) $m);
                 if ($stid <= 0) { continue; }
+                if (($gate['state'][$stid][$subj_id] ?? 'noelig') !== 'open') { $blocked++; continue; } // Eligible নয় / Attendance নেই / Absent
                 if ($m === '') {
                     $stmt->execute([$current_session_id, $term_id, $part_id, $subj_id, $class_id, $shift_id, $section_id, $stid, null]);
                     $count++;
@@ -122,10 +131,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_marks'])) {
             }
         }
         sec_log_activity($pdo, 'Result', 'Update', "ক্লাস আইডি {$class_id}, টার্ম আইডি {$term_id}, পার্ট আইডি {$part_id} এর Marks Entry (Exam) সংরক্ষণ করা হয়েছে");
-        $_SESSION['mx_msg'] = $count . ' টা মার্ক সেভ করা হয়েছে।' . ($bad_range ? ' (' . $bad_range . ' টা মার্ক Full Mark এর বাইরে থাকায় বাদ দেওয়া হয়েছে।)' : '');
+        $_SESSION['mx_msg'] = $count . ' টা মার্ক সেভ করা হয়েছে।' . ($bad_range ? ' (' . $bad_range . ' টা মার্ক Full Mark এর বাইরে থাকায় বাদ দেওয়া হয়েছে।)' : '') . ($blocked ? ' (' . $blocked . ' টা ঘর Eligibility/Attendance (Present) না থাকায় বাদ দেওয়া হয়েছে।)' : '');
     }
 
-    header('Location: index.php?page=result_marks_entry_exam&class_id=' . $class_id . '&shift_id=' . $shift_id . '&section_id=' . $section_id . '&term_id=' . $term_id . '&part_id=' . $part_id);
+    header('Location: index.php?page=result_marks_entry_exam&class_id=' . $class_id . '&shift_id=' . $shift_id . '&section_id=' . $section_id . '&term_id=' . $term_id . '&part_id=' . $part_id . '&group_id=' . (int) ($_POST['group_id'] ?? 0));
     exit();
 }
 
@@ -137,6 +146,9 @@ $sel_shift   = (int) ($_GET['shift_id'] ?? 0);
 $sel_section = (int) ($_GET['section_id'] ?? 0);
 $sel_term    = (int) ($_GET['term_id'] ?? 0);
 $sel_part    = (int) ($_GET['part_id'] ?? 0);
+$sel_group   = (int) ($_GET['group_id'] ?? 0);
+$mg_groups   = $sel_class > 0 ? ee_groups_of_class($pdo, $sel_class) : [];
+if ($mg_groups && !isset($mg_groups[$sel_group])) $sel_group = 0;
 
 $classes = $pdo->query("SELECT id, class_name FROM academic_classes WHERE status='Active' ORDER BY rank ASC, class_name ASC")->fetchAll();
 $shifts  = $pdo->query("SELECT id, shift_name FROM academic_shifts WHERE status='Active' ORDER BY shift_name ASC")->fetchAll();
@@ -160,14 +172,17 @@ $parts = $parts_stmt->fetchAll();
 // সিলেক্টেড কম্বিনেশনের জন্য: এই Class-এর সব Subject (কলাম) + Student লিস্ট (রো) + বিদ্যমান মার্ক
 // -----------------------------------------------------------
 $all_selected = ($sel_class > 0 && $sel_shift > 0 && $sel_section > 0 && $sel_term > 0 && $sel_part > 0);
+$need_group = ($all_selected && $mg_groups && $sel_group <= 0);
+if ($need_group) $all_selected = false;
 $subjects_list = [];
 $students = [];
 $marks_map = []; // marks_map[subject_id][student_id] = mark
 
 if ($all_selected) {
-    $subj_stmt = $pdo->prepare("SELECT id, subject_name, full_marks FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY id ASC");
+    $subj_stmt = $pdo->prepare("SELECT id, subject_name, full_marks, group_id FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY sort_order ASC, id ASC");
     $subj_stmt->execute([$sel_class]);
     $subjects_list = $subj_stmt->fetchAll();
+    if ($mg_groups) { $GS = $sel_group; $subjects_list = array_values(array_filter($subjects_list, function ($r) use ($GS) { $g = (int) ($r['group_id'] ?? 0); return $g === 0 || $g === $GS; })); }
 
     $assign_stmt = $pdo->prepare("SELECT subject_id, full_mark_exam FROM exam_assign_subjects WHERE term_id=? AND part_id=? AND class_id=?");
     $assign_stmt->execute([$sel_term, $sel_part, $sel_class]);
@@ -183,6 +198,7 @@ if ($all_selected) {
 
     $me_where = ['class_id=?', 'shift_id=?', 'section_id=?', "status='Active'"];
     $me_params = [$sel_class, $sel_shift, $sel_section];
+    if ($mg_groups) { $me_where[] = 'group_id=?'; $me_params[] = $sel_group; }
     branch_apply_filter($me_where, $me_params);
     $stu_stmt = $pdo->prepare("SELECT id, student_id, roll_no, name_en FROM students WHERE " . implode(' AND ', $me_where) . " ORDER BY (roll_no + 0) ASC, roll_no ASC");
     $stu_stmt->execute($me_params);
@@ -254,6 +270,20 @@ if ($all_selected) {
             </div>
         </div>
 
+        <div class="row mb-3 g-3" id="mxe_group_row" <?php echo $mg_groups ? '' : 'style="display:none;"'; ?>>
+            <div class="col-md-4">
+                <div class="d-flex align-items-center gap-2">
+                    <label class="fw-bold text-nowrap mb-0" style="min-width:95px;">Group <span class="text-danger">*</span></label>
+                    <select name="group_id" id="mxe_group" class="form-select">
+                        <option value="0">-- Select --</option>
+                        <?php foreach ($mg_groups as $gid => $gname): ?>
+                            <option value="<?php echo (int) $gid; ?>" <?php echo $sel_group === (int) $gid ? 'selected' : ''; ?>><?php echo htmlspecialchars((string) $gname, ENT_QUOTES, 'UTF-8'); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+        </div>
+
         <div class="row mb-3 g-3">
             <div class="col-md-4">
                 <div class="d-flex align-items-center gap-2">
@@ -295,73 +325,16 @@ if ($all_selected) {
     </div>
 
     <div id="mxe_result_wrap">
-    <?php if (!$all_selected): ?>
+    <?php if ($need_group): ?>
+        <?php echo ea_group_need_msg('Mark Entry'); ?>
+    <?php elseif (!$all_selected): ?>
         <div class="text-center text-muted py-4">উপরে Class, Shift, Section, Exam Term এবং Exam Part সিলেক্ট করুন — তাহলে স্টুডেন্ট লিস্ট এখানে দেখাবে।</div>
     <?php elseif (!$subjects_list): ?>
         <div class="text-center text-muted py-4">এই Class-এর জন্য কোনো Subject পাওয়া যায়নি। আগে <a href="index.php?page=academic_subject">Subject</a> যোগ করুন।</div>
     <?php elseif (!$students): ?>
         <div class="text-center text-muted py-4">এই Class/Shift/Section এ কোনো Active Student পাওয়া যায়নি।</div>
     <?php else: ?>
-        <?php $none_assigned = true; foreach ($subjects_list as $sub) { if ($sub['is_assigned']) { $none_assigned = false; break; } } ?>
-        <?php if ($none_assigned): ?>
-            <div class="alert alert-warning py-2">
-                এই Term/Part-এর জন্য এখনো কোনো Subject-এ Full Mark সেট করা হয়নি, তাই সব কলাম disabled দেখাচ্ছে।
-                আগে <a href="index.php?page=result_assign_exams">Assign Exam</a> পেজ থেকে সাবজেক্টগুলোর Full Mark সেট করুন।
-            </div>
-        <?php endif; ?>
-
-        <form method="POST" action="index.php?page=result_marks_entry_exam" id="marksForm">
-            <?php echo csrf_field(); ?>
-            <input type="hidden" name="class_id" value="<?php echo $sel_class; ?>">
-            <input type="hidden" name="shift_id" value="<?php echo $sel_shift; ?>">
-            <input type="hidden" name="section_id" value="<?php echo $sel_section; ?>">
-            <input type="hidden" name="term_id" value="<?php echo $sel_term; ?>">
-            <input type="hidden" name="part_id" value="<?php echo $sel_part; ?>">
-
-            <div class="table-responsive">
-                <table class="table table-bordered align-middle m-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th style="width:50px;">Sl.</th>
-                            <th>Name</th>
-                            <th style="width:70px;">Roll</th>
-                            <?php foreach ($subjects_list as $sub): ?>
-                                <th class="text-center">
-                                    <?php echo mxv($sub['subject_name']); ?><br>
-                                    <span class="text-warning fw-bold small">(<?php echo mxv(mxnum($sub['full_mark'])); ?>/<?php echo mxv(mxnum($sub['full_mark'])); ?>)</span>
-                                </th>
-                            <?php endforeach; ?>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php $srl = 1; foreach ($students as $stu): ?>
-                            <tr>
-                                <td><?php echo $srl++; ?></td>
-                                <td class="text-primary fw-bold"><?php echo mxv($stu['name_en']); ?></td>
-                                <td><?php echo mxv($stu['roll_no']); ?></td>
-                                <?php foreach ($subjects_list as $sub):
-                                    $sid = (int) $sub['id'];
-                                    $existing = $marks_map[$sid][(int) $stu['id']] ?? null;
-                                ?>
-                                    <td>
-                                        <input type="number" step="0.01" min="0" max="<?php echo mxv($sub['full_mark']); ?>"
-                                               name="marks[<?php echo $sid; ?>][<?php echo (int) $stu['id']; ?>]"
-                                               class="form-control form-control-sm text-end mxe-input"
-                                               value="<?php echo $existing !== null ? mxv(mxnum($existing)) : ''; ?>"
-                                               placeholder="0"
-                                               <?php echo $sub['is_assigned'] ? '' : 'disabled'; ?>>
-                                    </td>
-                                <?php endforeach; ?>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="d-flex justify-content-center mt-4">
-                <button type="submit" name="save_marks" class="btn btn-primary px-5 fw-bold" style="background-color:#1e3a8a;border-color:#1e3a8a;">Save Marks</button>
-            </div>
-        </form>
+        <?php mx_render_exam_form($pdo, $sel_class, $sel_shift, $sel_section, $sel_term, $sel_part, $sel_group, $subjects_list, $students, $marks_map); ?>
     <?php endif; ?>
     </div>
 </div>
@@ -374,6 +347,13 @@ if ($all_selected) {
     var elTerm    = document.getElementById('mxe_term');
     var elPart    = document.getElementById('mxe_part');
     var elHint    = document.getElementById('mxe_section_hint');
+    var elGroup   = document.getElementById('mxe_group');
+    var elGroupRow = document.getElementById('mxe_group_row');
+    function setGroups(list) {
+        elGroup.innerHTML = '<option value="0">-- Select --</option>';
+        list.forEach(function (g) { var o = document.createElement('option'); o.value = g.id; o.textContent = g.name; elGroup.appendChild(o); });
+        elGroupRow.style.display = list.length ? '' : 'none';
+    }
     var elWrap    = document.getElementById('mxe_result_wrap');
 
     function mxeAjaxUrl(action, extra) {
@@ -389,6 +369,7 @@ if ($all_selected) {
     function loadSections() {
         var classId = elClass.value, shiftId = elShift.value;
         elSection.innerHTML = '<option value="0">-- Select --</option>';
+        setGroups([]);
         clearTable();
 
         if (classId == '0' || shiftId == '0') {
@@ -407,6 +388,7 @@ if ($all_selected) {
                     opt.textContent = s.name;
                     elSection.appendChild(opt);
                 });
+                setGroups(data.groups || []);
             })
             .catch(function () { /* নেটওয়ার্ক সমস্যা হলে চুপচাপ থেমে যাওয়া, ইউজার আবার সিলেক্ট করলে রিট্রাই হবে */ });
     }
@@ -421,7 +403,7 @@ if ($all_selected) {
 
         elWrap.innerHTML = '<div class="text-center text-muted py-4"><i class="fa-solid fa-spinner fa-spin me-2"></i>লোড হচ্ছে...</div>';
 
-        fetch(mxeAjaxUrl('table', { class_id: classId, shift_id: shiftId, section_id: sectionId, term_id: termId, part_id: partId }))
+        fetch(mxeAjaxUrl('table', { class_id: classId, shift_id: shiftId, section_id: sectionId, term_id: termId, part_id: partId, group_id: elGroup.value }))
             .then(function (r) { return r.text(); })
             .then(function (html) { elWrap.innerHTML = html; })
             .catch(function () {
@@ -434,5 +416,36 @@ if ($all_selected) {
     elSection.addEventListener('change', loadTable);
     elTerm.addEventListener('change', loadTable);
     elPart.addEventListener('change', loadTable);
+    elGroup.addEventListener('change', loadTable);
+    // Full Mark-এর বেশি মার্ক টাইপ করলে সাথে সাথে লাল হবে, এবং Save আটকে যাবে
+    function markGuardCheck(inp) {
+        var max = parseFloat(inp.getAttribute('max'));
+        var v = parseFloat(inp.value);
+        var bad = !isNaN(max) && !isNaN(v) && (v > max || v < 0);
+        inp.classList.toggle('is-invalid', bad);
+        var text = 'Full Mark ' + max + '-এর বেশি দেওয়া যাবে না';
+        inp.setCustomValidity(bad ? text : '');
+        // ইনপুটের ঠিক নিচে লাল এরর মেসেজ
+        var msg = inp.nextElementSibling;
+        if (!msg || !msg.classList || !msg.classList.contains('mark-guard-msg')) {
+            msg = document.createElement('div');
+            msg.className = 'mark-guard-msg';
+            msg.style.cssText = 'color:#dc3545;font-size:11px;line-height:1.2;margin-top:3px;text-align:right;display:none;';
+            inp.parentNode.insertBefore(msg, inp.nextSibling);
+        }
+        msg.textContent = bad ? text : '';
+        msg.style.display = bad ? 'block' : 'none';
+        return !bad;
+    }
+    elWrap.addEventListener('input', function (e) {
+        if (e.target && e.target.matches && e.target.matches('input[type="number"][max]')) { markGuardCheck(e.target); }
+    });
+    elWrap.addEventListener('submit', function (e) {
+        var bad = null;
+        e.target.querySelectorAll('input[type="number"][max]').forEach(function (inp) {
+            if (!markGuardCheck(inp) && !bad) { bad = inp; }
+        });
+        if (bad) { e.preventDefault(); alert('কিছু মার্ক Full Mark-এর চেয়ে বেশি (লাল ঘর)। ঠিক করে আবার Save করুন।'); bad.focus(); }
+    }, true);
 })();
 </script>

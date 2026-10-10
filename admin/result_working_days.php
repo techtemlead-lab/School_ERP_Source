@@ -50,6 +50,8 @@ $pdo->exec(
 // Academic Module > Academic Calendar এ ম্যানেজ করা হয় (academic_calendar.php)।
 // এখানে শুধু READ করা হয় - ক্যালকুলেশনের জন্য।
 // (টেবিলটা যদি Academic Calendar পেজ আগে থেকে ভিজিট না করা থাকে সেক্ষেত্রেও এখানে অটো তৈরি হবে)
+require_once __DIR__ . '/../config/academic_calendar_helpers.php';
+ac_ensure_tables($pdo);
 $pdo->exec(
     "CREATE TABLE IF NOT EXISTS academic_holidays (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -82,9 +84,8 @@ function calculate_working_days(PDO $pdo, string $start, string $end, array $wee
     if (!$s || !$e || $e < $s) return 0;
 
     // সংশ্লিষ্ট রেঞ্জের একাডেমিক হলিডে ডেট গুলো একটা সেট এ নেওয়া হলো
-    $stmt = $pdo->prepare("SELECT start_date, end_date FROM academic_holidays WHERE status='Active' AND start_date <= ? AND end_date >= ?");
-    $stmt->execute([$end, $start]);
-    $holiday_ranges = $stmt->fetchAll();
+    // শুধু "ছুটি ধরা হবে" Category-র এন্ট্রি বাদ যাবে (Exam/Event ইত্যাদি কাজের দিন থেকে যাবে)
+    $holiday_ranges = ac_holiday_ranges($pdo, $start, $end);
 
     $total = 0;
     for ($t = $s; $t <= $e; $t += 86400) {
@@ -262,7 +263,7 @@ $classes = $pdo->query("SELECT id, class_name FROM academic_classes WHERE status
             থেকে ম্যানেজ করা হয় — সেখানে যোগ করা প্রতিটা তারিখ-রেঞ্জ এই Working Days ক্যালকুলেশনে অটো বাদ যাবে।
         </p>
 
-        <?php $holidays = $pdo->query("SELECT * FROM academic_holidays WHERE status='Active' ORDER BY start_date ASC")->fetchAll(); ?>
+        <?php $ac_cats_wd = ac_categories($pdo, true); $holidays = array_values(array_filter($pdo->query("SELECT * FROM academic_holidays WHERE status='Active' ORDER BY start_date ASC")->fetchAll(), fn($h) => ac_is_holiday_type($ac_cats_wd, $h['holiday_type']))); ?>
         <div class="table-responsive">
             <table class="table table-bordered table-sm align-middle">
                 <thead class="table-light"><tr><th>Holiday Name</th><th>Start Date</th><th>End Date</th><th>Days</th><th>Type</th></tr></thead>

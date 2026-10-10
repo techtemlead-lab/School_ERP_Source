@@ -45,6 +45,7 @@ function erp_install_empty_school(PDO $school,array $data): void {
  require_once __DIR__.'/lesson_plan_helpers.php';lp_ensure_tables($school);
  require_once __DIR__.'/scholarship_application_helpers.php';sa_ensure_tables($school);
  require_once __DIR__.'/teacher_question_helpers.php';tq_ensure_tables($school);
+ require_once __DIR__.'/academic_update_schema.php';erp_academic_update_schema($school);
  $school->beginTransaction();
  try{
   $school->exec('DELETE FROM admin');

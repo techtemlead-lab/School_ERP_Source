@@ -17,8 +17,12 @@ if (!isset($_SESSION['admin_logged'])) {
 }
 
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../config/portal_access.php';
+erp_portal_require_role($pdo, 'admin', 'result_attendance_subject');
+require_once __DIR__ . '/../../config/subject_rank.php'; subject_rank_ensure($pdo);
 require_once __DIR__ . '/../../config/branch_scope.php';
 require_once __DIR__ . '/../../config/permissions.php';
+require_once __DIR__ . '/../../config/exam_att_grid.php';
 
 if (!perm_page_allowed($pdo, 'result_attendance_subject')) {
     http_response_code(403);
@@ -26,6 +30,7 @@ if (!perm_page_allowed($pdo, 'result_attendance_subject')) {
     echo json_encode(['success' => false, 'message' => 'এই পেজ দেখার অনুমতি নেই।']);
     exit();
 }
+perm_write_guard($pdo, 'result_attendance_subject'); // Read-only ইউজারের সেভ আটকায়
 
 function asv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 
@@ -51,7 +56,9 @@ if ($action === 'sections') {
     foreach ($sections as $s) {
         $result[] = ['id' => (int) $s['id'], 'name' => $s['section_name']];
     }
-    echo json_encode(['success' => true, 'sections' => $result], JSON_UNESCAPED_UNICODE);
+    $groups = [];
+    foreach (($class_id > 0 ? ee_groups_of_class($pdo, $class_id) : []) as $gid => $gn) { $groups[] = ['id' => (int) $gid, 'name' => $gn]; }
+    echo json_encode(['success' => true, 'sections' => $result, 'groups' => $groups], JSON_UNESCAPED_UNICODE);
     exit();
 }
 
@@ -65,9 +72,11 @@ if ($action === 'subjects') {
 
     $subjects_list = [];
     if ($class_id > 0) {
-        $stmt = $pdo->prepare("SELECT id, subject_name FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY subject_name ASC");
+        $stmt = $pdo->prepare("SELECT id, subject_name, group_id FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY sort_order ASC, id ASC");
         $stmt->execute([$class_id]);
         $subjects_list = $stmt->fetchAll();
+        $gsel = (int) ($_GET['group_id'] ?? 0);
+        if ($gsel > 0) { $subjects_list = array_values(array_filter($subjects_list, function ($r) use ($gsel) { $g = (int) ($r['group_id'] ?? 0); return $g === 0 || $g === $gsel; })); }
     }
 
     $result = [];
@@ -134,13 +143,19 @@ if ($action === 'table') {
     $sel_term    = (int) ($_GET['term_id'] ?? 0);
     $sel_part    = (int) ($_GET['part_id'] ?? 0);
     $sel_subject = (int) ($_GET['subject_id'] ?? 0);
+    $sel_group   = (int) ($_GET['group_id'] ?? 0);
+    $as_groups   = $sel_class > 0 ? ee_groups_of_class($pdo, $sel_class) : [];
+    if ($as_groups && !isset($as_groups[$sel_group])) $sel_group = 0;
 
     $all_selected = ($sel_class > 0 && $sel_shift > 0 && $sel_section > 0 && $sel_term > 0 && $sel_part > 0 && $sel_subject > 0);
+    $need_group = ($all_selected && $as_groups && $sel_group <= 0);
+    if ($need_group) $all_selected = false;
     $students = [];
 
     if ($all_selected) {
         $ras_where = ['s.class_id=?', 's.shift_id=?', 's.section_id=?', "s.status='Active'"];
         $ras_params = [$sel_term, $sel_part, $sel_subject, $sel_class, $sel_shift, $sel_section];
+        if ($as_groups) { $ras_where[] = 's.group_id=?'; $ras_params[] = $sel_group; }
         branch_apply_filter($ras_where, $ras_params, 's.branch_id');
         $stu_stmt = $pdo->prepare(
             "SELECT s.id, s.student_id, s.roll_no, s.name_en, s.photo_path, ea.status AS saved_status
@@ -151,12 +166,16 @@ if ($action === 'table') {
         );
         $stu_stmt->execute($ras_params);
         $students = $stu_stmt->fetchAll();
+        $gate = ea_subject_gate($pdo, $sel_class, $sel_term, $sel_part, $sel_subject, $sel_shift, $sel_section);
+        $students = $gate['assigned'] ? array_values(array_filter($students, function ($x) use ($gate) { return !empty($gate['ids'][(int) $x['id']]); })) : [];
     }
     ?>
-    <?php if (!$all_selected): ?>
+    <?php if ($need_group): ?>
+        <?php echo ea_group_need_msg(); ?>
+    <?php elseif (!$all_selected): ?>
         <div class="text-center text-muted py-4">উপরে Class, Shift, Section, Exam Term, Exam Part এবং Subject সিলেক্ট করুন — তাহলে স্টুডেন্ট লিস্ট এখানে দেখাবে।</div>
     <?php elseif (!$students): ?>
-        <div class="text-center text-muted py-4">এই Class/Shift/Section এ কোনো Active Student পাওয়া যায়নি।</div>
+        <?php echo ea_subject_msg($gate); ?>
     <?php else: ?>
         <form method="POST" action="index.php?page=result_attendance_subject" id="attendanceForm">
             <?php echo csrf_field(); ?>
@@ -166,6 +185,7 @@ if ($action === 'table') {
             <input type="hidden" name="term_id" value="<?php echo $sel_term; ?>">
             <input type="hidden" name="part_id" value="<?php echo $sel_part; ?>">
             <input type="hidden" name="subject_id" value="<?php echo $sel_subject; ?>">
+            <input type="hidden" name="group_id" value="<?php echo (int) $sel_group; ?>">
 
             <div class="table-responsive">
                 <table class="table table-bordered align-middle m-0">

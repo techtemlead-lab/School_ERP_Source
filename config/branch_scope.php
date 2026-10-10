@@ -137,3 +137,40 @@ function branch_multi_branch_mode(PDO $pdo): bool
     }
     return $count > 1;
 }
+
+
+// ---------------------------------------------------------------------------
+// Branch আইসোলেশন হেল্পার — যেসব পেজে $where/$params অ্যারে নেই সেখানে সহজে ব্যবহার করার জন্য
+// ---------------------------------------------------------------------------
+
+/** SQL-এ সরাসরি জোড়ার জন্য " AND col = N" (N পূর্ণসংখ্যা, তাই ইনজেকশন-নিরাপদ)। All Branch হলে খালি স্ট্রিং। */
+if (!function_exists('branch_sql_inline')) {
+    function branch_sql_inline(string $column): string
+    {
+        $bid = branch_current_id();
+        if ($bid === null) { return ''; }
+        $bid = (int) $bid;
+        return defined('PORTAL_BRANCH_ID') ? " AND ($column = $bid OR $column IS NULL)" : " AND $column = $bid";
+    }
+}
+
+/** prepared statement-এর জন্য: [' AND col = ?', [params]] */
+if (!function_exists('branch_sql_and')) {
+    function branch_sql_and(string $column): array
+    {
+        $w = []; $p = [];
+        branch_apply_filter($w, $p, $column);
+        return [$w ? ' AND ' . implode(' AND ', $w) : '', $p];
+    }
+}
+
+/** এই student_pk টা বর্তমান ইউজারের branch-এর কিনা (id দিয়ে সরাসরি অ্যাক্সেস আটকাতে) */
+if (!function_exists('branch_student_ok')) {
+    function branch_student_ok(PDO $pdo, int $student_pk): bool
+    {
+        [$f, $p] = branch_sql_and('branch_id');
+        $st = $pdo->prepare('SELECT 1 FROM students WHERE id = ?' . $f);
+        $st->execute(array_merge([$student_pk], $p));
+        return (bool) $st->fetchColumn();
+    }
+}

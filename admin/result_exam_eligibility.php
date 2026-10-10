@@ -6,6 +6,7 @@
 //   কালো  = Main (Compulsory) subjects
 //   গোলাপি = Class wise Optional subjects (group_id ফাঁকা)
 //   সোনালি = Student wise Optional subjects (নির্দিষ্ট Group এর সাথে সংযুক্ত)
+require_once __DIR__ . '/../config/exam_elig_grid.php'; // Group-wise গ্রিড + সেভ
 $ee_err = $_SESSION['ee_err'] ?? '';
 $ee_msg = $_SESSION['ee_msg'] ?? '';
 unset($_SESSION['ee_err'], $_SESSION['ee_msg']);
@@ -78,26 +79,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_eligibility'])) 
     if ($class_id <= 0 || $shift_id <= 0 || $section_id <= 0 || $term_id <= 0 || !$student_ids || !$subject_ids) {
         $_SESSION['ee_err'] = 'Class, Shift, Section এবং Exam Term সিলেক্ট করুন।';
     } else {
-        $stmt = $pdo->prepare(
-            "INSERT INTO exam_eligibility (session_id, term_id, class_id, shift_id, section_id, student_id, subject_id, is_eligible)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE is_eligible = VALUES(is_eligible)"
-        );
-        $count = 0;
-        foreach ($student_ids as $stid) {
-            $stid = (int) $stid;
-            foreach ($subject_ids as $sid) {
-                $sid = (int) $sid;
-                $is_elig = isset($elig_map[$stid][$sid]) && $elig_map[$stid][$sid] === '1' ? 1 : 0;
-                $stmt->execute([$current_session_id, $term_id, $class_id, $shift_id, $section_id, $stid, $sid, $is_elig]);
-                $count++;
-            }
-        }
+        [$n_students, $count] = ee_save($pdo, $current_session_id, $term_id, $class_id, $shift_id, $section_id, (array) $student_ids, (array) $subject_ids, $elig_map);
         sec_log_activity($pdo, 'Result', 'Update', "ক্লাস আইডি {$class_id}, টার্ম আইডি {$term_id} এর {$count} টি Exam Eligibility এন্ট্রি সংরক্ষণ করা হয়েছে");
-        $_SESSION['ee_msg'] = count($student_ids) . ' জন শিক্ষার্থীর Exam Eligibility সেভ করা হয়েছে।';
+        $_SESSION['ee_msg'] = $n_students . ' জন শিক্ষার্থীর Exam Eligibility সেভ করা হয়েছে।';
     }
 
-    header('Location: index.php?page=result_exam_eligibility&class_id=' . $class_id . '&shift_id=' . $shift_id . '&section_id=' . $section_id . '&term_id=' . $term_id);
+    header('Location: index.php?page=result_exam_eligibility&class_id=' . $class_id . '&shift_id=' . $shift_id . '&section_id=' . $section_id . '&term_id=' . $term_id . '&group_id=' . (int) ($_POST['group_id'] ?? 0));
     exit();
 }
 
@@ -108,6 +95,8 @@ $sel_class   = (int) ($_GET['class_id'] ?? 0);
 $sel_shift   = (int) ($_GET['shift_id'] ?? 0);
 $sel_section = (int) ($_GET['section_id'] ?? 0);
 $sel_term    = (int) ($_GET['term_id'] ?? 0);
+$sel_group   = (int) ($_GET['group_id'] ?? 0);
+$ee_groups   = $sel_class > 0 ? ee_groups_of_class($pdo, $sel_class) : []; // Group-ওয়ালা Class (Nine/Ten) হলে Group ফিল্টার দেখাবে
 
 $classes = $pdo->query("SELECT id, class_name FROM academic_classes WHERE status='Active' ORDER BY rank ASC, class_name ASC")->fetchAll();
 $shifts  = $pdo->query("SELECT id, shift_name FROM academic_shifts WHERE status='Active' ORDER BY shift_name ASC")->fetchAll();
@@ -123,48 +112,6 @@ $terms_stmt = $pdo->prepare("SELECT id, term_name FROM exam_terms WHERE session_
 $terms_stmt->execute([$current_session_id]);
 $terms = $terms_stmt->fetchAll();
 
-// -----------------------------------------------------------
-// সিলেক্টেড কম্বিনেশনের জন্য Subject + Student লিস্ট + বিদ্যমান এলিজিবিলিটি
-// -----------------------------------------------------------
-$all_selected = ($sel_class > 0 && $sel_shift > 0 && $sel_section > 0 && $sel_term > 0);
-$subjects = [];
-$students = [];
-$existing = []; // [student_id][subject_id] = is_eligible
-
-if ($all_selected) {
-    $sub_stmt = $pdo->prepare(
-        "SELECT id, subject_name, subject_type, group_id FROM academic_subjects
-         WHERE class_id=? AND status='Active'
-         ORDER BY (subject_type='Compulsory') DESC, subject_name ASC"
-    );
-    $sub_stmt->execute([$sel_class]);
-    $subjects = $sub_stmt->fetchAll();
-
-    $ree_where = ['class_id=?', 'shift_id=?', 'section_id=?', "status='Active'"];
-    $ree_params = [$sel_class, $sel_shift, $sel_section];
-    branch_apply_filter($ree_where, $ree_params);
-    $stu_stmt = $pdo->prepare(
-        "SELECT id, roll_no, name_en, group_id, religion FROM students
-         WHERE " . implode(' AND ', $ree_where) . "
-         ORDER BY (roll_no + 0) ASC, roll_no ASC"
-    );
-    $stu_stmt->execute($ree_params);
-    $students = $stu_stmt->fetchAll();
-
-    if ($subjects && $students) {
-        $ex_stmt = $pdo->prepare("SELECT student_id, subject_id, is_eligible FROM exam_eligibility WHERE term_id=? AND class_id=? AND shift_id=? AND section_id=?");
-        $ex_stmt->execute([$sel_term, $sel_class, $sel_shift, $sel_section]);
-        foreach ($ex_stmt->fetchAll() as $row) {
-            $existing[(int) $row['student_id']][(int) $row['subject_id']] = (int) $row['is_eligible'];
-        }
-    }
-}
-
-function subject_color_class($sub): string {
-    if ($sub['subject_type'] === 'Compulsory') return 'sub-main';
-    if ($sub['subject_type'] === 'Optional' && empty($sub['group_id'])) return 'sub-classwise';
-    return 'sub-studentwise';
-}
 ?>
 
 <style>
@@ -232,6 +179,20 @@ function subject_color_class($sub): string {
                 <button type="submit" class="btn btn-primary px-4 fw-bold" style="background-color:#1e3a8a;border-color:#1e3a8a;">Submit</button>
             </div>
         </div>
+
+        <!-- Group ফিল্টার: শুধু Group-ওয়ালা Class (Nine/Ten ইত্যাদি) হলে দেখায় -->
+        <div class="row mb-1 align-items-center" id="ee_group_row" <?php echo $ee_groups ? '' : 'style="display:none;"'; ?>>
+            <label class="col-sm-2 col-form-label fw-bold text-end">Group</label>
+            <div class="col-sm-3">
+                <select name="group_id" id="ee_group" class="form-select">
+                    <option value="0">সব Group (All Groups)</option>
+                    <?php foreach ($ee_groups as $gid => $gname): ?>
+                        <option value="<?php echo (int) $gid; ?>" <?php echo $sel_group === (int) $gid ? 'selected' : ''; ?>><?php echo eev($gname); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-sm-7 small text-muted">প্রতিটা শিক্ষার্থী শুধু নিজের Group-এর (ও কমন) Subject-এ Eligible হবে। Group বাছলে শুধু সেই Group-এর শিক্ষার্থী ও Subject দেখাবে।</div>
+        </div>
     </form>
 </div>
 
@@ -242,77 +203,7 @@ function subject_color_class($sub): string {
     </div>
 
     <div id="ee_result_wrap">
-        <?php if (!$all_selected): ?>
-            <div class="text-center text-muted py-4">উপরে Class, Shift, Section এবং Exam Term সিলেক্ট করুন — তাহলে ঐ ক্লাসের সব Student ও Subject এখানে দেখাবে।</div>
-        <?php elseif (!$subjects): ?>
-            <div class="text-center text-muted py-4">এই ক্লাসের জন্য কোনো Subject পাওয়া যায়নি। প্রথমে Academic Module &gt; Subject থেকে Subject যোগ করুন।</div>
-        <?php elseif (!$students): ?>
-            <div class="text-center text-muted py-4">এই Class/Shift/Section এ কোনো Active Student পাওয়া যায়নি।</div>
-        <?php else: ?>
-
-            <div class="d-flex justify-content-center gap-5 mb-4">
-                <div class="elig-legend-item"><span class="sub-th-dot" style="background:#1f2937;"></span><span>(Main subjects)</span></div>
-                <div class="elig-legend-item"><span class="sub-th-dot" style="background:#f4a6b8;"></span><span class="text-danger">(Class wise optional subjects)</span></div>
-                <div class="elig-legend-item"><span class="sub-th-dot" style="background:#c99a1e;"></span><span style="color:#b8860b;">(Student wise optional subjects)</span></div>
-            </div>
-
-            <form method="POST" action="index.php?page=result_exam_eligibility">
-                <?php echo csrf_field(); ?>
-                <input type="hidden" name="class_id" value="<?php echo $sel_class; ?>">
-                <input type="hidden" name="shift_id" value="<?php echo $sel_shift; ?>">
-                <input type="hidden" name="section_id" value="<?php echo $sel_section; ?>">
-                <input type="hidden" name="term_id" value="<?php echo $sel_term; ?>">
-                <?php foreach ($subjects as $sub): ?>
-                    <input type="hidden" name="grid_subject_id[]" value="<?php echo (int) $sub['id']; ?>">
-                <?php endforeach; ?>
-
-                <div class="table-responsive">
-                    <table class="table table-bordered align-middle text-center">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Sl.</th>
-                                <th class="text-start">Name</th>
-                                <th>Roll</th>
-                                <th>Group</th>
-                                <th>Religion</th>
-                                <?php foreach ($subjects as $sub): $cls = subject_color_class($sub); ?>
-                                    <th class="<?php echo $cls; ?>">
-                                        <span class="sub-th-dot mb-1" style="cursor:pointer;" title="Select/Unselect All" onclick="toggleColumn(<?php echo (int) $sub['id']; ?>, this)"></span>
-                                    </th>
-                                <?php endforeach; ?>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php $srl = 1; foreach ($students as $stu): $stid = (int) $stu['id']; ?>
-                                <tr>
-                                    <td><?php echo $srl++; ?></td>
-                                    <td class="text-start"><?php echo eev($stu['name_en']); ?></td>
-                                    <td><?php echo eev($stu['roll_no']); ?></td>
-                                    <td><?php echo eev($stu['group_id'] ?: 'N/A'); ?></td>
-                                    <td><?php echo eev($stu['religion']); ?></td>
-                                    <input type="hidden" name="student_id[]" value="<?php echo $stid; ?>">
-                                    <?php foreach ($subjects as $sub):
-                                        $sid = (int) $sub['id'];
-                                        $cls = subject_color_class($sub);
-                                        $checked = array_key_exists($sid, $existing[$stid] ?? []) ? (bool) $existing[$stid][$sid] : true;
-                                    ?>
-                                        <td class="<?php echo $cls; ?>">
-                                            <div class="small sub-name mb-1"><?php echo eev($sub['subject_name']); ?></div>
-                                            <input type="checkbox" class="form-check-input elig-cb elig-col-<?php echo $sid; ?>" name="elig[<?php echo $stid; ?>][<?php echo $sid; ?>]" value="1" <?php echo $checked ? 'checked' : ''; ?>>
-                                        </td>
-                                    <?php endforeach; ?>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-
-                <hr>
-                <div class="text-center">
-                    <button type="submit" name="save_eligibility" class="btn btn-primary px-5 fw-bold" style="background-color:#1e3a8a;border-color:#1e3a8a;">Save Eligibility</button>
-                </div>
-            </form>
-        <?php endif; ?>
+        <?php ee_render_grid($pdo, $sel_class, $sel_shift, $sel_section, $sel_term, $sel_group); ?>
     </div>
 </div>
 
@@ -331,6 +222,8 @@ function toggleColumn(subjectId, dotEl) {
     var elSection = document.getElementById('ee_section');
     var elTerm    = document.getElementById('ee_term');
     var elHint    = document.getElementById('ee_section_hint');
+    var elGroup   = document.getElementById('ee_group');
+    var elGroupRow = document.getElementById('ee_group_row');
     var elWrap    = document.getElementById('ee_result_wrap');
 
     function eeAjaxUrl(action, extra) {
@@ -342,6 +235,7 @@ function toggleColumn(subjectId, dotEl) {
     function loadSections() {
         var classId = elClass.value, shiftId = elShift.value;
         elSection.innerHTML = '<option value="0">-- Select --</option>';
+        setGroups([]);
         clearTable();
 
         if (classId == '0' || shiftId == '0') {
@@ -360,8 +254,19 @@ function toggleColumn(subjectId, dotEl) {
                     opt.textContent = s.name;
                     elSection.appendChild(opt);
                 });
+                setGroups(data.groups || []);
             })
             .catch(function () { /* নেটওয়ার্ক সমস্যা হলে চুপচাপ থেমে যাওয়া, ইউজার আবার সিলেক্ট করলে রিট্রাই হবে */ });
+    }
+
+    // Class বদলালে সেই Class-এর Group তালিকা (না থাকলে Group ফিল্টার লুকানো)
+    function setGroups(list) {
+        if (!elGroup) return;
+        elGroup.innerHTML = '<option value="0">সব Group (All Groups)</option>';
+        list.forEach(function (g) {
+            var o = document.createElement('option'); o.value = g.id; o.textContent = g.name; elGroup.appendChild(o);
+        });
+        elGroupRow.style.display = list.length ? '' : 'none';
     }
 
     function clearTable() {
@@ -378,7 +283,7 @@ function toggleColumn(subjectId, dotEl) {
 
         elWrap.innerHTML = '<div class="text-center text-muted py-4"><i class="fa-solid fa-spinner fa-spin me-2"></i>লোড হচ্ছে...</div>';
 
-        fetch(eeAjaxUrl('table', { class_id: classId, shift_id: shiftId, section_id: sectionId, term_id: termId }))
+        fetch(eeAjaxUrl('table', { class_id: classId, shift_id: shiftId, section_id: sectionId, term_id: termId, group_id: elGroup ? elGroup.value : 0 }))
             .then(function (r) { return r.text(); })
             .then(function (html) { elWrap.innerHTML = html; })
             .catch(function () {
@@ -390,5 +295,6 @@ function toggleColumn(subjectId, dotEl) {
     elShift.addEventListener('change', loadSections);
     elSection.addEventListener('change', loadTable);
     elTerm.addEventListener('change', loadTable);
+    if (elGroup) elGroup.addEventListener('change', loadTable);
 })();
 </script>

@@ -89,7 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
     }
 }
 
-$sp_show_first_login_note = empty($_COOKIE['sp_seen_first_login_note']);
+$sp_show_first_login_note = erp_env('APP_ENV') !== 'production' && empty($_COOKIE['sp_seen_first_login_note']);
 
 $inst_name = 'School ERP';
 try {
@@ -98,148 +98,74 @@ try {
 
 // প্রতিবার লগইন ফর্ম রেন্ডার হওয়ার আগে নতুন ভেরিফিকেশন কোড
 $student_captcha_code = captcha_new('captcha_student');
+require_once __DIR__ . '/../config/login_ui.php';
+$lg_logo = login_ui_logo_url($pdo, '../');
 ?>
 <!DOCTYPE html>
-<html lang="en">
+<html lang="bn">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Student / Guardian Login - <?php echo sp_e($inst_name); ?></title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        html, body { height: 100%; }
-        body {
-            margin: 0; min-height: 100vh;
-            background: radial-gradient(circle at 15% 15%, #134e4a 0%, #0f172a 55%, #0a0f1e 100%);
-            display: flex; align-items: center; justify-content: center;
-            position: relative; overflow: hidden; padding: 24px 12px;
-            font-family: 'Segoe UI', Tahoma, sans-serif;
-        }
-        .edu-bg { position: absolute; inset: 0; z-index: 0; overflow: hidden; }
-        .edu-orb {
-            position: absolute; border-radius: 50%; filter: blur(60px);
-            background: radial-gradient(circle, rgba(45,212,191,0.25), transparent 70%);
-            animation: eduDrift 14s ease-in-out infinite alternate;
-        }
-        .edu-orb.two { background: radial-gradient(circle, rgba(16,185,129,0.20), transparent 70%); animation-duration: 18s; }
-        @keyframes eduDrift { 0% { transform: translate(0,0) scale(1); } 100% { transform: translate(60px,40px) scale(1.15); } }
-        .edu-item {
-            position: absolute; opacity: 0; font-size: 50px; color: rgba(45,212,191,0.4);
-            animation: eduFloat linear infinite;
-        }
-        .edu-item.orange { color: rgba(251,191,36,0.4); }
-        .edu-item.small { font-size: 34px; }
-        .edu-item.large { font-size: 64px; }
-        @keyframes eduFloat {
-            0% { transform: translateY(110vh) rotate(0deg) scale(0.8); opacity: 0; }
-            10% { opacity: 0.85; } 90% { opacity: 0.65; }
-            100% { transform: translateY(-15vh) rotate(360deg) scale(1.1); opacity: 0; }
-        }
-
-        .login-card {
-            position: relative; z-index: 2;
-            background: white; padding: 32px 34px 34px; border-radius: 14px;
-            width: 100%; max-width: 430px;
-            box-shadow: 0 20px 45px rgba(0,0,0,0.45);
-            border-top: 5px solid #14b8a6;
-            animation: cardRise 0.6s ease-out;
-        }
-        @keyframes cardRise { 0% { opacity: 0; transform: translateY(18px); } 100% { opacity: 1; transform: translateY(0); } }
-        .brand-row { display: flex; flex-direction: column; align-items: center; margin-bottom: 10px; }
-        .brand-icon {
-            width: 54px; height: 54px; border-radius: 14px; background: #0f172a;
-            color: #2dd4bf; display: flex; align-items: center; justify-content: center;
-            font-size: 24px; margin-bottom: 8px;
-        }
-        .brand-row span { font-size: 12.5px; font-weight: 800; letter-spacing: 0.3px; color: #0f172a; }
-        .portal-title-row { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 2px; }
-        .portal-title-row h3 { margin: 0; color: #0f172a; font-weight: 800; }
-        .login-card p.subtitle { text-align: center; color: #64748b; font-size: 13px; margin: 4px 0 20px; }
-        label.form-label { font-size: 13px; }
-    </style>
+    <style><?php echo login_ui_css('student'); ?></style>
 </head>
-<body>
-    <div class="edu-bg" aria-hidden="true">
-        <div class="edu-orb" style="width:300px;height:300px;top:-60px;left:-60px;"></div>
-        <div class="edu-orb two" style="width:260px;height:260px;bottom:-70px;right:-40px;"></div>
-        <i class="edu-item large fa-solid fa-user-graduate" style="left:8%; animation-duration:16s; animation-delay:0s;"></i>
-        <i class="edu-item orange fa-solid fa-book" style="left:22%; animation-duration:20s; animation-delay:2s;"></i>
-        <i class="edu-item small fa-solid fa-pen" style="left:34%; animation-duration:14s; animation-delay:4s;"></i>
-        <i class="edu-item large fa-solid fa-graduation-cap" style="left:48%; animation-duration:22s; animation-delay:1s;"></i>
-        <i class="edu-item orange fa-solid fa-house-laptop" style="left:62%; animation-duration:18s; animation-delay:3s;"></i>
-        <i class="edu-item small fa-solid fa-people-roof" style="left:74%; animation-duration:19s; animation-delay:5s;"></i>
-        <i class="edu-item fa-solid fa-book-open" style="left:86%; animation-duration:17s; animation-delay:2.5s;"></i>
-    </div>
+<body class="lg">
+<main class="lg-shell">
+    <?php echo login_ui_aside('student', $inst_name, $lg_logo); ?>
 
-    <div class="login-card">
-        <div class="brand-row">
-            <div class="brand-icon"><i class="fa-solid fa-user-graduate"></i></div>
-            <span><?php echo sp_e($inst_name); ?></span>
-        </div>
-        <div class="portal-title-row">
-            <h3>Student / Guardian Login</h3>
-        </div>
-        <p class="subtitle">নিজের রোল/আইডি নাম্বার দিয়ে লগইন করুন</p>
+    <section class="lg-main">
+        <div class="lg-card">
+            <div class="lg-bar"></div>
+            <h2>সাইন-ইন</h2>
+            <p class="lg-sub">নিজের Student ID ও পাসওয়ার্ড দিয়ে প্রবেশ করুন</p>
 
-        <?php if ($login_error): ?><div class="alert alert-danger py-2 text-center" style="font-size:13px;"><?php echo sp_e($login_error); ?></div><?php endif; ?>
+            <?php if ($login_error): ?><div class="lg-alert err"><i class="fa-solid fa-circle-exclamation mt-1"></i><span><?php echo sp_e($login_error); ?></span></div><?php endif; ?>
 
-        <form method="POST">
-            <?php echo csrf_field(); ?>
+            <form method="POST" autocomplete="on">
+                <?php echo csrf_field(); ?>
 
-            <?php if ($branches): ?>
-            <div class="mb-3">
-                <label class="form-label fw-bold">Branch <span class="text-danger">*</span></label>
-                <select name="branch_id" class="form-select" required>
-                    <option value="">-- Select Branch --</option>
-                    <?php foreach ($branches as $b): ?>
-                        <option value="<?php echo (int) $b['id']; ?>"><?php echo sp_e($b['branch_name']); ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
+                <?php if ($branches): ?>
+                <div class="lg-field">
+                    <label class="lg-label">Branch</label>
+                    <div class="lg-input"><i class="fa-solid fa-building-columns"></i>
+                        <select name="branch_id" required>
+                            <option value="">-- Branch সিলেক্ট করুন --</option>
+                            <?php foreach ($branches as $b): ?>
+                                <option value="<?php echo (int) $b['id']; ?>"><?php echo sp_e($b['branch_name']); ?></option>
+                            <?php endforeach; ?>
+                        </select></div>
+                </div>
+                <?php endif; ?>
+
+                <div class="lg-field">
+                    <label class="lg-label">User Name (Student ID)</label>
+                    <div class="lg-input"><i class="fa-solid fa-user"></i>
+                        <input type="text" name="student_id" placeholder="যেমন: 260101003" required autofocus></div>
+                </div>
+                <div class="lg-field">
+                    <label class="lg-label">Password</label>
+                    <div class="lg-input"><i class="fa-solid fa-lock"></i>
+                        <input type="password" name="password" placeholder="আপনার পাসওয়ার্ড" required>
+                        <button type="button" class="lg-eye" title="দেখান/লুকান"><i class="fa-solid fa-eye"></i></button></div>
+                </div>
+                <?php echo login_ui_captcha(captcha_svg_markup($student_captcha_code)); ?>
+                <button type="submit" name="login" class="lg-btn">সাইন-ইন করুন <i class="fa-solid fa-arrow-right"></i></button>
+            </form>
+
+            <?php if ($sp_show_first_login_note): ?>
+            <div class="lg-note"><i class="fa-solid fa-circle-info"></i> প্রথমবার লগইনের সময় Password ফিল্ডে আপনার নিজের Student ID দিন। লগইন করার পর নিজের পাসওয়ার্ড পরিবর্তন করে নিন।</div>
             <?php endif; ?>
 
-            <div class="mb-3">
-                <label class="form-label fw-bold">User Name <span class="text-danger">*</span></label>
-                <input type="text" name="student_id" class="form-control" placeholder="e.g. 260101003" required autofocus>
-            </div>
-
-            <div class="mb-3">
-                <label class="form-label fw-bold">Password <span class="text-danger">*</span></label>
-                <input type="password" name="password" class="form-control" placeholder="প্রথমবার হলে আপনার Student ID-ই পাসওয়ার্ড" required>
-            </div>
-
-            <div class="mb-3">
-                <label class="form-label fw-bold">Verification Code <span class="text-danger">*</span></label>
-                <div id="captchaBox" style="position:relative;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 10px 14px;text-align:center;">
-                    <?php echo captcha_svg_markup($student_captcha_code); ?>
-                    <button type="button" id="captchaRefreshBtn" title="নতুন কোড" style="position:absolute;bottom:-10px;right:14px;width:30px;height:30px;border-radius:50%;background:#059669;color:#fff;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;cursor:pointer;">
-                        <i class="fa-solid fa-rotate" style="font-size:13px;"></i>
-                    </button>
-                </div>
-                <style>#captchaBox svg{display:block;width:100%;max-width:260px;height:auto;margin:0 auto;}</style>
-                <input type="text" name="verification_code" class="form-control mt-3" placeholder="উপরের সংখ্যাগুলো লিখুন" autocomplete="off" required>
-            </div>
-
-            <button type="submit" name="login" class="btn w-100 fw-bold py-2 text-white" style="background:#0f766e;border-color:#0f766e;">Login</button>
-        </form>
-
-        <?php if ($sp_show_first_login_note): ?>
-        <p class="text-muted text-center mt-3 mb-0" style="font-size:12px;">প্রথমবার লগইনের সময় Password ফিল্ডে আপনার নিজের Student ID দিন। লগইন করার পর নিজের পাসওয়ার্ড পরিবর্তন করে নিন।</p>
-        <?php endif; ?>
-    </div>
-    <script>
-    document.getElementById('captchaRefreshBtn')?.addEventListener('click', function () {
-        const btn = this;
-        const icon = btn.querySelector('i');
-        icon.classList.add('fa-spin');
-        fetch('captcha_refresh.php')
-            .then(res => res.json())
-            .then(data => {
-                document.getElementById('captchaBox').querySelector('svg').outerHTML = data.svg;
-            })
-            .finally(() => icon.classList.remove('fa-spin'));
-    });
-    </script>
+            <?php echo login_ui_switch([
+                ['label' => 'শিক্ষক', 'href' => '../teacher/login.php', 'icon' => 'fa-chalkboard-user'],
+                ['label' => 'অ্যাডমিন', 'href' => '../admin/', 'icon' => 'fa-gauge-high'],
+            ]); ?>
+        </div>
+    </section>
+</main>
+<?php echo login_ui_script(); ?>
 </body>
 </html>

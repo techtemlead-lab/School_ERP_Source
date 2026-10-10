@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/../config/routine_access.php';
+erp_routine_access($pdo, 'routine_general');
 // admin/routine_general.php - General Routine (স্ক্রিনশট অনুযায়ী)
 $rt_err = $_SESSION['rt_err'] ?? '';
 $rt_msg = $_SESSION['rt_msg'] ?? '';
@@ -53,8 +55,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_routine'])) {
     $teacher_id = (int) ($_POST['teacher_id'] ?? 0);
     $status     = ($_POST['status'] ?? 'Active') === 'Inactive' ? 'Inactive' : 'Active';
 
-    if (!$section_id || !$subject_id || !$teacher_id) {
-        $_SESSION['rt_err'] = 'Section, Subject, Teacher — এই ফিল্ডগুলো আবশ্যক।';
+    if ($has_break) { $subject_id = 0; $teacher_id = 0; } // Break/Tiffin-এ Subject/Teacher লাগে না
+
+    if (!$section_id || (!$has_break && (!$subject_id || !$teacher_id))) {
+        $_SESSION['rt_err'] = $has_break ? 'Section আবশ্যক।' : 'Section, Subject, Teacher — এই ফিল্ডগুলো আবশ্যক।';
     } else {
         if ($id > 0) {
             $stmt = $pdo->prepare(
@@ -90,7 +94,7 @@ $view = $_GET['view'] ?? 'list';
 $classes  = $pdo->query("SELECT id, class_name FROM academic_classes WHERE status = 'Active' ORDER BY rank ASC, class_name ASC")->fetchAll();
 $shifts   = $pdo->query("SELECT id, shift_name FROM academic_shifts WHERE status = 'Active' ORDER BY shift_name ASC")->fetchAll();
 $sections = $pdo->query("SELECT s.id, s.section_name, s.class_id, s.shift_id, c.class_name FROM academic_sections s LEFT JOIN academic_classes c ON c.id = s.class_id WHERE s.status = 'Active' ORDER BY s.section_name ASC")->fetchAll();
-$subjects = $pdo->query("SELECT id, subject_name, class_id FROM academic_subjects WHERE status = 'Active' ORDER BY subject_name ASC")->fetchAll();
+$subjects = $pdo->query("SELECT id, subject_name, class_id, religion FROM academic_subjects WHERE status = 'Active' ORDER BY sort_order ASC, id ASC")->fetchAll();
 
 // একটা Class-এ কোন কোন Shift আছে সেটা academic_sections (class_id + shift_id) থেকে বের করা —
 // Class সিলেক্ট না করা পর্যন্ত Shift/Section ফাঁকা/বন্ধ থাকবে
@@ -214,14 +218,14 @@ $week_days = ['Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'
                 <div class="col-sm-6">
                     <select name="subject_id" id="rtSubjectSelect" class="form-select" required>
                         <option value="">Select Subject</option>
-                        <?php foreach ($subjects as $sub): ?><option value="<?php echo (int) $sub['id']; ?>" data-class="<?php echo (int) $sub['class_id']; ?>" <?php echo (int) $d['subject_id'] === (int) $sub['id'] ? 'selected' : ''; ?>><?php echo rtv($sub['subject_name']); ?></option><?php endforeach; ?>
+                        <?php foreach ($subjects as $sub): ?><option value="<?php echo (int) $sub['id']; ?>" data-class="<?php echo (int) $sub['class_id']; ?>" <?php echo (int) $d['subject_id'] === (int) $sub['id'] ? 'selected' : ''; ?>><?php echo rtv($sub['subject_name']) . (trim((string) ($sub['religion'] ?? '')) !== '' ? ' [' . rtv($sub['religion']) . ']' : ''); ?></option><?php endforeach; ?>
                     </select>
                 </div>
             </div>
             <div class="row mb-3 align-items-center">
                 <label class="col-sm-3 col-form-label fw-bold text-end">Teacher <span class="text-danger">*</span></label>
                 <div class="col-sm-6">
-                    <select name="teacher_id" class="form-select" required>
+                    <select name="teacher_id" id="rtTeacherSelect" class="form-select" required>
                         <option value="">Select Teacher</option>
                         <?php foreach ($teachers as $t): ?><option value="<?php echo (int) $t['id']; ?>" <?php echo (int) $d['teacher_id'] === (int) $t['id'] ? 'selected' : ''; ?>><?php echo rtv($t['name']); ?></option><?php endforeach; ?>
                     </select>
@@ -284,6 +288,23 @@ $week_days = ['Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'
     </style>
 
     <script>
+// Break/Tiffin = YES হলে Subject ও Teacher লাগে না
+(function () {
+    function tg() {
+        var isBreak = document.getElementById('breakYes').checked;
+        ['rtSubjectSelect', 'rtTeacherSelect'].forEach(function (id) {
+            var el = document.getElementById(id); if (!el) return;
+            el.required = !isBreak;
+            if (isBreak) { el.value = ''; }
+            el.closest('.row').style.display = isBreak ? 'none' : '';
+        });
+    }
+    document.getElementById('breakYes').addEventListener('change', tg);
+    document.getElementById('breakNo').addEventListener('change', tg);
+    document.addEventListener('DOMContentLoaded', tg);
+})();
+</script>
+<script>
         // ---------------- Choose Time Popup ----------------
         let rtActiveField = null; // 'start' অথবা 'end'
 
@@ -598,8 +619,8 @@ $week_days = ['Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'
                             <td><?php echo rtv($row['section_name'] ?? '-'); ?></td>
                             <td class="small"><?php echo rtv(str_replace(',', ', ', $row['routine_days'] ?? '')); ?></td>
                             <td class="small"><?php echo fmt_time_rt($row['start_time']); ?> - <?php echo fmt_time_rt($row['end_time']); ?></td>
-                            <td><?php echo rtv($row['subject_name'] ?? '-'); ?></td>
-                            <td><?php echo rtv($row['teacher_name'] ?? '-'); ?></td>
+                            <td><?php echo (!empty($row['has_break']) && empty($row['subject_name'])) ? '<b>Break / Tiffin</b>' : rtv($row['subject_name'] ?? '-'); ?></td>
+                            <td><?php echo (!empty($row['has_break']) && empty($row['subject_name'])) ? '—' : rtv($row['teacher_name'] ?? '-'); ?></td>
                             <td><?php echo $row['status'] === 'Active' ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>'; ?></td>
                             <td class="text-end">
                                 <a href="index.php?page=routine_general&view=edit&id=<?php echo (int) $row['id']; ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-pen"></i></a>

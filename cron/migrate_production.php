@@ -20,6 +20,7 @@ try{
   lp_ensure_tables($school);
   require_once __DIR__.'/../config/scholarship_application_helpers.php';sa_ensure_tables($school);
   require_once __DIR__.'/../config/teacher_question_helpers.php';tq_ensure_tables($school);
+ require_once __DIR__.'/../config/academic_update_schema.php';erp_academic_update_schema($school);
   $ver='20261004_portal_columns';$q=$school->prepare('SELECT version FROM schema_migrations WHERE version=?');$q->execute([$ver]);
   if(!$q->fetch()){
    foreach(['students','employees'] as $table){

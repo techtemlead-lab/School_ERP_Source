@@ -13,6 +13,8 @@ if (!isset($_SESSION['admin_logged'])) {
 }
 
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../config/portal_access.php';
+erp_portal_require_role($pdo, 'admin', 'result_exam_terms');
 require_once __DIR__ . '/../../config/permissions.php';
 
 if (!perm_page_allowed($pdo, 'result_exam_terms')) {
@@ -21,6 +23,7 @@ if (!perm_page_allowed($pdo, 'result_exam_terms')) {
     echo json_encode(['success' => false, 'message' => 'এই পেজ দেখার অনুমতি নেই।']);
     exit();
 }
+perm_write_guard($pdo, 'result_exam_terms'); // Read-only ইউজারের সেভ আটকায়
 
 require_once __DIR__ . '/../../config/csrf.php';
 

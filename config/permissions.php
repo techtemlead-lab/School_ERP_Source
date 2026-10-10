@@ -127,3 +127,20 @@ function perm_flatten_module_keys(array $module): array
     }
     return $keys;
 }
+
+/**
+ * AJAX এন্ডপয়েন্টের জন্য: "Read-only" (শুধু View) পারমিশন লেভেল থাকলে POST (সেভ/মুছা) আটকানোর হুক।
+ * এই প্রজেক্টে পেজ-পারমিশন শুধু On/Off (Read-only লেভেল নেই), তাই এখন কিছু আটকায় না — কিন্তু result_*_ajax.php
+ * ফাইলগুলো (Skooly থেকে আনা) এই ফাংশন কল করে, তাই থাকা দরকার। ভবিষ্যতে Read/Write লেভেল যোগ হলে শুধু এটা বদলালেই হবে।
+ */
+if (!function_exists('perm_write_guard')) {
+    function perm_write_guard(PDO $pdo, string $page_key): void
+    {
+        if (function_exists('perm_can_write') && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !perm_can_write($pdo, $page_key)) {
+            http_response_code(403);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['success' => false, 'ok' => false, 'message' => 'আপনার এই পেজে সেভ/পরিবর্তনের অনুমতি নেই।']);
+            exit();
+        }
+    }
+}

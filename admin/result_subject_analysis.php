@@ -123,11 +123,12 @@ if ($searched && $f_class_id && $f_term_id) {
 
             foreach ($students as $stu) {
                 $sid_stu = (int) $stu['id'];
-                $res = rc_student_result($defs, $marks_all[$sid_stu] ?? [], $att_all[$sid_stu] ?? [], $grade_bands);
+                $res = rc_student_result($defs, $marks_all[$sid_stu] ?? [], $att_all[$sid_stu] ?? [], $grade_bands, rc_excluded_subjects($pdo, $defs, (int) $f_term_id, $sid_stu));
 
-                $i = 0;
+                $sr_map = array_column($res['subject_rows'], null, 'subject_id');
                 foreach ($defs as $subj_id => $def) {
-                    $sr = $res['subject_rows'][$i++];
+                    $sr = $sr_map[$subj_id] ?? null;
+                    if ($sr === null) { continue; } // Group-এর নয় / Not Eligible
                     $absent = false;
                     foreach ((array) ($att_all[$sid_stu][$subj_id] ?? []) as $ast) { if ($ast === 'Absent') { $absent = true; } }
 

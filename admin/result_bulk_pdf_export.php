@@ -210,7 +210,7 @@ if ($do_export && $f_session_id && $f_class_id && $f_term_id) {
         $att_map = [];
         foreach ($at->fetchAll() as $r) { $att_map[$r['subject_id']][$r['part_id']] = $r['status']; }
 
-        $result = rc_student_result($defs, $marks_map, $att_map, $grade_bands);
+        $result = rc_student_result($defs, $marks_map, $att_map, $grade_bands, rc_excluded_subjects($pdo, $defs, (int) $f_term_id, (int) $sid));
         $html = bpe_build_html($student, $result, $inst_name, $inst_addr, $term_name, $session_name, $class_name);
 
         $mpdf = new \Mpdf\Mpdf([
@@ -247,6 +247,7 @@ if ($do_export && $f_session_id && $f_class_id && $f_term_id) {
     // সব বাফার মুছে ফেলে (ob_end_clean লুপে) শুধু ZIP বাইটগুলোই আউটপুট করা হচ্ছে।
     while (ob_get_level() > 0) { ob_end_clean(); }
 
+    @ini_set('zlib.output_compression', 'Off'); // Content-Length-সহ বাইনারি ডাউনলোড — gzip নয়
     header('Content-Type: application/zip');
     header('Content-Disposition: attachment; filename="' . $zip_download_name . '"');
     header('Content-Length: ' . filesize($zip_path));

@@ -15,6 +15,9 @@ if (!isset($_SESSION['admin_logged'])) {
 }
 
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../config/portal_access.php';
+erp_portal_require_role($pdo, 'admin', 'result_assign_subject_teacher');
+require_once __DIR__ . '/../../config/subject_rank.php'; subject_rank_ensure($pdo);
 require_once __DIR__ . '/../../config/permissions.php';
 
 if (!perm_page_allowed($pdo, 'result_assign_subject_teacher')) {
@@ -23,6 +26,7 @@ if (!perm_page_allowed($pdo, 'result_assign_subject_teacher')) {
     echo json_encode(['success' => false, 'message' => 'এই পেজ দেখার অনুমতি নেই।']);
     exit();
 }
+perm_write_guard($pdo, 'result_assign_subject_teacher'); // Read-only ইউজারের সেভ আটকায়
 
 if (!function_exists('lv')) {
     function lv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
@@ -66,7 +70,7 @@ if ($action === 'table') {
     $assigned_subject_ids = [];
     $routine_subject_ids = [];
     if ($selected_teacher && $sel_class > 0) {
-        $subj_stmt = $pdo->prepare("SELECT id, subject_name FROM academic_subjects WHERE class_id = ? AND status = 'Active' ORDER BY subject_name ASC");
+        $subj_stmt = $pdo->prepare("SELECT id, subject_name FROM academic_subjects WHERE class_id = ? AND status = 'Active' ORDER BY sort_order ASC, id ASC");
         $subj_stmt->execute([$sel_class]);
         $class_subjects = $subj_stmt->fetchAll();
 

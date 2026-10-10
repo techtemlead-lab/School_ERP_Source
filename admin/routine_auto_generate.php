@@ -59,7 +59,7 @@ $sel_section = (int) ($_GET['section_id'] ?? $_POST['section_id'] ?? 0);
 
 $subjects = [];
 if ($sel_class) {
-    $sq = $pdo->prepare("SELECT id, subject_name FROM academic_subjects WHERE class_id = ? AND status = 'Active' ORDER BY subject_name ASC");
+    $sq = $pdo->prepare("SELECT id, subject_name FROM academic_subjects WHERE class_id = ? AND status = 'Active' ORDER BY sort_order ASC, id ASC");
     $sq->execute([$sel_class]);
     $subjects = $sq->fetchAll();
 }

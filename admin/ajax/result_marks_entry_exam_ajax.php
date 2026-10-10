@@ -16,8 +16,13 @@ if (!isset($_SESSION['admin_logged'])) {
 }
 
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../config/portal_access.php';
+erp_portal_require_role($pdo, 'admin', 'result_marks_entry_exam');
+require_once __DIR__ . '/../../config/subject_rank.php'; subject_rank_ensure($pdo);
 require_once __DIR__ . '/../../config/branch_scope.php';
 require_once __DIR__ . '/../../config/permissions.php';
+require_once __DIR__ . '/../../config/exam_att_grid.php';
+
 
 if (!perm_page_allowed($pdo, 'result_marks_entry_exam')) {
     http_response_code(403);
@@ -25,6 +30,7 @@ if (!perm_page_allowed($pdo, 'result_marks_entry_exam')) {
     echo json_encode(['success' => false, 'message' => 'এই পেজ দেখার অনুমতি নেই।']);
     exit();
 }
+perm_write_guard($pdo, 'result_marks_entry_exam'); // Read-only ইউজারের সেভ আটকায়
 
 function mxv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 function mxnum($val): string { return rtrim(rtrim(number_format((float) $val, 2), '0'), '.'); }
@@ -51,7 +57,9 @@ if ($action === 'sections') {
     foreach ($sections as $s) {
         $result[] = ['id' => (int) $s['id'], 'name' => $s['section_name']];
     }
-    echo json_encode(['success' => true, 'sections' => $result], JSON_UNESCAPED_UNICODE);
+    $groups = [];
+    foreach (($class_id > 0 ? ee_groups_of_class($pdo, $class_id) : []) as $gid => $gn) { $groups[] = ['id' => (int) $gid, 'name' => $gn]; }
+    echo json_encode(['success' => true, 'sections' => $result, 'groups' => $groups], JSON_UNESCAPED_UNICODE);
     exit();
 }
 
@@ -107,16 +115,22 @@ if ($action === 'table') {
     $sel_section = (int) ($_GET['section_id'] ?? 0);
     $sel_term    = (int) ($_GET['term_id'] ?? 0);
     $sel_part    = (int) ($_GET['part_id'] ?? 0);
+    $sel_group   = (int) ($_GET['group_id'] ?? 0);
+    $mg_groups   = $sel_class > 0 ? ee_groups_of_class($pdo, $sel_class) : [];
+    if ($mg_groups && !isset($mg_groups[$sel_group])) $sel_group = 0;
 
     $all_selected = ($sel_class > 0 && $sel_shift > 0 && $sel_section > 0 && $sel_term > 0 && $sel_part > 0);
+    $need_group = ($all_selected && $mg_groups && $sel_group <= 0);
+    if ($need_group) $all_selected = false;
     $subjects_list = [];
     $students = [];
     $marks_map = []; // marks_map[subject_id][student_id] = mark
 
     if ($all_selected) {
-        $subj_stmt = $pdo->prepare("SELECT id, subject_name, full_marks FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY id ASC");
+        $subj_stmt = $pdo->prepare("SELECT id, subject_name, full_marks, group_id FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY sort_order ASC, id ASC");
         $subj_stmt->execute([$sel_class]);
         $subjects_list = $subj_stmt->fetchAll();
+        if ($mg_groups) { $GS = $sel_group; $subjects_list = array_values(array_filter($subjects_list, function ($r) use ($GS) { $g = (int) ($r['group_id'] ?? 0); return $g === 0 || $g === $GS; })); }
 
         $assign_stmt = $pdo->prepare("SELECT subject_id, full_mark_exam FROM exam_assign_subjects WHERE term_id=? AND part_id=? AND class_id=?");
         $assign_stmt->execute([$sel_term, $sel_part, $sel_class]);
@@ -132,6 +146,7 @@ if ($action === 'table') {
 
         $me_where = ['class_id=?', 'shift_id=?', 'section_id=?', "status='Active'"];
         $me_params = [$sel_class, $sel_shift, $sel_section];
+        if ($mg_groups) { $me_where[] = 'group_id=?'; $me_params[] = $sel_group; }
         branch_apply_filter($me_where, $me_params);
         $stu_stmt = $pdo->prepare("SELECT id, student_id, roll_no, name_en FROM students WHERE " . implode(' AND ', $me_where) . " ORDER BY (roll_no + 0) ASC, roll_no ASC");
         $stu_stmt->execute($me_params);
@@ -151,73 +166,16 @@ if ($action === 'table') {
         }
     }
     ?>
-    <?php if (!$all_selected): ?>
+    <?php if ($need_group): ?>
+        <?php echo ea_group_need_msg('Mark Entry'); ?>
+    <?php elseif (!$all_selected): ?>
         <div class="text-center text-muted py-4">উপরে Class, Shift, Section, Exam Term এবং Exam Part সিলেক্ট করুন — তাহলে স্টুডেন্ট লিস্ট এখানে দেখাবে।</div>
     <?php elseif (!$subjects_list): ?>
         <div class="text-center text-muted py-4">এই Class-এর জন্য কোনো Subject পাওয়া যায়নি। আগে <a href="index.php?page=academic_subject">Subject</a> যোগ করুন।</div>
     <?php elseif (!$students): ?>
         <div class="text-center text-muted py-4">এই Class/Shift/Section এ কোনো Active Student পাওয়া যায়নি।</div>
     <?php else: ?>
-        <?php $none_assigned = true; foreach ($subjects_list as $sub) { if ($sub['is_assigned']) { $none_assigned = false; break; } } ?>
-        <?php if ($none_assigned): ?>
-            <div class="alert alert-warning py-2">
-                এই Term/Part-এর জন্য এখনো কোনো Subject-এ Full Mark সেট করা হয়নি, তাই সব কলাম disabled দেখাচ্ছে।
-                আগে <a href="index.php?page=result_assign_exams">Assign Exam</a> পেজ থেকে সাবজেক্টগুলোর Full Mark সেট করুন।
-            </div>
-        <?php endif; ?>
-
-        <form method="POST" action="index.php?page=result_marks_entry_exam" id="marksForm">
-            <?php echo csrf_field(); ?>
-            <input type="hidden" name="class_id" value="<?php echo $sel_class; ?>">
-            <input type="hidden" name="shift_id" value="<?php echo $sel_shift; ?>">
-            <input type="hidden" name="section_id" value="<?php echo $sel_section; ?>">
-            <input type="hidden" name="term_id" value="<?php echo $sel_term; ?>">
-            <input type="hidden" name="part_id" value="<?php echo $sel_part; ?>">
-
-            <div class="table-responsive">
-                <table class="table table-bordered align-middle m-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th style="width:50px;">Sl.</th>
-                            <th>Name</th>
-                            <th style="width:70px;">Roll</th>
-                            <?php foreach ($subjects_list as $sub): ?>
-                                <th class="text-center">
-                                    <?php echo mxv($sub['subject_name']); ?><br>
-                                    <span class="text-warning fw-bold small">(<?php echo mxv(mxnum($sub['full_mark'])); ?>/<?php echo mxv(mxnum($sub['full_mark'])); ?>)</span>
-                                </th>
-                            <?php endforeach; ?>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php $srl = 1; foreach ($students as $stu): ?>
-                            <tr>
-                                <td><?php echo $srl++; ?></td>
-                                <td class="text-primary fw-bold"><?php echo mxv($stu['name_en']); ?></td>
-                                <td><?php echo mxv($stu['roll_no']); ?></td>
-                                <?php foreach ($subjects_list as $sub):
-                                    $sid = (int) $sub['id'];
-                                    $existing = $marks_map[$sid][(int) $stu['id']] ?? null;
-                                ?>
-                                    <td>
-                                        <input type="number" step="0.01" min="0" max="<?php echo mxv($sub['full_mark']); ?>"
-                                               name="marks[<?php echo $sid; ?>][<?php echo (int) $stu['id']; ?>]"
-                                               class="form-control form-control-sm text-end mxe-input"
-                                               value="<?php echo $existing !== null ? mxv(mxnum($existing)) : ''; ?>"
-                                               placeholder="0"
-                                               <?php echo $sub['is_assigned'] ? '' : 'disabled'; ?>>
-                                    </td>
-                                <?php endforeach; ?>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="d-flex justify-content-center mt-4">
-                <button type="submit" name="save_marks" class="btn btn-primary px-5 fw-bold" style="background-color:#1e3a8a;border-color:#1e3a8a;">Save Marks</button>
-            </div>
-        </form>
+        <?php mx_render_exam_form($pdo, $sel_class, $sel_shift, $sel_section, $sel_term, $sel_part, $sel_group, $subjects_list, $students, $marks_map); ?>
     <?php endif; ?>
     <?php
     exit();

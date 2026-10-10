@@ -132,7 +132,7 @@ $all_selected = ($sel_class > 0 && $sel_shift > 0 && $sel_section > 0 && $sel_te
 $subjects = [];
 $existing = [];
 if ($all_selected) {
-    $sub_stmt = $pdo->prepare("SELECT id, subject_name, subject_code FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY subject_name ASC");
+    $sub_stmt = $pdo->prepare("SELECT id, subject_name, subject_code FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY sort_order ASC, id ASC");
     $sub_stmt->execute([$sel_class]);
     $subjects = $sub_stmt->fetchAll();
 
@@ -311,8 +311,10 @@ $er_holidays = [];
 try {
     $er_b = $pdo->query("SELECT weekly_holidays FROM branches WHERE status='Active' ORDER BY id ASC LIMIT 1")->fetch();
     $er_weekly = array_values(array_filter(array_map('trim', explode(',', $er_b['weekly_holidays'] ?? 'Friday'))));
-    $er_h = $pdo->query("SELECT holiday_name, start_date, end_date FROM academic_holidays WHERE status='Active'");
-    if ($er_h) { $er_holidays = $er_h->fetchAll(PDO::FETCH_ASSOC); }
+    // শুধু "ছুটি ধরা হবে" Category-র এন্ট্রি (Exam/Event Category বাদ)
+    require_once __DIR__ . '/../config/academic_calendar_helpers.php';
+    $er_weekly = ac_weekly_holidays($pdo);
+    $er_holidays = ac_holiday_ranges($pdo, '2000-01-01', '2100-12-31');
 } catch (Throwable $e) { /* টেবিল/কলাম না থাকলে শুধু চেক বন্ধ থাকবে */ }
 ?>
 <script>
@@ -370,7 +372,7 @@ function removeRoutineRow(btn) {
 
     function errAjaxUrl(action, extra) {
         var p = new URLSearchParams(extra || {});
-        return 'ajax/result_exam_routine_ajax.php?action=' + action + '&' + p.toString();
+        return '<?php echo !empty($_SESSION['teacher_logged']) ? '../admin/ajax/' : 'ajax/'; ?>result_exam_routine_ajax.php?action=' + action + '&' + p.toString();
     }
 
     function clearTable() {

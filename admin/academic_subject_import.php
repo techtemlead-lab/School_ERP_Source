@@ -6,6 +6,9 @@
 // CSV/TXT/XLSX পার্সিং লজিক config/import_helpers.php তে শেয়ার্ড।
 
 require_once __DIR__ . '/../config/import_helpers.php';
+require_once __DIR__ . '/../config/subject_rank.php';
+require_once __DIR__ . '/../config/subject_religion.php';
+subject_rank_ensure($pdo);
 
 // academic_subjects / academic_classes / academic_groups টেবিল এখনো তৈরি না হলে
 // (একদম নতুন tenant) নিশ্চিত করে নেওয়া
@@ -38,9 +41,12 @@ $pdo->exec(
         subject_type ENUM('Compulsory','Optional','Continuous Assessment') NOT NULL DEFAULT 'Compulsory',
         group_id INT NULL,
         optional_count INT NULL,
+        sort_order INT NOT NULL DEFAULT 0,
         status ENUM('Active','Inactive') NOT NULL DEFAULT 'Active'
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
 );
+subject_rank_ensure($pdo);
+sr_ensure($pdo); // academic_subjects.religion
 
 $imp_msg = $_SESSION['subj_imp_msg'] ?? '';
 $imp_err = $_SESSION['subj_imp_err'] ?? '';
@@ -56,6 +62,7 @@ $subj_import_field_aliases = [
     'subject_type'  => ['subject type', 'type', 'ধরন'],
     'group'         => ['group', 'group name', 'গ্রুপ'],
     'optional_count' => ['optional count', 'optional count (gpa>2)', 'ঐচ্ছিক সংখ্যা'],
+    'religion'      => ['religion', 'ধর্ম'],
     'status'        => ['status', 'স্ট্যাটাস'],
 ];
 
@@ -66,15 +73,37 @@ import_cleanup_old_temp($import_tmp_dir);
 // -----------------------------------------------------------
 // স্যাম্পল CSV টেমপ্লেট ডাউনলোড
 // -----------------------------------------------------------
+if (isset($_GET['preset'])) {
+    // Play–Five (জলঢাকা ফিউচার ড্রিম একাডেমি মার্কশিট অনুযায়ী) ক্লাস-ওয়াইজ বিষয় তালিকা
+    while (ob_get_level() > 0) { ob_end_clean(); }
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="subjects_play_to_five.csv"');
+    echo "\xEF\xBB\xBF";
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['Class', 'Subject Name', 'Full Marks']);
+    $core = [['বাংলা',100],['ইংরেজি',100],['গণিত',100],['ধর্ম',100]];
+    $up = array_merge($core, [['বাংলাদেশ ও বিশ্বপরিচয়',100],['বিজ্ঞান',100],['সাধারণ জ্ঞান',50],['ওয়ার্ড বুক',50],['অংকন',50]]);
+    $mid = array_merge($core, [['পরিবেশ',100],['কবিতা',50],['ওয়ার্ড বুক',50],['অংকন',50],['সাধারণ জ্ঞান',50]]);
+    $sets = [
+        'প্লে' => array_merge($core, [['সাধারণ জ্ঞান',50],['অংকন',50]]),
+        'নার্সারি' => array_merge($core, [['সাধারণ জ্ঞান',50],['অংকন',50],['ওয়ার্ড বুক',50]]),
+        'প্রথম' => $mid, 'দ্বিতীয়' => $mid, 'তৃতীয়' => $up, 'চতুর্থ' => $up, 'পঞ্চম' => $up,
+    ];
+    foreach ($sets as $c => $list) { foreach ($list as $x) { fputcsv($out, [$c, $x[0], $x[1]]); } }
+    fclose($out);
+    exit();
+}
 if (isset($_GET['sample'])) {
     while (ob_get_level() > 0) { ob_end_clean(); } // sidebar/header ইতিমধ্যে যা buffer-এ জমেছে তা ফেলে দাও
     header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="subject_import_sample.csv"');
     echo "\xEF\xBB\xBF";
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Class', 'Subject Name', 'Subject Code', 'Full Marks', 'Subject Type', 'Group', 'Optional Count (GPA>2)', 'Status']);
-    fputcsv($out, ['Class Nine', 'Bangla 1st Paper', '101', '100', 'Compulsory', '', '', 'Active']);
-    fputcsv($out, ['Class Nine', 'Higher Math', '126', '100', 'Optional', 'Science', '', 'Active']);
+    fputcsv($out, ['Class', 'Subject Name', 'Subject Code', 'Full Marks', 'Subject Type', 'Group', 'Optional Count (GPA>2)', 'Religion', 'Status']);
+    fputcsv($out, ['Class Nine', 'Bangla 1st Paper', '101', '100', 'Compulsory', '', '', '', 'Active']);
+    fputcsv($out, ['Class Nine', 'Higher Math', '126', '100', 'Optional', 'Science', '', '', 'Active']);
+    fputcsv($out, ['Class Nine', 'Islam & Moral Education', '111', '100', 'Compulsory', '', '', 'Islam', 'Active']);
+    fputcsv($out, ['Class Nine', 'Hindu Religion & Moral Education', '112', '100', 'Compulsory', '', '', 'Hinduism', 'Active']);
     fclose($out);
     exit();
 }
@@ -149,6 +178,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['upload_file'])) {
         $existing_codes[$r['class_id'] . '|' . $r['subject_code']] = true;
     }
     $seen_in_file = [];
+    $auto_create = !empty($_POST['auto_create_class']);
+    $existing_names = [];
+    foreach ($pdo->query("SELECT class_id, subject_name FROM academic_subjects") as $r) {
+        $existing_names[(int) $r['class_id'] . '|' . mb_strtolower(trim($r['subject_name']))] = true;
+    }
+    $seen_names = [];
 
     $validated = [];
     foreach ($rawRows as $rowIdx => $raw) {
@@ -166,9 +201,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['upload_file'])) {
         $class_id = null;
         if ($classRaw !== '') {
             $class_id = $classes_lk[mb_strtolower($classRaw)] ?? null;
-            if (!$class_id) $errors[] = "Class '{$classRaw}' খুঁজে পাওয়া যায়নি (Academic Module > All Class List এ আগে থেকে যোগ করে নিন)";
+            if (!$class_id && $auto_create) {
+                $class_id = 'new:' . mb_strtolower($classRaw); // confirm এর সময় তৈরি হবে
+            } elseif (!$class_id) $errors[] = "Class '{$classRaw}' খুঁজে পাওয়া যায়নি (Academic Module > All Class List এ আগে থেকে যোগ করে নিন)";
         } else {
             $errors[] = 'Class কলাম খালি';
+        }
+
+        if ($subject_name !== '' && $class_id) {
+            $nk = $class_id . '|' . mb_strtolower($subject_name);
+            if (isset($existing_names[$nk])) $errors[] = 'এই Class-এ এই নামের বিষয় আগে থেকেই আছে (ডুপ্লিকেট — বাদ যাবে)';
+            elseif (isset($seen_names[$nk])) $errors[] = 'ফাইলে একই Class-এ বিষয়টি দুইবার আছে';
+            $seen_names[$nk] = true;
         }
 
         $subject_code = trim($row['subject_code'] ?? '');
@@ -196,6 +240,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['upload_file'])) {
 
         $optional_count = trim($row['optional_count'] ?? '') !== '' ? (int) $row['optional_count'] : null;
 
+        $religionRaw = trim($row['religion'] ?? '');
+        $religion = sr_norm($religionRaw);
+        if ($religionRaw !== '' && $religion === '') {
+            $errors[] = "Religion '{$religionRaw}' চেনা যায়নি (Islam / Hinduism / Buddhism / Christianity / Others দিন)";
+        }
+
         $statusRaw = mb_strtolower($row['status'] ?? '');
         $status = $statusRaw === 'inactive' ? 'Inactive' : 'Active';
 
@@ -203,7 +253,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['upload_file'])) {
             'class_id' => $class_id, 'class_label' => $classRaw,
             'subject_name' => $subject_name, 'subject_code' => $subject_code, 'full_marks' => $full_marks,
             'subject_type' => $subject_type, 'group_id' => $group_id, 'group_label' => $groupRaw,
-            'optional_count' => $optional_count, 'status' => $status,
+            'optional_count' => $optional_count, 'status' => $status, 'religion' => $religion,
         ];
 
         if ($subject_code !== '' && $class_id) { $seen_in_file[$class_id . '|' . $subject_code] = true; }
@@ -247,19 +297,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_import'])) {
     $skipped = 0;
 
     $stmt = $pdo->prepare(
-        "INSERT INTO academic_subjects (class_id, subject_name, subject_code, full_marks, subject_type, group_id, optional_count, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO academic_subjects (class_id, subject_name, subject_code, full_marks, subject_type, group_id, optional_count, status, sort_order, religion)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
 
     $pdo->beginTransaction();
     try {
+        $new_classes = []; $created_classes = 0;
         foreach ($rows as $r) {
             if (empty($r['ok'])) { $skipped++; continue; }
             $d = $r['data'];
+            if (is_string($d['class_id']) && strpos($d['class_id'], 'new:') === 0) {
+                $ck = $d['class_id'];
+                if (!isset($new_classes[$ck])) {
+                    $f = $pdo->prepare("SELECT id FROM academic_classes WHERE LOWER(class_name)=LOWER(?) LIMIT 1");
+                    $f->execute([$d['class_label']]);
+                    $cid = $f->fetchColumn();
+                    if (!$cid) {
+                        $mr = (int) $pdo->query("SELECT COALESCE(MAX(rank),0) FROM academic_classes")->fetchColumn();
+                        $pdo->prepare("INSERT INTO academic_classes (medium_id, class_name, rank, status) VALUES (NULL, ?, ?, 'Active')")
+                            ->execute([$d['class_label'], $mr + 1]);
+                        $cid = (int) $pdo->lastInsertId(); $created_classes++;
+                    }
+                    $new_classes[$ck] = (int) $cid;
+                }
+                $d['class_id'] = $new_classes[$ck];
+            }
 
             $stmt->execute([
                 $d['class_id'], $d['subject_name'], $d['subject_code'] ?: null, $d['full_marks'],
-                $d['subject_type'], $d['group_id'] ?: null, $d['optional_count'], $d['status'],
+                $d['subject_type'], $d['group_id'] ?: null, $d['optional_count'], $d['status'], subject_rank_next($pdo, $d['class_id']), ($d['religion'] ?? '') !== '' ? $d['religion'] : null,
             ]);
             $imported++;
         }
@@ -273,9 +340,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_import'])) {
 
     @unlink($tmpFile);
     if ($imported > 0) {
-        sec_log_activity($pdo, 'Academic', 'Import', "Subject Import করা হয়েছে: {$imported} টি (skipped: {$skipped})");
+        sec_log_activity($pdo, 'Academic', 'Import', "Subject Import করা হয়েছে: {$imported} টি (skipped: {$skipped}, নতুন Class: {$created_classes})");
     }
-    $_SESSION['subj_imp_msg'] = "{$imported} টি Subject সফলভাবে import করা হয়েছে।" . ($skipped ? " {$skipped} টি সারি এরর থাকায় বাদ দেওয়া হয়েছে।" : '');
+    $_SESSION['subj_imp_msg'] = "{$imported} টি Subject সফলভাবে import করা হয়েছে।" . ($created_classes ? " {$created_classes} টি নতুন Class তৈরি হয়েছে (Medium/Rank পরে All Class List থেকে ঠিক করুন)।" : '') . ($skipped ? " {$skipped} টি সারি এরর থাকায় বাদ দেওয়া হয়েছে।" : '');
     header('Location: index.php?page=academic_subject_import');
     exit();
 }
@@ -305,11 +372,18 @@ $err_count = $preview_rows ? count($preview_rows) - $ok_count : 0;
                             <input type="file" name="import_file" class="form-control" accept=".xlsx,.csv,.txt" required>
                             <small class="text-muted d-block mt-1">সর্বোচ্চ 5MB। পুরনো .xls ফরম্যাট হলে আগে .xlsx বা .csv তে সেভ করে নিন।</small>
                         </div>
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" name="auto_create_class" value="1" id="acc" checked>
+                            <label class="form-check-label small" for="acc">ফাইলের Class নাম সিস্টেমে না থাকলে নতুন Class স্বয়ংক্রিয়ভাবে তৈরি করো</label>
+                        </div>
                         <button type="submit" name="upload_file" class="btn btn-primary btn-sm">
                             <i class="fa-solid fa-upload"></i> Upload &amp; Preview
                         </button>
                         <a href="index.php?page=academic_subject_import&sample=1" class="btn btn-outline-secondary btn-sm">
                             <i class="fa-solid fa-download"></i> স্যাম্পল টেমপ্লেট ডাউনলোড
+                        </a>
+                        <a href="index.php?page=academic_subject_import&preset=1" class="btn btn-outline-success btn-sm mt-2">
+                            <i class="fa-solid fa-list-check"></i> প্লে–পঞ্চম শ্রেণীর বিষয় তালিকা (রেডিমেড CSV)
                         </a>
                     </form>
                 </div>
@@ -320,10 +394,11 @@ $err_count = $preview_rows ? count($preview_rows) - $ok_count : 0;
                     <ul class="mb-0 ps-3">
                         <li>প্রথম সারি অবশ্যই হেডার (কলামের নাম) হতে হবে।</li>
                         <li>আবশ্যক কলাম: <b>Class, Subject Name</b> — বাকিগুলো ঐচ্ছিক।</li>
-                        <li><b>Class</b> অবশ্যই Academic Module &gt; All Class List এ আগে থেকে তৈরি করা নামের সাথে মিলতে হবে।</li>
+                        <li><b>Class</b> নাম All Class List-এর সাথে মিলতে হবে; না মিললে উপরের টিক দিলে নতুন Class তৈরি হবে। একই Class-এ একই নামের বিষয় আগে থেকে থাকলে সেটা বাদ যাবে।</li>
                         <li><b>Group</b> দিলে Academic Module &gt; All Group List এ আগে থেকে তৈরি করা নামের সাথে মিলতে হবে।</li>
                         <li><b>Subject Code</b> দিলে একই Class-এ ডুপ্লিকেট Code থাকলে সেই সারি এরর দেখাবে।</li>
                         <li><b>Full Marks</b> খালি রাখলে ডিফল্ট 100 বসবে। <b>Subject Type</b> খালি বা না মিললে ডিফল্ট 'Compulsory' বসবে।</li>
+                        <li><b>Religion</b> কলামে (ঐচ্ছিক) Islam / Hinduism / Buddhism / Christianity / Others দিলে Subject শুধু ঐ ধর্মের শিক্ষার্থীর জন্য হবে; খালি = সবার জন্য।</li>
                         <li><b>Status</b> কলামে Active / Inactive দিন, খালি থাকলে ডিফল্ট 'Active' বসবে।</li>
                         <li>Upload করার পর প্রথমে প্রিভিউ দেখাবে — Confirm করলে শুধু ঠিক সারিগুলোই সেভ হবে।</li>
                     </ul>
@@ -353,7 +428,7 @@ $err_count = $preview_rows ? count($preview_rows) - $ok_count : 0;
             <table class="table table-bordered table-sm align-middle">
                 <thead class="table-dark">
                     <tr>
-                        <th>সারি</th><th>স্ট্যাটাস</th><th>Class</th><th>Subject Name</th><th>Code</th><th>Marks</th><th>Type</th><th>Group</th><th>বিস্তারিত</th>
+                        <th>সারি</th><th>স্ট্যাটাস</th><th>Class</th><th>Subject Name</th><th>Code</th><th>Marks</th><th>Type</th><th>Group</th><th>Religion</th><th>বিস্তারিত</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -361,12 +436,13 @@ $err_count = $preview_rows ? count($preview_rows) - $ok_count : 0;
                         <tr class="<?php echo $r['ok'] ? '' : 'table-danger'; ?>">
                             <td><?php echo (int) $r['row_no']; ?></td>
                             <td><?php echo $r['ok'] ? '<span class="badge bg-success">OK</span>' : '<span class="badge bg-danger">Error</span>'; ?></td>
-                            <td><?php echo $d['class_id'] ? '✓ ' . siv($d['class_label']) : '<span class="text-muted">—</span>'; ?></td>
+                            <td><?php echo $d['class_id'] ? (is_string($d['class_id']) ? '＋ নতুন: ' : '✓ ') . siv($d['class_label']) : '<span class="text-muted">—</span>'; ?></td>
                             <td><?php echo siv($d['subject_name']); ?></td>
                             <td><?php echo siv($d['subject_code']); ?></td>
                             <td><?php echo (int) $d['full_marks']; ?></td>
                             <td><?php echo siv($d['subject_type']); ?></td>
                             <td><?php echo $d['group_id'] ? siv($d['group_label']) : '<span class="text-muted">—</span>'; ?></td>
+                            <td><?php echo !empty($d['religion']) ? siv($d['religion']) : '<span class="text-muted">—</span>'; ?></td>
                             <td class="small text-danger"><?php echo siv(implode(', ', $r['errors'])); ?></td>
                         </tr>
                     <?php endforeach; ?>

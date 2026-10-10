@@ -4,6 +4,7 @@
 // একসাথে কলাম আকারে দেখানো হয় — প্রতি Subject কলামের প্রতিটা স্টুডেন্ট রো তে চেকবক্স দিয়ে
 // Present/Absent মার্ক করা যায়। ডাটা একই exam_attendance_subject টেবিলে সেভ হয়, তাই
 // Attendance (Subject) পেজ থেকে করা এন্ট্রিও এখানে দেখা যাবে এবং উল্টোটাও।
+require_once __DIR__ . '/../config/exam_att_grid.php'; // Assign + Eligibility নিয়ম মানা গ্রিড/সেভ
 $ax_err = $_SESSION['ax_err'] ?? '';
 $ax_msg = $_SESSION['ax_msg'] ?? '';
 unset($_SESSION['ax_err'], $_SESSION['ax_msg']);
@@ -77,27 +78,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_attendance'])) {
     if (!$class_id || !$shift_id || !$section_id || !$term_id || !$part_id || !$student_ids || !$subject_ids) {
         $_SESSION['ax_err'] = 'Class, Shift, Section, Exam Term এবং Exam Part সিলেক্ট করুন।';
     } else {
-        $stmt = $pdo->prepare(
-            "INSERT INTO exam_attendance_subject
-                (session_id, term_id, part_id, subject_id, class_id, shift_id, section_id, student_id, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE status = VALUES(status)"
-        );
-        $count = 0;
-        foreach ($student_ids as $stid) {
-            $stid = (int) $stid;
-            foreach ($subject_ids as $sid) {
-                $sid = (int) $sid;
-                $status = (isset($present_map[$stid][$sid]) && $present_map[$stid][$sid] === '1') ? 'Present' : 'Absent';
-                $stmt->execute([$current_session_id, $term_id, $part_id, $sid, $class_id, $shift_id, $section_id, $stid, $status]);
-                $count++;
-            }
-        }
+        [$n_students, $count, $blocked] = ea_save($pdo, $current_session_id, $term_id, $part_id, $class_id, $shift_id, $section_id, (array) $student_ids, (array) $subject_ids, $present_map);
         sec_log_activity($pdo, 'Result', 'Update', "ক্লাস আইডি {$class_id}, টার্ম আইডি {$term_id}, পার্ট আইডি {$part_id} এর {$count} টি Exam Attendance এন্ট্রি সংরক্ষণ করা হয়েছে");
-        $_SESSION['ax_msg'] = count($student_ids) . ' জন শিক্ষার্থীর সব Subject এর Exam Attendance সেভ করা হয়েছে।';
+        $_SESSION['ax_msg'] = $n_students . ' জন শিক্ষার্থীর Exam Attendance সেভ করা হয়েছে।' . ($blocked ? " ({$blocked}টি ঘর Eligibility/Assign না থাকায় বাদ গেছে।)" : '');
     }
 
-    header('Location: index.php?page=result_attendance_exam&class_id=' . $class_id . '&shift_id=' . $shift_id . '&section_id=' . $section_id . '&term_id=' . $term_id . '&part_id=' . $part_id);
+    header('Location: index.php?page=result_attendance_exam&class_id=' . $class_id . '&shift_id=' . $shift_id . '&section_id=' . $section_id . '&term_id=' . $term_id . '&part_id=' . $part_id . '&group_id=' . (int) ($_POST['group_id'] ?? 0));
     exit();
 }
 
@@ -109,6 +95,8 @@ $sel_shift   = (int) ($_GET['shift_id'] ?? 0);
 $sel_section = (int) ($_GET['section_id'] ?? 0);
 $sel_term    = (int) ($_GET['term_id'] ?? 0);
 $sel_part    = (int) ($_GET['part_id'] ?? 0);
+$sel_group   = (int) ($_GET['group_id'] ?? 0);
+$ax_groups   = $sel_class > 0 ? ee_groups_of_class($pdo, $sel_class) : [];
 
 $classes = $pdo->query("SELECT id, class_name FROM academic_classes WHERE status='Active' ORDER BY rank ASC, class_name ASC")->fetchAll();
 $shifts  = $pdo->query("SELECT id, shift_name FROM academic_shifts WHERE status='Active' ORDER BY shift_name ASC")->fetchAll();
@@ -128,38 +116,7 @@ $parts_stmt = $pdo->prepare("SELECT id, part_name FROM exam_parts WHERE session_
 $parts_stmt->execute([$current_session_id]);
 $parts = $parts_stmt->fetchAll();
 
-// -----------------------------------------------------------
-// সিলেক্টেড কম্বিনেশনের জন্য Subject + Student লিস্ট + বিদ্যমান Attendance
-// -----------------------------------------------------------
 $all_selected = ($sel_class > 0 && $sel_shift > 0 && $sel_section > 0 && $sel_term > 0 && $sel_part > 0);
-$subjects = [];
-$students = [];
-$existing = []; // [student_id][subject_id] = status
-
-if ($all_selected) {
-    $sub_stmt = $pdo->prepare("SELECT id, subject_name FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY subject_name ASC");
-    $sub_stmt->execute([$sel_class]);
-    $subjects = $sub_stmt->fetchAll();
-
-    $rae_where = ['class_id=?', 'shift_id=?', 'section_id=?', "status='Active'"];
-    $rae_params = [$sel_class, $sel_shift, $sel_section];
-    branch_apply_filter($rae_where, $rae_params);
-    $stu_stmt = $pdo->prepare(
-        "SELECT id, roll_no, name_en FROM students
-         WHERE " . implode(' AND ', $rae_where) . "
-         ORDER BY (roll_no + 0) ASC, roll_no ASC"
-    );
-    $stu_stmt->execute($rae_params);
-    $students = $stu_stmt->fetchAll();
-
-    if ($subjects && $students) {
-        $ex_stmt = $pdo->prepare("SELECT student_id, subject_id, status FROM exam_attendance_subject WHERE term_id=? AND part_id=? AND class_id=? AND shift_id=? AND section_id=?");
-        $ex_stmt->execute([$sel_term, $sel_part, $sel_class, $sel_shift, $sel_section]);
-        foreach ($ex_stmt->fetchAll() as $row) {
-            $existing[(int) $row['student_id']][(int) $row['subject_id']] = $row['status'];
-        }
-    }
-}
 ?>
 
 <style>
@@ -212,6 +169,20 @@ if ($all_selected) {
             </div>
         </div>
 
+        <div class="row mb-3 g-3" id="rax_group_row" <?php echo $ax_groups ? '' : 'style="display:none;"'; ?>>
+            <div class="col-md-4">
+                <div class="d-flex align-items-center gap-2">
+                    <label class="fw-bold text-nowrap mb-0" style="min-width:95px;">Group <span class="text-danger">*</span></label>
+                    <select name="group_id" id="rax_group" class="form-select">
+                        <option value="0">-- Select --</option>
+                        <?php foreach ($ax_groups as $gid => $gname): ?>
+                            <option value="<?php echo (int) $gid; ?>" <?php echo $sel_group === (int) $gid ? 'selected' : ''; ?>><?php echo htmlspecialchars((string) $gname, ENT_QUOTES, 'UTF-8'); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+        </div>
+
         <div class="row g-3 align-items-center">
             <div class="col-md-4">
                 <div class="d-flex align-items-center gap-2">
@@ -251,74 +222,14 @@ if ($all_selected) {
     </div>
 
     <div id="rax_result_wrap">
-        <?php if (!$all_selected): ?>
-            <div class="text-center text-muted py-4">উপরে Class, Shift, Section, Exam Term এবং Exam Part সিলেক্ট করুন — তাহলে স্টুডেন্ট লিস্ট এখানে দেখাবে।</div>
-        <?php elseif (!$subjects): ?>
-            <div class="text-center text-muted py-4">এই ক্লাসের জন্য কোনো Subject পাওয়া যায়নি।</div>
-        <?php elseif (!$students): ?>
-            <div class="text-center text-muted py-4">এই Class/Shift/Section এ কোনো Active Student পাওয়া যায়নি।</div>
-        <?php else: ?>
-            <form method="POST" action="index.php?page=result_attendance_exam">
-                <?php echo csrf_field(); ?>
-                <input type="hidden" name="class_id" value="<?php echo $sel_class; ?>">
-                <input type="hidden" name="shift_id" value="<?php echo $sel_shift; ?>">
-                <input type="hidden" name="section_id" value="<?php echo $sel_section; ?>">
-                <input type="hidden" name="term_id" value="<?php echo $sel_term; ?>">
-                <input type="hidden" name="part_id" value="<?php echo $sel_part; ?>">
-                <?php foreach ($subjects as $sub): ?>
-                    <input type="hidden" name="grid_subject_id[]" value="<?php echo (int) $sub['id']; ?>">
-                <?php endforeach; ?>
-
-                <div class="table-responsive">
-                    <table class="table table-bordered align-middle text-center">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Sl.</th>
-                                <th>Roll</th>
-                                <th class="text-start">Name</th>
-                                <?php foreach ($subjects as $sub): ?>
-                                    <th>
-                                        <div class="small text-muted mb-1">All</div>
-                                        <input type="checkbox" class="form-check-input axcol-all" data-subject="<?php echo (int) $sub['id']; ?>" onclick="toggleAxColumn(<?php echo (int) $sub['id']; ?>, this)">
-                                    </th>
-                                <?php endforeach; ?>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php $srl = 1; foreach ($students as $stu): $stid = (int) $stu['id']; ?>
-                                <tr>
-                                    <td><?php echo $srl++; ?></td>
-                                    <td><?php echo axv($stu['roll_no']); ?></td>
-                                    <td class="text-start"><?php echo axv($stu['name_en']); ?></td>
-                                    <input type="hidden" name="student_id[]" value="<?php echo $stid; ?>">
-                                    <?php foreach ($subjects as $sub):
-                                        $sid = (int) $sub['id'];
-                                        $status = $existing[$stid][$sid] ?? 'Absent';
-                                        $checked = $status === 'Present';
-                                    ?>
-                                        <td>
-                                            <div class="small text-muted mb-1"><?php echo axv($sub['subject_name']); ?></div>
-                                            <input type="checkbox" class="form-check-input ax-cb ax-col-<?php echo $sid; ?>" name="present[<?php echo $stid; ?>][<?php echo $sid; ?>]" value="1" <?php echo $checked ? 'checked' : ''; ?>>
-                                        </td>
-                                    <?php endforeach; ?>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-
-                <div class="d-flex justify-content-center mt-4">
-                    <button type="submit" name="save_attendance" class="btn btn-primary px-5 fw-bold" style="background-color:#1e3a8a;border-color:#1e3a8a;">Save Attendance</button>
-                </div>
-            </form>
-        <?php endif; ?>
+        <?php ea_render_grid($pdo, $sel_class, $sel_shift, $sel_section, $sel_term, $sel_part, $sel_group); ?>
     </div>
 </div>
 
 <script>
 function toggleAxColumn(subjectId, headerBox) {
     var boxes = document.querySelectorAll('.ax-col-' + subjectId);
-    boxes.forEach(function (b) { b.checked = headerBox.checked; });
+    boxes.forEach(function (b) { if (!b.disabled) b.checked = headerBox.checked; });
 }
 
 (function () {
@@ -328,6 +239,13 @@ function toggleAxColumn(subjectId, headerBox) {
     var elTerm    = document.getElementById('rax_term');
     var elPart    = document.getElementById('rax_part');
     var elHint    = document.getElementById('rax_section_hint');
+    var elGroup   = document.getElementById('rax_group');
+    var elGroupRow = document.getElementById('rax_group_row');
+    function setGroups(list) {
+        elGroup.innerHTML = '<option value="0">-- Select --</option>';
+        list.forEach(function (g) { var o = document.createElement('option'); o.value = g.id; o.textContent = g.name; elGroup.appendChild(o); });
+        elGroupRow.style.display = list.length ? '' : 'none';
+    }
     var elWrap    = document.getElementById('rax_result_wrap');
 
     function raxAjaxUrl(action, extra) {
@@ -343,6 +261,7 @@ function toggleAxColumn(subjectId, headerBox) {
     function loadSections() {
         var classId = elClass.value, shiftId = elShift.value;
         elSection.innerHTML = '<option value="0">-- Select --</option>';
+        setGroups([]);
         clearTable();
 
         if (classId == '0' || shiftId == '0') {
@@ -361,6 +280,7 @@ function toggleAxColumn(subjectId, headerBox) {
                     opt.textContent = s.name;
                     elSection.appendChild(opt);
                 });
+                setGroups(data.groups || []);
             })
             .catch(function () { /* নেটওয়ার্ক সমস্যা হলে চুপচাপ থেমে যাওয়া, ইউজার আবার সিলেক্ট করলে রিট্রাই হবে */ });
     }
@@ -375,7 +295,7 @@ function toggleAxColumn(subjectId, headerBox) {
 
         elWrap.innerHTML = '<div class="text-center text-muted py-4"><i class="fa-solid fa-spinner fa-spin me-2"></i>লোড হচ্ছে...</div>';
 
-        fetch(raxAjaxUrl('table', { class_id: classId, shift_id: shiftId, section_id: sectionId, term_id: termId, part_id: partId }))
+        fetch(raxAjaxUrl('table', { class_id: classId, shift_id: shiftId, section_id: sectionId, term_id: termId, part_id: partId, group_id: elGroup.value }))
             .then(function (r) { return r.text(); })
             .then(function (html) { elWrap.innerHTML = html; })
             .catch(function () {
@@ -388,5 +308,6 @@ function toggleAxColumn(subjectId, headerBox) {
     elSection.addEventListener('change', loadTable);
     elTerm.addEventListener('change', loadTable);
     elPart.addEventListener('change', loadTable);
+    elGroup.addEventListener('change', loadTable);
 })();
 </script>

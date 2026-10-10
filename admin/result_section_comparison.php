@@ -117,7 +117,7 @@ if ($searched && $f_class_id && $f_term_id) {
 
             foreach ($students as $stu) {
                 $sid_stu = (int) $stu['id'];
-                $res = rc_student_result($defs, $marks_all[$sid_stu] ?? [], $att_all[$sid_stu] ?? [], $grade_bands);
+                $res = rc_student_result($defs, $marks_all[$sid_stu] ?? [], $att_all[$sid_stu] ?? [], $grade_bands, rc_excluded_subjects($pdo, $defs, (int) $f_term_id, $sid_stu));
 
                 $section_stats[$sec_id]['total']++;
                 $section_stats[$sec_id]['sum_pct'] += $res['percentage'];

@@ -8,7 +8,7 @@
 require_once __DIR__ . '/../../config/runtime.php';
 erp_session_start();
 
-if (!isset($_SESSION['admin_logged'])) {
+if (!isset($_SESSION['admin_logged']) && empty($_SESSION['teacher_logged'])) {
     http_response_code(403);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode(['success' => false, 'message' => 'Session শেষ হয়ে গেছে, আবার লগইন করুন।']);
@@ -16,15 +16,33 @@ if (!isset($_SESSION['admin_logged'])) {
 }
 
 require_once __DIR__ . '/../../config/db.php';
+require_once __DIR__ . '/../../config/portal_access.php';
+erp_portal_require_role($pdo, 'admin', 'result_exam_routine');
+require_once __DIR__ . '/../../config/subject_rank.php'; subject_rank_ensure($pdo);
 require_once __DIR__ . '/../../config/branch_scope.php';
 require_once __DIR__ . '/../../config/permissions.php';
 
-if (!perm_page_allowed($pdo, 'result_exam_routine')) {
+// Teacher Portal থেকে এলে নিজের branch-এ লক (teacher/_bootstrap.php-এর tp_apply_branch_scope-এর মতো)
+if (!empty($_SESSION['teacher_logged']) && !empty($_SESSION['teacher_id']) && !defined('PORTAL_BRANCH_ID')) {
+    try {
+        if (!branch_multi_branch_mode($pdo)) {
+            define('PORTAL_BRANCH_ID', null);
+        } else {
+            $__bst = $pdo->prepare("SELECT branch_id FROM employees WHERE id = ? LIMIT 1");
+            $__bst->execute([(int) $_SESSION['teacher_id']]);
+            $__b = $__bst->fetchColumn();
+            define('PORTAL_BRANCH_ID', ($__b === false || $__b === null || $__b === '') ? null : (int) $__b);
+        }
+    } catch (\Throwable $e) { define('PORTAL_BRANCH_ID', null); }
+}
+
+if (empty($_SESSION['teacher_logged']) && !perm_page_allowed($pdo, 'result_exam_routine')) {
     http_response_code(403);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode(['success' => false, 'message' => 'এই পেজ দেখার অনুমতি নেই।']);
     exit();
 }
+perm_write_guard($pdo, 'result_exam_routine'); // Read-only ইউজারের সেভ আটকায়
 
 function erv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 
@@ -99,7 +117,7 @@ if ($action === 'table') {
     $subjects = [];
     $existing = [];
     if ($all_selected) {
-        $sub_stmt = $pdo->prepare("SELECT id, subject_name, subject_code FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY subject_name ASC");
+        $sub_stmt = $pdo->prepare("SELECT id, subject_name, subject_code FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY sort_order ASC, id ASC");
         $sub_stmt->execute([$sel_class]);
         $subjects = $sub_stmt->fetchAll();
 
