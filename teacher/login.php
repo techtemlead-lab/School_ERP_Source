@@ -1,6 +1,7 @@
 <?php
 // teacher/login.php - Teacher Portal Login (Employee ID + Password)
 require_once __DIR__ . '/_bootstrap.php';
+require_once __DIR__ . '/../config/default_password.php';
 require_once __DIR__.'/../config/auth_rate_limit.php';
 if(($_SERVER['REQUEST_METHOD']??'GET')==='POST')erp_login_limit($pdo,'teacher');
 
@@ -36,8 +37,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
         if ($row) {
             if (empty($row['password'])) {
                 // এই এমপ্লয়ির জন্য এখনো কোনো পাসওয়ার্ড সেট হয়নি —
-                // ডিফল্ট পাসওয়ার্ড হলো তার নিজের Employee ID
-                if (erp_env('APP_ENV')!=='production' && hash_equals((string) $row['employee_id'], (string) $password)) {
+                // ডিফল্ট পাসওয়ার্ড (config/default_password.php)
+                if (hash_equals(erp_default_password(), (string) $password)) {
                     $hash = password_hash($password, PASSWORD_DEFAULT);
                     $pdo->prepare('UPDATE employees SET password = ?, must_change_password = 1 WHERE id = ?')
                         ->execute([$hash, $row['id']]);
@@ -74,7 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
 
 // এই ব্রাউজারে আগে অন্তত একবার সফল লগইন হয়ে থাকলে "প্রথমবার লগইনের নিয়ম"
 // নোটিশটা আর দেখানো হবে না
-$tp_show_first_login_note = erp_env('APP_ENV') !== 'production' && empty($_COOKIE['tp_seen_first_login_note']);
+$tp_show_first_login_note = empty($_COOKIE['tp_seen_first_login_note']);
 
 $inst_name = 'School ERP';
 try {
@@ -128,7 +129,7 @@ $lg_logo = login_ui_logo_url($pdo, '../');
             </form>
 
             <?php if ($tp_show_first_login_note): ?>
-            <div class="lg-note"><i class="fa-solid fa-circle-info"></i> প্রথমবার লগইনের সময় Password ফিল্ডে আপনার নিজের Employee ID দিন। লগইন করার পর নিজের পাসওয়ার্ড পরিবর্তন করে নিন।</div>
+            <div class="lg-note"><i class="fa-solid fa-circle-info"></i> প্রথমবার লগইনের সময় Password ফিল্ডে ডিফল্ট পাসওয়ার্ড দিন (স্কুল থেকে জেনে নিন)। লগইন করার পর নিজের পাসওয়ার্ড পরিবর্তন করে নিন।</div>
             <?php endif; ?>
 
             <?php echo login_ui_switch([
