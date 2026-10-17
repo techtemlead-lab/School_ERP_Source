@@ -164,7 +164,8 @@ if ($fr_bid2 !== null) {
 }
 $site_url = (isset($_SERVER['HTTPS']) ? 'https://' : 'http://') . ($_SERVER['HTTP_HOST'] ?? '');
 $csrf = htmlspecialchars(csrf_token());
-$redirect_qs = ssv(http_build_query($_GET));
+$redirect_qs_raw = http_build_query($_GET);
+$redirect_qs = ssv($redirect_qs_raw);
 ?>
 
 <div class="card-custom mb-3">
@@ -302,8 +303,8 @@ $redirect_qs = ssv(http_build_query($_GET));
                                     <td><?php echo ssv($row['name_en']); ?></td>
                                     <td><?php echo ssv($row['roll_no']); ?></td>
                                     <td class="text-nowrap">
-                                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="return ssRowAction('index.php?page=sms_users_students', {id: <?php echo (int) $row['id']; ?>, redirect_qs: <?php echo htmlspecialchars(json_encode($redirect_qs), ENT_QUOTES, 'UTF-8'); ?>, reset_password: '1'}, <?php echo htmlspecialchars(json_encode($row['name_en'] . '-এর পাসওয়ার্ড ডিফল্টে (123456) রিসেট হবে, নিশ্চিত?'), ENT_QUOTES, 'UTF-8'); ?>);">Change Password</button>
-                                        <button type="button" class="btn btn-sm btn-success" onclick="return ssRowAction('index.php?page=sms_users_students', {'ids[]': <?php echo (int) $row['id']; ?>, redirect_qs: <?php echo htmlspecialchars(json_encode($redirect_qs), ENT_QUOTES, 'UTF-8'); ?>, send_sms: '1'}, null);">Send SMS</button>
+                                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="return ssRowAction('index.php?page=sms_users_students', {id: <?php echo (int) $row['id']; ?>, redirect_qs: <?php echo htmlspecialchars(json_encode($redirect_qs_raw), ENT_QUOTES, 'UTF-8'); ?>, reset_password: '1'}, <?php echo htmlspecialchars(json_encode($row['name_en'] . '-এর পাসওয়ার্ড ডিফল্টে (123456) রিসেট হবে, নিশ্চিত?'), ENT_QUOTES, 'UTF-8'); ?>);">Change Password</button>
+                                        <button type="button" class="btn btn-sm btn-success" onclick="return ssRowAction('index.php?page=sms_users_students', {'ids[]': <?php echo (int) $row['id']; ?>, redirect_qs: <?php echo htmlspecialchars(json_encode($redirect_qs_raw), ENT_QUOTES, 'UTF-8'); ?>, send_sms: '1'}, null);">Send SMS</button>
                                     </td>
                                 </tr>
                             <?php endforeach; else: ?>
