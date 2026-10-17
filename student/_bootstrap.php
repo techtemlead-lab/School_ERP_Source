@@ -21,9 +21,19 @@ require_once __DIR__ . '/../config/security_helpers.php';  // sec_log_activity()
 
 function sp_ensure_column(PDO $pdo, string $table, string $column, string $definition): void
 {
-    $chk = $pdo->query("SHOW COLUMNS FROM `$table` LIKE " . $pdo->quote($column))->fetch();
-    if (!$chk) {
-        $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$column` $definition");
+    // টেবিল না থাকলে বা ALTER ব্যর্থ হলে (পুরনো/আংশিক ডাটাবেজ) লগইন পেজ যেন crash না করে
+    try {
+        $chk = $pdo->query("SHOW COLUMNS FROM `$table` LIKE " . $pdo->quote($column))->fetch();
+        if (!$chk) {
+            try {
+                $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$column` $definition");
+            } catch (\Throwable $e) {
+                // AFTER <কলাম> নেই — কলামটা শেষে যোগ করার চেষ্টা
+                $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$column` " . preg_replace('/\s+AFTER\s+\w+\s*$/i', '', $definition));
+            }
+        }
+    } catch (\Throwable $e) {
+        error_log('[student-bootstrap] ' . $table . '.' . $column . ': ' . $e->getMessage());
     }
 }
 

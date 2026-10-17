@@ -235,7 +235,18 @@ if (!isset($page_map[$page])) { $page = 'dashboard'; }
             <?php if ($pass_msg): ?><div class="alert alert-success py-2"><?php echo sp_e($pass_msg); ?></div><?php endif; ?>
             <?php if ($pass_err): ?><div class="alert alert-danger py-2"><?php echo sp_e($pass_err); ?></div><?php endif; ?>
 
-            <?php include $target_file; ?>
+            <?php
+            // মডিউলের টেবিল/কলাম না থাকলে বা পেজে এরর হলে পুরো পোর্টাল সাদা/500 না হয়ে এখানে কারণসহ বার্তা দেখাবে
+            // (লগইন ও মেনু ঠিক থাকবে)
+            try {
+                include $target_file;
+            } catch (\Throwable $e_page) {
+                error_log('[portal-page] ' . $page . ': ' . $e_page->getMessage());
+                echo '<div class="alert alert-warning m-3"><b>এই পেজটি লোড করতে সমস্যা হয়েছে।</b><br>'
+                   . '<code style="white-space:pre-wrap">' . htmlspecialchars($e_page->getMessage()) . '</code><br>'
+                   . '<small class="text-muted">' . htmlspecialchars(basename($e_page->getFile()) . ':' . $e_page->getLine()) . '</small></div>';
+            }
+            ?>
         </div>
     </div>
 
@@ -295,5 +306,6 @@ if (!isset($page_map[$page])) { $page = 'dashboard'; }
             }
         }, { passive: true });
     </script>
+<?php require_once __DIR__ . '/../config/searchable_select.php'; echo searchable_select_assets(); // বড় ড্রপডাউনে টাইপ করে সার্চ ?>
 </body>
 </html>
