@@ -86,6 +86,7 @@ $classes = $pdo->query("SELECT id, class_name FROM academic_classes WHERE status
 $f_folio = trim($_GET['f_folio'] ?? '');
 $f_class = (int) ($_GET['f_class'] ?? 0);
 $f_roll  = trim($_GET['f_roll'] ?? '');
+$f_student = trim($_GET['f_student'] ?? '');
 $f_date  = trim($_GET['f_date'] ?? '');
 $page_no = max(1, (int) ($_GET['pg'] ?? 1));
 $per_page = 50;
@@ -95,6 +96,8 @@ $params = [];
 if ($f_folio !== '') { $where[] = 'fc.folio_no LIKE ?'; $params[] = '%' . $f_folio . '%'; }
 if ($f_class > 0) { $where[] = 's.class_id = ?'; $params[] = $f_class; }
 if ($f_roll !== '') { $where[] = 's.roll_no LIKE ?'; $params[] = '%' . $f_roll . '%'; }
+// Student সার্চ: Student ID, নাম অথবা Roll — তিনটার যেকোনো একটা মিললেই হবে
+if ($f_student !== '') { $where[] = '(s.student_id LIKE ? OR s.name_en LIKE ? OR s.roll_no LIKE ?)'; $like_st = '%' . $f_student . '%'; array_push($params, $like_st, $like_st, $like_st); }
 if ($f_date !== '') { $where[] = 'DATE(fc.collected_at) = ?'; $params[] = $f_date; }
 branch_apply_filter($where, $params, 's.branch_id');
 $where_sql = implode(' AND ', $where);
@@ -118,7 +121,7 @@ $list_sql = "SELECT fc.folio_no, MIN(fc.student_id) AS student_id, MIN(fc.collec
              LEFT JOIN students s ON s.id = fc.student_id
              WHERE $where_sql
              GROUP BY fc.folio_no
-             ORDER BY MIN(fc.id) ASC
+             ORDER BY MAX(fc.collected_at) DESC, MAX(fc.id) DESC
              LIMIT $per_page OFFSET $offset";
 $lstmt = $pdo->prepare($list_sql);
 $lstmt->execute($params);
@@ -191,7 +194,7 @@ $showing_to = min($offset + $per_page, $total_items);
                             <th>Class</th>
                             <th>Student</th>
                             <th style="width:90px;">Roll No.</th>
-                            <th style="width:150px;">Collection Date</th>
+                            <th style="width:190px;">Collection Date &amp; Time</th>
                             <th style="width:100px;">Actions</th>
                         </tr>
                         <tr>
@@ -205,14 +208,14 @@ $showing_to = min($offset + $per_page, $total_items);
                                     <?php endforeach; ?>
                                 </select>
                             </th>
-                            <th></th>
+                            <th><input type="text" name="f_student" class="form-control form-control-sm" placeholder="ID / Name / Roll" value="<?php echo civ($f_student); ?>" onchange="document.getElementById('ciFilterForm').submit()"></th>
                             <th><input type="text" name="f_roll" class="form-control form-control-sm" value="<?php echo civ($f_roll); ?>" onchange="document.getElementById('ciFilterForm').submit()"></th>
                             <th><input type="date" name="f_date" class="form-control form-control-sm" value="<?php echo civ($f_date); ?>" onchange="document.getElementById('ciFilterForm').submit()"></th>
                             <th></th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php if ($folios): $srl = $offset + 1; foreach ($folios as $f): $sid = (int) $f['student_id']; $sinfo = $student_map[$sid] ?? null; $qs = 'f_folio=' . urlencode($f_folio) . '&f_class=' . $f_class . '&f_roll=' . urlencode($f_roll) . '&f_date=' . urlencode($f_date) . '&pg=' . $page_no; $csrf = htmlspecialchars(csrf_token()); ?>
+                        <?php if ($folios): $srl = $offset + 1; foreach ($folios as $f): $sid = (int) $f['student_id']; $sinfo = $student_map[$sid] ?? null; $qs = 'f_folio=' . urlencode($f_folio) . '&f_class=' . $f_class . '&f_roll=' . urlencode($f_roll) . '&f_student=' . urlencode($f_student) . '&f_date=' . urlencode($f_date) . '&pg=' . $page_no; $csrf = htmlspecialchars(csrf_token()); ?>
                             <tr>
                                 <td><?php echo $srl++; ?></td>
                                 <td class="fw-bold text-primary"><?php echo civ($f['folio_no']); ?></td>
@@ -222,7 +225,7 @@ $showing_to = min($offset + $per_page, $total_items);
                                     <?php echo civ($sinfo ? $sinfo['student_code'] . ' - ' . $sinfo['name_en'] . ' - ' . $sinfo['roll_no'] : '—'); ?>
                                 </td>
                                 <td><?php echo civ($sinfo['roll_no'] ?? '—'); ?></td>
-                                <td><?php echo civ(date('d F Y', strtotime($f['collection_date']))); ?></td>
+                                <td><?php echo civ(date('d F Y, h:i A', strtotime($f['collection_date']))); ?></td>
                                 <td class="text-nowrap">
                                     <a href="print_money_receipt.php?folio_no=<?php echo urlencode($f['folio_no']); ?>&back=finance_collection_invoice_list" target="_blank" class="btn btn-sm btn-outline-primary" title="Print Money Receipt"><i class="fa-solid fa-print"></i></a>
                                     <button type="button" class="btn btn-sm btn-outline-danger" title="Delete" onclick="return ciRowAction('index.php?page=finance_collection_invoice_list', {folio_no: <?php echo civ_js($f['folio_no']); ?>, back_qs: <?php echo civ_js($qs); ?>, delete_folio: '1'}, <?php echo civ_js('এই পুরো Folio (' . $f['folio_no'] . ') Void করবেন? সব লাইন-আইটেম মুছে যাবে।'); ?>);"><i class="fa-solid fa-trash"></i></button>
@@ -241,7 +244,7 @@ $showing_to = min($offset + $per_page, $total_items);
                 <ul class="pagination pagination-sm justify-content-end">
                     <?php for ($pgn = 1; $pgn <= $total_pages; $pgn++): ?>
                         <li class="page-item <?php echo $pgn === $page_no ? 'active' : ''; ?>">
-                            <a class="page-link" href="index.php?page=finance_collection_invoice_list&f_folio=<?php echo urlencode($f_folio); ?>&f_class=<?php echo $f_class; ?>&f_roll=<?php echo urlencode($f_roll); ?>&f_date=<?php echo urlencode($f_date); ?>&pg=<?php echo $pgn; ?>"><?php echo $pgn; ?></a>
+                            <a class="page-link" href="index.php?page=finance_collection_invoice_list&f_folio=<?php echo urlencode($f_folio); ?>&f_class=<?php echo $f_class; ?>&f_roll=<?php echo urlencode($f_roll); ?>&f_student=<?php echo urlencode($f_student); ?>&f_date=<?php echo urlencode($f_date); ?>&pg=<?php echo $pgn; ?>"><?php echo $pgn; ?></a>
                         </li>
                     <?php endfor; ?>
                 </ul>
