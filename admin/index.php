@@ -1,14 +1,11 @@
 <?php
 // admin/index.php - School ERP Admin Dashboard
-require_once __DIR__ . '/../config/runtime.php';
-erp_session_start();
+session_start();
 ob_start(); // পুরো পেজ output buffer করা হচ্ছে, যাতে HTML প্রিন্ট শুরু হয়ে যাওয়ার পরও
             // ভেতরে include হওয়া পেজ ফাইল (institute.php, admissions.php, website.php)
             // থেকে header('Location: ...') redirect ঠিকভাবে কাজ করে ("headers already
             // sent" এরর ছাড়াই)
 require_once __DIR__ . '/../config/db.php';   // $pdo (PDO) এখানে সেট হয়
-require_once __DIR__.'/../config/auth_rate_limit.php';
-if(isset($_POST['login']))erp_login_limit($pdo,'school-admin');
 require_once __DIR__ . '/../config/csrf.php'; // csrf_token() / csrf_field() / csrf_verify()
 require_once __DIR__ . '/../config/captcha.php'; // captcha_new() / captcha_verify() / captcha_svg_markup()
 require_once __DIR__ . '/../config/branch_scope.php'; // branch_current_id() / branch_apply_filter() ইত্যাদি (Branch-wise ডাটা আলাদা করার হেল্পার)
@@ -304,74 +301,172 @@ if (!isset($_SESSION['admin_logged'])) {
     $admin_captcha_code = captcha_new('captcha_admin');
     ?>
     <?php
-    // নতুন লগইন ডিজাইন (Admin/Teacher/Student শেয়ার্ড) — config/login_ui.php
-    require_once __DIR__ . '/../config/login_ui.php';
-    $lg_inst_name = 'School ERP';
-    try { $lg_inst_name = $pdo->query("SELECT institute_name FROM institute_settings WHERE id = 1")->fetchColumn() ?: $lg_inst_name; } catch (\Throwable $e) { /* টেবিল নাই */ }
-    $lg_logo = login_ui_logo_url($pdo, '../');
+    // লোগো ইমেজ base64 data URI হিসেবে সরাসরি এমবেড করা হয়েছে — কোনো ফাইল পাথ/আপলোড
+    // ঠিকঠাক না থাকলেও লোগো সবসময় দেখা যাবে (আলাদা .png ফাইলের উপর নির্ভরতা নেই)
+    $brand_logo_data_uri = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2Ij48Y2lyY2xlIGN4PSIxMjgiIGN5PSIxMjgiIHI9IjEyMCIgZmlsbD0iIzFlNDA3YyIvPjxwYXRoIGQ9Ik0xMjggNjRsODggNDAtODggNDAtODgtNDB6IiBmaWxsPSIjZmZmIi8+PHBhdGggZD0iTTg0IDEzOHYzNGMwIDEyIDIwIDIyIDQ0IDIyczQ0LTEwIDQ0LTIydi0zNGwtNDQgMjB6IiBmaWxsPSIjZmZmIi8+PC9zdmc+';
     ?>
     <!DOCTYPE html>
-    <html lang="bn">
+    <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Admin Login - <?php echo htmlspecialchars($lg_inst_name); ?></title>
+        <title>Login - School ERP</title>
         <?php echo $_favicon_tag; ?>
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet">
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-        <style><?php echo login_ui_css('admin'); ?></style>
+        <style>
+            html, body { height: 100%; }
+            body {
+                margin: 0;
+                background: radial-gradient(circle at 20% 20%, #16213e 0%, #0f172a 55%, #0a0f1e 100%);
+                display: flex; align-items: center; justify-content: center;
+                position: relative; overflow: hidden;
+                font-family: 'Segoe UI', Tahoma, sans-serif;
+            }
+
+            /* ---------- পুরো পেজ জুড়ে বড় Logo Watermark ---------- */
+            .edu-bg-logo {
+                position: absolute; inset: 0; z-index: 0;
+                display: flex; align-items: center; justify-content: center;
+                pointer-events: none;
+            }
+            .edu-bg-logo img {
+                width: min(78vw, 720px); height: auto; opacity: 0.16;
+                filter: drop-shadow(0 0 50px rgba(56,189,248,0.25));
+                animation: bgLogoPulse 8s ease-in-out infinite;
+            }
+            @keyframes bgLogoPulse {
+                0%, 100% { transform: scale(1); opacity: 0.14; }
+                50%      { transform: scale(1.03); opacity: 0.20; }
+            }
+
+            /* ---------- Animated Educational Icons (logo-র উপর দিয়ে ভাসবে) ---------- */
+            .edu-bg { position: absolute; inset: 0; z-index: 1; overflow: hidden; }
+            .edu-item {
+                position: absolute; opacity: 0; font-size: 56px;
+                color: rgba(56, 189, 248, 0.42);
+                animation: eduFloat linear infinite;
+                filter: drop-shadow(0 0 8px rgba(56,189,248,0.2));
+            }
+            .edu-item.orange { color: rgba(251, 191, 36, 0.42); }
+            .edu-item.green  { color: rgba(52, 211, 153, 0.38); }
+            .edu-item.small  { font-size: 40px; }
+            .edu-item.large  { font-size: 72px; }
+
+            @keyframes eduFloat {
+                0%   { transform: translateY(110vh) rotate(0deg) scale(0.8); opacity: 0; }
+                10%  { opacity: 0.9; }
+                90%  { opacity: 0.7; }
+                100% { transform: translateY(-15vh) rotate(360deg) scale(1.1); opacity: 0; }
+            }
+
+            .edu-orb {
+                position: absolute; border-radius: 50%; filter: blur(60px);
+                background: radial-gradient(circle, rgba(56,189,248,0.25), transparent 70%);
+                animation: eduDrift 14s ease-in-out infinite alternate;
+                z-index: 1;
+            }
+            .edu-orb.two { background: radial-gradient(circle, rgba(16,185,129,0.20), transparent 70%); animation-duration: 18s; }
+            @keyframes eduDrift {
+                0%   { transform: translate(0, 0) scale(1); }
+                100% { transform: translate(60px, 40px) scale(1.15); }
+            }
+
+            /* ---------- Login Card ---------- */
+            .login-card {
+                position: relative; z-index: 2;
+                background: white; padding: 36px 40px 40px; border-radius: 14px;
+                width: 100%; max-width: 400px;
+                box-shadow: 0 20px 45px rgba(0,0,0,0.45);
+                border-top: 5px solid #10b981;
+                animation: cardRise 0.6s ease-out;
+            }
+            @keyframes cardRise {
+                0%   { opacity: 0; transform: translateY(18px); }
+                100% { opacity: 1; transform: translateY(0); }
+            }
+            .login-card .brand-logo { display: block; margin: 0 auto 10px; width: 92px; height: auto; }
+            .login-card h3 { color: #0a2540; font-weight: 800; margin-bottom: 22px; text-align: center; }
+        </style>
     </head>
-    <body class="lg">
-    <main class="lg-shell">
-        <?php echo login_ui_aside('admin', $lg_inst_name, $lg_logo); ?>
+    <body>
 
-        <section class="lg-main">
-            <div class="lg-card">
-                <div class="lg-bar"></div>
-                <h2>অ্যাডমিন সাইন-ইন</h2>
-                <p class="lg-sub">আপনার ইউজারনেম ও পাসওয়ার্ড দিয়ে প্রবেশ করুন</p>
+        <!-- পুরো পেজ জুড়ে বড় School ERP Logo (Watermark ব্যাকগ্রাউন্ড) -->
+        <div class="edu-bg-logo" aria-hidden="true">
+            <img src="<?php echo $brand_logo_data_uri; ?>" alt="">
+        </div>
 
-                <?php if ($login_kick_msg): ?><div class="lg-alert warn"><i class="fa-solid fa-triangle-exclamation mt-1"></i><span><?php echo htmlspecialchars($login_kick_msg); ?></span></div><?php endif; ?>
-                <?php if ($login_error): ?><div class="lg-alert err"><i class="fa-solid fa-circle-exclamation mt-1"></i><span><?php echo htmlspecialchars($login_error); ?></span></div><?php endif; ?>
+        <!-- Animated Educational Background Icons -->
+        <div class="edu-bg" aria-hidden="true">
+            <div class="edu-orb" style="width:320px;height:320px;top:-60px;left:-60px;"></div>
+            <div class="edu-orb two" style="width:280px;height:280px;bottom:-80px;right:-40px;"></div>
 
-                <form method="POST" autocomplete="on">
-                    <?php echo csrf_field(); ?>
-                    <?php if ($branch_login_needed): ?>
-                    <div class="lg-field">
-                        <label class="lg-label">Branch</label>
-                        <div class="lg-input"><i class="fa-solid fa-building-columns"></i>
-                            <select name="branch_id" required>
-                                <option value="">-- Branch সিলেক্ট করুন --</option>
-                                <?php foreach ($branch_login_list as $bl): ?>
-                                    <option value="<?php echo (int) $bl['id']; ?>" <?php echo (isset($_POST['branch_id']) && (string) $_POST['branch_id'] === (string) $bl['id']) ? 'selected' : ''; ?>><?php echo htmlspecialchars($bl['branch_name']); ?></option>
-                                <?php endforeach; ?>
-                            </select></div>
+            <i class="edu-item fa-solid fa-graduation-cap large" style="left:8%;  animation-duration:16s; animation-delay:0s;"></i>
+            <i class="edu-item orange fa-solid fa-book"          style="left:20%; animation-duration:20s; animation-delay:2s;"></i>
+            <i class="edu-item green fa-solid fa-pencil small"   style="left:32%; animation-duration:14s; animation-delay:4s;"></i>
+            <i class="edu-item fa-solid fa-book-open large"      style="left:46%; animation-duration:22s; animation-delay:1s;"></i>
+            <i class="edu-item orange fa-solid fa-graduation-cap" style="left:60%; animation-duration:18s; animation-delay:3s;"></i>
+            <i class="edu-item green fa-solid fa-ruler small"    style="left:72%; animation-duration:19s; animation-delay:5s;"></i>
+            <i class="edu-item fa-solid fa-calculator"           style="left:84%; animation-duration:17s; animation-delay:2.5s;"></i>
+            <i class="edu-item orange fa-solid fa-lightbulb large" style="left:92%; animation-duration:21s; animation-delay:0.5s;"></i>
+            <i class="edu-item green fa-solid fa-book small"     style="left:12%; animation-duration:23s; animation-delay:7s;"></i>
+            <i class="edu-item fa-solid fa-pencil"                style="left:54%; animation-duration:15s; animation-delay:8s;"></i>
+        </div>
+
+        <div class="login-card">
+            <img src="<?php echo $brand_logo_data_uri; ?>" alt="School ERP" class="brand-logo">
+            <h3>School ERP</h3>
+            <?php if($login_kick_msg): ?><div class="alert alert-warning py-2 text-center" style="font-size:13px;"><?php echo htmlspecialchars($login_kick_msg); ?></div><?php endif; ?>
+            <?php if($login_error): ?><div class="alert alert-danger py-2 text-center" style="font-size:13px;"><?php echo htmlspecialchars($login_error); ?></div><?php endif; ?>
+            <form method="POST">
+                <?php echo csrf_field(); ?>
+                <?php if ($branch_login_needed): ?>
+                <div class="mb-3">
+                    <label class="form-label fw-bold" style="font-size:13px;">Branch</label>
+                    <select name="branch_id" class="form-select" required>
+                        <option value="">-- Branch সিলেক্ট করুন --</option>
+                        <?php foreach ($branch_login_list as $bl): ?>
+                            <option value="<?php echo (int) $bl['id']; ?>" <?php echo (isset($_POST['branch_id']) && (string) $_POST['branch_id'] === (string) $bl['id']) ? 'selected' : ''; ?>><?php echo htmlspecialchars($bl['branch_name']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <?php endif; ?>
+                <div class="mb-3">
+                    <label class="form-label fw-bold" style="font-size:13px;">Username</label>
+                    <input type="text" name="username" class="form-control" placeholder="admin" value="<?php echo htmlspecialchars($_POST['username'] ?? ''); ?>" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold" style="font-size:13px;">Password</label>
+                    <input type="password" name="password" class="form-control" placeholder="Password" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold" style="font-size:13px;">Verification Code</label>
+                    <div id="captchaBox" style="position:relative;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 10px 14px;text-align:center;">
+                        <?php echo captcha_svg_markup($admin_captcha_code); ?>
+                        <button type="button" id="captchaRefreshBtn" title="নতুন কোড" style="position:absolute;bottom:-10px;right:14px;width:30px;height:30px;border-radius:50%;background:#059669;color:#fff;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;cursor:pointer;">
+                            <i class="fa-solid fa-rotate" style="font-size:13px;"></i>
+                        </button>
                     </div>
-                    <?php endif; ?>
-                    <div class="lg-field">
-                        <label class="lg-label">Username</label>
-                        <div class="lg-input"><i class="fa-solid fa-user"></i>
-                            <input type="text" name="username" placeholder="ইউজারনেম" value="<?php echo htmlspecialchars($_POST['username'] ?? ''); ?>" required autofocus></div>
-                    </div>
-                    <div class="lg-field">
-                        <label class="lg-label">Password</label>
-                        <div class="lg-input"><i class="fa-solid fa-lock"></i>
-                            <input type="password" name="password" placeholder="পাসওয়ার্ড" required>
-                            <button type="button" class="lg-eye" title="দেখান/লুকান"><i class="fa-solid fa-eye"></i></button></div>
-                    </div>
-                    <?php echo login_ui_captcha(captcha_svg_markup($admin_captcha_code)); ?>
-                    <button type="submit" name="login" class="lg-btn">সাইন-ইন করুন <i class="fa-solid fa-arrow-right"></i></button>
-                </form>
-
-                <?php echo login_ui_switch([
-                    ['label' => 'শিক্ষক', 'href' => '../teacher/login.php', 'icon' => 'fa-chalkboard-user'],
-                    ['label' => 'শিক্ষার্থী / অভিভাবক', 'href' => '../student/login.php', 'icon' => 'fa-user-graduate'],
-                ]); ?>
-            </div>
-        </section>
-    </main>
-    <?php echo login_ui_script(); ?>
+                    <style>#captchaBox svg{display:block;width:100%;max-width:260px;height:auto;margin:0 auto;}</style>
+                    <input type="text" name="verification_code" class="form-control mt-3" placeholder="উপরের সংখ্যাগুলো লিখুন" autocomplete="off" required>
+                </div>
+                <button type="submit" name="login" class="btn btn-success w-100 fw-bold py-2">Login</button>
+                <p class="text-center text-muted mt-2 mb-0" style="font-size:12px;">কোড দেখা না গেলে রিফ্রেশ বাটনে চাপুন</p>
+            </form>
+        </div>
+    <script>
+    document.getElementById('captchaRefreshBtn')?.addEventListener('click', function () {
+        const btn = this;
+        const icon = btn.querySelector('i');
+        icon.classList.add('fa-spin');
+        fetch('captcha_refresh.php')
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('captchaBox').querySelector('svg').outerHTML = data.svg;
+            })
+            .finally(() => icon.classList.remove('fa-spin'));
+    });
+    </script>
     </body>
     </html>
     <?php
@@ -407,8 +502,7 @@ if (!empty($_SESSION['admin_logged'])) {
         }
         $_SESSION = [];
         session_destroy();
-        require_once __DIR__ . '/../config/runtime.php';
-erp_session_start();
+        session_start();
         $_SESSION['login_kick_msg'] = $sec_kick_reason === 'timeout'
             ? 'আপনার সেশনের মেয়াদ শেষ হয়ে গেছে (নিষ্ক্রিয়তার কারণে) — আবার লগইন করুন।'
             : 'একজন Administrator আপনাকে জোরপূর্বক লগআউট করে দিয়েছেন — আবার লগইন করুন।';
@@ -443,9 +537,10 @@ if ($idx_students_exists) {
 }
 
 // Change Password Handler
+$is_admin_demo = (($GLOBALS['tenant']['school_code'] ?? ($_SESSION['tenant_school_code'] ?? '')) === 'demo');
 $pass_msg = '';
 $pass_err = '';
-if (!erp_is_demo() && isset($_POST['change_password'])) {
+if (isset($_POST['change_password'])) {
     if (!csrf_verify($_POST['csrf_token'] ?? null)) {
         $pass_err = 'ফর্মের মেয়াদ শেষ হয়ে গেছে, পেজ রিলোড করে আবার চেষ্টা করুন।';
     } else {
@@ -454,7 +549,9 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
         $confirm_pass = $_POST['confirm_password'] ?? '';
         $username = $_SESSION['admin_user'];
 
-        if (strlen($new_pass) < 6) {
+        if (($GLOBALS['tenant']['school_code'] ?? ($_SESSION['tenant_school_code'] ?? '')) === 'demo') {
+            $pass_err = 'Demo Sandbox মোডে পাসওয়ার্ড পরিবর্তন করা বন্ধ রাখা হয়েছে।';
+        } elseif (strlen($new_pass) < 6) {
             $pass_err = 'নতুন পাসওয়ার্ড কমপক্ষে ৬ ক্যারেক্টার হতে হবে!';
         } elseif ($new_pass !== $confirm_pass) {
             $pass_err = 'New password and confirm password do not match!';
@@ -608,7 +705,6 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
     </style>
 </head>
 <body>
-<?php if (erp_is_demo()) require __DIR__ . '/../demo/banner.php'; ?>
 
     <!-- SIDEBAR -->
     <?php include 'sidebar.php'; ?>
@@ -625,6 +721,12 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                         <a href="#" title="Transactions"><i class="fa-solid fa-coins"></i></a>
                         <a href="#" title="Staffs"><i class="fa-solid fa-user-tie"></i></a>
                     </div>
+                    <?php if (($GLOBALS['tenant']['school_code'] ?? ($_SESSION['tenant_school_code'] ?? '')) === 'demo'): ?>
+                        <div class="d-flex align-items-center gap-2 px-3 py-1 rounded-pill bg-warning text-dark fw-bold shadow-sm" style="font-size: 11px;">
+                            <i class="fa-solid fa-flask"></i> DEMO SANDBOX (Hourly Reset)
+                            <a href="../demo/index.php" class="badge bg-dark text-white text-decoration-none ms-1">Hub</a>
+                        </div>
+                    <?php endif; ?>
                 </div>
 
                 <div class="nav-icons">
@@ -634,7 +736,11 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                             <span class="fs-6"><?php echo htmlspecialchars($_SESSION['admin_user']); ?></span>
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end shadow border-0 mt-2" style="font-size: 13.5px;">
-                            <?php if (!erp_is_demo()): ?><li><a class="dropdown-item py-2" href="#" data-bs-toggle="modal" data-bs-target="#changePasswordModal"><i class="fa-solid fa-key text-primary me-2"></i> Change Password</a></li><?php endif; ?>
+                            <?php if (!$is_admin_demo): ?>
+                                <li><a class="dropdown-item py-2" href="#" data-bs-toggle="modal" data-bs-target="#changePasswordModal"><i class="fa-solid fa-key text-primary me-2"></i> Change Password</a></li>
+                            <?php else: ?>
+                                <li><span class="dropdown-item py-2 text-muted disabled"><i class="fa-solid fa-lock text-muted me-2"></i> Password Change (Demo Locked)</span></li>
+                            <?php endif; ?>
                             <li><hr class="dropdown-divider my-1"></li>
                             <li><a class="dropdown-item text-danger fw-bold py-2" href="index.php?logout=true"><i class="fa-solid fa-power-off me-2"></i> Logout</a></li>
                         </ul>
@@ -879,8 +985,6 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                         echo 'Question Management > Create Question';
                     } elseif ($page == 'result_question_list') {
                         echo 'Question Management > Question List';
-                    } elseif ($page == 'teacher_questions') {
-                        echo 'Question Management > Teacher Questions';
                     } elseif ($page == 'accounts_chart') {
                         echo 'Accounts Module > Chart of Accounts';
                     } elseif (in_array($page, ['accounts_journal_voucher', 'accounts_receipt_voucher', 'accounts_payment_voucher', 'accounts_contra_voucher'], true)) {
@@ -934,11 +1038,11 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                         echo 'Finance Module > Finance Reports > Students Dues > Student Due Details';
                     } elseif ($page == 'finance_student_due_month_details') {
                         echo 'Finance Module > Finance Reports > Students Dues > Month Details';
-                    } elseif (in_array($page, ['scholarship_types', 'scholarship_award', 'scholarship_disbursement', 'scholarship_report', 'poor_fund_aid', 'scholarship_applications'], true)) {
+                    } elseif (in_array($page, ['scholarship_types', 'scholarship_award', 'scholarship_disbursement', 'scholarship_report', 'poor_fund_aid'], true)) {
                         $scholarship_labels = [
                             'scholarship_types' => 'Scholarship Types', 'scholarship_award' => 'Assign Scholarship',
                             'scholarship_disbursement' => 'Process Disbursement', 'scholarship_report' => 'Scholarship Report',
-                            'poor_fund_aid' => 'Poor Fund / Charity Aid', 'scholarship_applications' => 'Scholarship Applications',
+                            'poor_fund_aid' => 'Poor Fund / Charity Aid',
                         ];
                         echo 'Finance Module > Scholarship & Welfare > ' . $scholarship_labels[$page];
                     } elseif ($page == 'admission_selection') {
@@ -1035,8 +1139,6 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                         echo 'HR Module > Import Employees';
                     } elseif ($page == 'homework') {
                         echo 'E-Learning Module > Homework';
-                    } elseif ($page == 'lesson_plan') {
-                        echo 'E-Learning Module > Lesson Plan';
                     } elseif ($page == 'live_class') {
                         echo 'E-Learning Module > Live Class';
                     } elseif ($page == 'live_class_host') {
@@ -1243,7 +1345,6 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                 'result_students_report_card' => 'result_students_report_card.php',
                 'result_question_create'      => 'result_question_create.php',
                 'result_question_list'        => 'result_question_list.php',
-                'teacher_questions'           => 'teacher_questions.php',
                 'accounts_chart'                => 'accounts_chart.php',
                 'accounts_journal_voucher'      => 'accounts_journal_voucher.php',
                 'accounts_receipt_voucher'      => 'accounts_journal_voucher.php',
@@ -1274,7 +1375,6 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                 'scholarship_award'            => 'scholarship_award.php',
                 'scholarship_disbursement'     => 'scholarship_disbursement.php',
                 'scholarship_report'           => 'scholarship_report.php',
-                'scholarship_applications'     => 'scholarship_applications.php',
                 'poor_fund_aid'                => 'poor_fund_aid.php',
                 'finance_voucher_print'        => 'finance_voucher_print.php',
                 'finance_daily_collection'     => 'finance_daily_collection.php',
@@ -1311,7 +1411,6 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                 'security_activity_log' => 'security_activity_log.php',
                 'database_reset' => 'database_reset.php',
                 'homework' => 'homework.php',
-                'lesson_plan' => 'lesson_plan.php',
                 'live_class' => 'live_class.php',
                 'live_class_host' => 'live_class_host.php',
                 'live_class_settings' => 'live_class_settings.php',
@@ -1344,7 +1443,7 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
     </div>
 
     <!-- CHANGE PASSWORD MODAL -->
-    <div class="modal fade" id="changePasswordModal" <?php if (erp_is_demo()) echo 'style="display:none!important"'; ?> tabindex="-1" aria-labelledby="changePasswordModalLabel" aria-hidden="true">
+    <div class="modal fade" id="changePasswordModal" tabindex="-1" aria-labelledby="changePasswordModalLabel" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
                 <form method="POST">
@@ -1354,22 +1453,27 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
+                        <?php if ($is_admin_demo): ?>
+                            <div class="alert alert-warning py-2 mb-3">
+                                <i class="fa-solid fa-lock me-1"></i> <strong>Demo Sandbox:</strong> ডেমো অ্যাডমিন অ্যাকাউন্টের পাসওয়ার্ড পরিবর্তন লক করা আছে।
+                            </div>
+                        <?php endif; ?>
                         <div class="mb-3">
                             <label class="form-label fw-bold" style="font-size: 13px;">Current Password</label>
-                            <input type="password" name="current_password" class="form-control" required>
+                            <input type="password" name="current_password" class="form-control" <?php echo $is_admin_demo ? 'disabled' : 'required'; ?>>
                         </div>
                         <div class="mb-3">
                             <label class="form-label fw-bold" style="font-size: 13px;">New Password</label>
-                            <input type="password" name="new_password" class="form-control" required>
+                            <input type="password" name="new_password" class="form-control" <?php echo $is_admin_demo ? 'disabled' : 'required'; ?>>
                         </div>
                         <div class="mb-3">
                             <label class="form-label fw-bold" style="font-size: 13px;">Confirm New Password</label>
-                            <input type="password" name="confirm_password" class="form-control" required>
+                            <input type="password" name="confirm_password" class="form-control" <?php echo $is_admin_demo ? 'disabled' : 'required'; ?>>
                         </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
-                        <button type="submit" name="change_password" <?php if (erp_is_demo()) echo 'disabled title="Disabled in public demo"'; ?> class="btn btn-success btn-sm">Update Password</button>
+                        <button type="submit" name="change_password" class="btn btn-success btn-sm" <?php echo $is_admin_demo ? 'disabled' : ''; ?>>Update Password</button>
                     </div>
                 </form>
             </div>
@@ -1496,5 +1600,6 @@ window.addEventListener('load', function () {
 // সাইটজুড়ে Class সিলেক্ট করলে শুধু ওই Class-এর Shift ও Section দেখানো — config/class_scope_filter.php
 if (isset($pdo)) { include __DIR__ . '/../config/class_scope_filter.php'; }
 ?>
+<?php require_once __DIR__ . '/../config/searchable_select.php'; echo searchable_select_assets(); // বড় ড্রপডাউনে টাইপ করে সার্চ ?>
 </body>
 </html>
