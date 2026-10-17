@@ -51,11 +51,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $reset_stu_name = $pdo->prepare("SELECT name_en FROM students WHERE id = ?");
         $reset_stu_name->execute([$id]);
         $reset_stu_name_val = $reset_stu_name->fetchColumn();
-        require_once __DIR__ . '/../config/temp_password.php';
-        $temp_pw = erp_temp_password();
-        $pdo->prepare("UPDATE students SET password = ?, must_change_password = 1 WHERE id = ?")
-            ->execute([password_hash($temp_pw, PASSWORD_DEFAULT), $id]);
-        $_SESSION['ss_msg'] = 'অস্থায়ী পাসওয়ার্ড তৈরি হয়েছে: ' . $temp_pw . ' — এটি শুধু এখনই দেখানো হচ্ছে, লিখে রাখুন বা SMS করুন। প্রথম লগইনের পর পাসওয়ার্ড বদলাতে হবে।';
+        require_once __DIR__ . '/../config/default_password.php';
+        $pdo->prepare("UPDATE students SET password = NULL, must_change_password = 1 WHERE id = ?")->execute([$id]);
+        $_SESSION['ss_msg'] = 'পাসওয়ার্ড ডিফল্টে (' . erp_default_password() . ') রিসেট করা হয়েছে। এখন এই পাসওয়ার্ড দিয়ে লগইন করা যাবে; লগইনের পর পাসওয়ার্ড বদলাতে হবে।';
         sec_log_activity($pdo, 'SMS', 'Update', "Student পাসওয়ার্ড রিসেট করা হয়েছে: " . ($reset_stu_name_val ?: "#$id"));
     } elseif (isset($_POST['send_sms']) || isset($_POST['send_sms_all'])) {
         if (isset($_POST['send_sms_all'])) {
@@ -94,15 +92,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute($ids);
             $students = $stmt->fetchAll();
 
-            require_once __DIR__ . '/../config/temp_password.php';
+            require_once __DIR__ . '/../config/default_password.php';
             $sent = 0; $failed = 0; $skipped = 0;
             foreach ($students as $s) {
                 if (empty($s['guardian_phone'])) { $failed++; continue; }
                 // যে ইউজার নিজে পাসওয়ার্ড বদলে ফেলেছে তার পাসওয়ার্ড বদলানো হবে না (Reset বাটন ব্যবহার করুন)
                 if (!empty($s['password']) && empty($s['must_change_password'])) { $skipped++; continue; }
-                $temp_pw = erp_temp_password();
-                $pdo->prepare("UPDATE students SET password = ?, must_change_password = 1 WHERE id = ?")
-                    ->execute([password_hash($temp_pw, PASSWORD_DEFAULT), (int) $s['id']]);
+                // নিজের পাসওয়ার্ড সেট না করা ইউজার (বা আগে অস্থায়ী পাসওয়ার্ড পাওয়া) → ডিফল্টে ফিরিয়ে SMS
+                $pdo->prepare("UPDATE students SET password = NULL, must_change_password = 1 WHERE id = ?")->execute([(int) $s['id']]);
+                $temp_pw = erp_default_password();
                 $message = "{$inst_name}: প্রিয় অভিভাবক, {$s['name_en']} (ID: {$s['student_id']})-এর লগইন তথ্য — Student ID: {$s['student_id']}, Password: {$temp_pw}। প্রথমবার লগইন করে পাসওয়ার্ড বদলে নিন।";
                 $res = send_sms($pdo, $s['guardian_phone'], $message);
                 if ($res['success']) { $sent++; } else { $failed++; }
@@ -305,7 +303,7 @@ $redirect_qs = ssv($redirect_qs_raw);
                                     <td><?php echo ssv($row['name_en']); ?></td>
                                     <td><?php echo ssv($row['roll_no']); ?></td>
                                     <td class="text-nowrap">
-                                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="return ssRowAction('index.php?page=sms_users_students', {id: <?php echo (int) $row['id']; ?>, redirect_qs: <?php echo htmlspecialchars(json_encode($redirect_qs_raw), ENT_QUOTES, 'UTF-8'); ?>, reset_password: '1'}, <?php echo htmlspecialchars(json_encode($row['name_en'] . '-এর জন্য নতুন অস্থায়ী পাসওয়ার্ড তৈরি হবে, নিশ্চিত?'), ENT_QUOTES, 'UTF-8'); ?>);">Change Password</button>
+                                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="return ssRowAction('index.php?page=sms_users_students', {id: <?php echo (int) $row['id']; ?>, redirect_qs: <?php echo htmlspecialchars(json_encode($redirect_qs_raw), ENT_QUOTES, 'UTF-8'); ?>, reset_password: '1'}, <?php echo htmlspecialchars(json_encode($row['name_en'] . '-এর পাসওয়ার্ড ডিফল্টে (123456) রিসেট হবে, নিশ্চিত?'), ENT_QUOTES, 'UTF-8'); ?>);">Change Password</button>
                                         <button type="button" class="btn btn-sm btn-success" onclick="return ssRowAction('index.php?page=sms_users_students', {'ids[]': <?php echo (int) $row['id']; ?>, redirect_qs: <?php echo htmlspecialchars(json_encode($redirect_qs_raw), ENT_QUOTES, 'UTF-8'); ?>, send_sms: '1'}, null);">Send SMS</button>
                                     </td>
                                 </tr>
