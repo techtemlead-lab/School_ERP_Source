@@ -6,7 +6,9 @@
  * এইটা প্রতিটা স্কুলের আলাদা DB (config/db.php যেটা বানায়) থেকে
  * সম্পূর্ণ আলাদা কানেকশন।
  *
- * ⚠️ প্রোডাকশনে আসল cPanel credential দিয়ে বদলাও।
+ * ⚠️ প্রোডাকশনে আসল cPanel credential দিয়ে বদলাও (.env ফাইলে DB_HOST/DB_USER/DB_PASS/DB_NAME)।
+ */
+
 require_once __DIR__ . '/env.php';
 
 $master_db_host = getenv('DB_HOST') ?: (gethostbyname('school-erp-mariadb') !== 'school-erp-mariadb' ? 'school-erp-mariadb' : '127.0.0.1');
