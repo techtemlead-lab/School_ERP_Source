@@ -22,9 +22,19 @@ require_once __DIR__ . '/../config/security_helpers.php';  // sec_log_activity()
 
 function tp_ensure_column(PDO $pdo, string $table, string $column, string $definition): void
 {
-    $chk = $pdo->query("SHOW COLUMNS FROM `$table` LIKE " . $pdo->quote($column))->fetch();
-    if (!$chk) {
-        $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$column` $definition");
+    // টেবিল না থাকলে বা ALTER ব্যর্থ হলে (পুরনো/আংশিক ডাটাবেজ) লগইন পেজ যেন crash না করে
+    try {
+        $chk = $pdo->query("SHOW COLUMNS FROM `$table` LIKE " . $pdo->quote($column))->fetch();
+        if (!$chk) {
+            try {
+                $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$column` $definition");
+            } catch (\Throwable $e) {
+                // AFTER <কলাম> নেই — কলামটা শেষে যোগ করার চেষ্টা
+                $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$column` " . preg_replace('/\s+AFTER\s+\w+\s*$/i', '', $definition));
+            }
+        }
+    } catch (\Throwable $e) {
+        error_log('[teacher-bootstrap] ' . $table . '.' . $column . ': ' . $e->getMessage());
     }
 }
 
@@ -33,9 +43,11 @@ tp_ensure_column($pdo, 'employees', 'password', "VARCHAR(255) NULL AFTER employe
 tp_ensure_column($pdo, 'employees', 'must_change_password', "TINYINT(1) NOT NULL DEFAULT 1 AFTER password");
 // admin/ এর যেসব পেজ এখানে include হয় সেগুলো branch_id কলাম ধরে কোয়েরি করে — পুরনো
 // ডাটাবেজে কলামগুলো না থাকলে এখানেই যোগ হয়ে যাবে (admin/index.php যেমন করে)
-branch_ensure_column($pdo, 'employees');
-branch_ensure_column($pdo, 'students');
-branch_ensure_column($pdo, 'routines');
+try {
+    branch_ensure_column($pdo, 'employees');
+    branch_ensure_column($pdo, 'students');
+    branch_ensure_column($pdo, 'routines');
+} catch (\Throwable $e) { error_log('[teacher-bootstrap] branch_ensure_column: ' . $e->getMessage()); }
 
 /**
  * লগইন করা টিচার কোন branch-এর, সেটা এই রিকোয়েস্টের জন্য লক করে দেয় — এর পরে
