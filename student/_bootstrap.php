@@ -8,8 +8,7 @@
  * admin/ ফোল্ডারের কোনো ফাইল পরিবর্তন করা হয়নি — এই ফোল্ডারটাই নতুন।
  */
 
-require_once __DIR__ . '/../config/runtime.php';
-erp_session_start();
+session_start();
 require_once __DIR__ . '/../config/db.php';      // $pdo (PDO) সেট হয় — tenant অনুযায়ী
 require_once __DIR__ . '/../config/csrf.php';    // csrf_token() / csrf_field() / csrf_verify()
 require_once __DIR__ . '/../config/captcha.php'; // captcha_new() / captcha_verify() / captcha_svg_markup()
@@ -22,9 +21,19 @@ require_once __DIR__ . '/../config/security_helpers.php';  // sec_log_activity()
 
 function sp_ensure_column(PDO $pdo, string $table, string $column, string $definition): void
 {
-    $chk = $pdo->query("SHOW COLUMNS FROM `$table` LIKE " . $pdo->quote($column))->fetch();
-    if (!$chk) {
-        $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$column` $definition");
+    // টেবিল না থাকলে বা ALTER ব্যর্থ হলে (পুরনো/আংশিক ডাটাবেজ) লগইন পেজ যেন crash না করে
+    try {
+        $chk = $pdo->query("SHOW COLUMNS FROM `$table` LIKE " . $pdo->quote($column))->fetch();
+        if (!$chk) {
+            try {
+                $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$column` $definition");
+            } catch (\Throwable $e) {
+                // AFTER <কলাম> নেই — কলামটা শেষে যোগ করার চেষ্টা
+                $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$column` " . preg_replace('/\s+AFTER\s+\w+\s*$/i', '', $definition));
+            }
+        }
+    } catch (\Throwable $e) {
+        error_log('[student-bootstrap] ' . $table . '.' . $column . ': ' . $e->getMessage());
     }
 }
 
@@ -61,16 +70,6 @@ sp_apply_branch_scope($pdo);
  */
 function sp_require_login(): void
 {
-    if (!erp_is_demo() && !empty($_SESSION['student_logged']) && !empty($_SESSION['student_pk'])) {
-        global $pdo;
-        $q = $pdo->prepare('SELECT must_change_password FROM students WHERE id=?');
-        $q->execute([(int)$_SESSION['student_pk']]);
-        $required = $q->fetchColumn();
-        $scriptName = basename($_SERVER['SCRIPT_NAME'] ?? '');
-        if ($required === false || ($required && $scriptName !== 'index.php')) {
-            erp_stop(403, 'Change your initial password from the portal dashboard before using other features.');
-        }
-    }
     if (empty($_SESSION['student_logged'])) {
         header('Location: login.php');
         exit();
