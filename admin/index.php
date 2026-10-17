@@ -1496,5 +1496,6 @@ window.addEventListener('load', function () {
 // সাইটজুড়ে Class সিলেক্ট করলে শুধু ওই Class-এর Shift ও Section দেখানো — config/class_scope_filter.php
 if (isset($pdo)) { include __DIR__ . '/../config/class_scope_filter.php'; }
 ?>
+<?php require_once __DIR__ . '/../config/searchable_select.php'; echo searchable_select_assets(); // বড় ড্রপডাউনে টাইপ করে সার্চ ?>
 </body>
 </html>

@@ -284,5 +284,6 @@ if (!isset($page_map[$page])) { $page = 'dashboard'; }
             }
         }, { passive: true });
     </script>
+<?php require_once __DIR__ . '/../config/searchable_select.php'; echo searchable_select_assets(); // বড় ড্রপডাউনে টাইপ করে সার্চ ?>
 </body>
 </html>
