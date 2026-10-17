@@ -25,21 +25,18 @@ if (!$student || $student['status'] !== 'Active') {
 }
 
 // Change Password Handler
-$is_demo = (($GLOBALS['tenant']['school_code'] ?? ($_SESSION['tenant_school_code'] ?? '')) === 'demo');
 $pass_msg = '';
 $pass_err = '';
-if (isset($_POST['change_password'])) {
-    if ($is_demo) {
-        $pass_err = 'Demo Sandbox মোডে পাসওয়ার্ড পরিবর্তন বন্ধ রাখা হয়েছে।';
-    } elseif (!csrf_verify($_POST['csrf_token'] ?? null)) {
+if (!erp_is_demo() && isset($_POST['change_password'])) {
+    if (!csrf_verify($_POST['csrf_token'] ?? null)) {
         $pass_err = 'ফর্মের মেয়াদ শেষ হয়ে গেছে, পেজ রিলোড করে আবার চেষ্টা করুন।';
     } else {
         $current_pass = $_POST['current_password'] ?? '';
         $new_pass     = $_POST['new_password'] ?? '';
         $confirm_pass = $_POST['confirm_password'] ?? '';
 
-        if (strlen($new_pass) < 6) {
-            $pass_err = 'নতুন পাসওয়ার্ড কমপক্ষে ৬ ক্যারেক্টার হতে হবে!';
+        if (strlen($new_pass) < 12) {
+            $pass_err = 'নতুন পাসওয়ার্ড কমপক্ষে ১২ ক্যারেক্টার হতে হবে!';
         } elseif ($new_pass !== $confirm_pass) {
             $pass_err = 'New password and confirm password do not match!';
         } elseif (!password_verify($current_pass, $student['password'] ?? '')) {
@@ -55,6 +52,7 @@ if (isset($_POST['change_password'])) {
 }
 
 $page = $_GET['page'] ?? 'dashboard';
+if(!erp_is_demo() && !empty($student['must_change_password']) && ($page!=='dashboard' || (($_SERVER['REQUEST_METHOD']??'GET')==='POST' && !isset($_POST['change_password']))))erp_stop(403,'Change your initial password from the portal dashboard before using other features.');
 
 $page_map = [
     'dashboard'       => __DIR__ . '/dashboard.php',
@@ -66,6 +64,7 @@ $page_map = [
     'home_work'       => __DIR__ . '/home_work.php',
     'assignment'      => __DIR__ . '/assignment.php',
     'lesson_plan'     => __DIR__ . '/lesson_plan.php',
+    'scholarship_apply' => __DIR__ . '/scholarship_apply.php',
     'my_teacher'      => __DIR__ . '/my_teacher.php',
     'my_syllabus'     => __DIR__ . '/my_syllabus.php',
     'my_attendance'   => __DIR__ . '/my_attendance.php',
@@ -87,6 +86,7 @@ $breadcrumb_labels = [
     'home_work'       => 'My Home Work',
     'assignment'      => 'My Assignment',
     'lesson_plan'     => 'My Lesson Plan',
+    'scholarship_apply' => 'Scholarship Apply (শিক্ষাবৃত্তি আবেদন)',
     'my_teacher'      => 'My Teacher',
     'my_syllabus'     => 'My Syllabus',
     'my_attendance'   => 'My Attendance',
@@ -179,6 +179,7 @@ if (!isset($page_map[$page])) { $page = 'dashboard'; }
     </style>
 </head>
 <body>
+<?php if (erp_is_demo()) require __DIR__ . '/../demo/banner.php'; ?>
 
     <!-- SIDEBAR -->
     <?php include 'sidebar.php'; ?>
@@ -191,9 +192,6 @@ if (!isset($page_map[$page])) { $page = 'dashboard'; }
                 <div class="d-flex align-items-center gap-2">
                     <i class="fa-solid fa-bars fs-5 text-white" id="toggleSidebar" style="cursor:pointer;"></i>
                     <span class="badge" style="background:#14b8a6;color:#0f172a;font-weight:700;">Student Portal</span>
-                    <?php if ($is_demo): ?>
-                        <a href="../demo/index.php" class="badge bg-warning text-dark text-decoration-none fw-bold ms-1" title="Demo Sandbox"><i class="fa-solid fa-flask me-1"></i>Demo</a>
-                    <?php endif; ?>
                 </div>
                 <div class="nav-icons">
                     <div class="dropdown">
@@ -207,11 +205,7 @@ if (!isset($page_map[$page])) { $page = 'dashboard'; }
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end shadow border-0 mt-2" style="font-size:13.5px;">
                             <li><a class="dropdown-item py-2" href="index.php?page=my_profile"><i class="fa-solid fa-id-card text-primary me-2"></i> My Profile</a></li>
-                            <?php if (!$is_demo): ?>
-                                <li><a class="dropdown-item py-2" href="#" data-bs-toggle="modal" data-bs-target="#changePasswordModal"><i class="fa-solid fa-key text-primary me-2"></i> Change Password</a></li>
-                            <?php else: ?>
-                                <li><span class="dropdown-item py-2 text-muted disabled"><i class="fa-solid fa-lock text-muted me-2"></i> Change Password (Demo Locked)</span></li>
-                            <?php endif; ?>
+                            <?php if (!erp_is_demo()): ?><li><a class="dropdown-item py-2" href="#" data-bs-toggle="modal" data-bs-target="#changePasswordModal"><i class="fa-solid fa-key text-primary me-2"></i> Change Password</a></li><?php endif; ?>
                             <li><hr class="dropdown-divider my-1"></li>
                             <li><a class="dropdown-item text-danger fw-bold py-2" href="index.php?logout=true"><i class="fa-solid fa-power-off me-2"></i> Logout</a></li>
                         </ul>
@@ -226,7 +220,7 @@ if (!isset($page_map[$page])) { $page = 'dashboard'; }
         </div>
 
         <div class="content-body">
-            <?php if (!empty($student['must_change_password']) && !$is_demo): ?>
+            <?php if (!erp_is_demo() && !empty($student['must_change_password'])): ?>
                 <div class="alert alert-warning d-flex justify-content-between align-items-center py-2">
                     <span><i class="fa-solid fa-triangle-exclamation me-1"></i> আপনি এখনো ডিফল্ট পাসওয়ার্ড ব্যবহার করছেন। নিরাপত্তার জন্য পাসওয়ার্ড পরিবর্তন করে নিন।</span>
                     <a href="#" class="btn btn-sm btn-warning fw-bold" data-bs-toggle="modal" data-bs-target="#changePasswordModal">Change Now</a>
@@ -235,23 +229,12 @@ if (!isset($page_map[$page])) { $page = 'dashboard'; }
             <?php if ($pass_msg): ?><div class="alert alert-success py-2"><?php echo sp_e($pass_msg); ?></div><?php endif; ?>
             <?php if ($pass_err): ?><div class="alert alert-danger py-2"><?php echo sp_e($pass_err); ?></div><?php endif; ?>
 
-            <?php
-            // মডিউলের টেবিল/কলাম না থাকলে বা পেজে এরর হলে পুরো পোর্টাল সাদা/500 না হয়ে এখানে কারণসহ বার্তা দেখাবে
-            // (লগইন ও মেনু ঠিক থাকবে)
-            try {
-                include $target_file;
-            } catch (\Throwable $e_page) {
-                error_log('[portal-page] ' . $page . ': ' . $e_page->getMessage());
-                echo '<div class="alert alert-warning m-3"><b>এই পেজটি লোড করতে সমস্যা হয়েছে।</b><br>'
-                   . '<code style="white-space:pre-wrap">' . htmlspecialchars($e_page->getMessage()) . '</code><br>'
-                   . '<small class="text-muted">' . htmlspecialchars(basename($e_page->getFile()) . ':' . $e_page->getLine()) . '</small></div>';
-            }
-            ?>
+            <?php include $target_file; ?>
         </div>
     </div>
 
     <!-- CHANGE PASSWORD MODAL -->
-    <div class="modal fade" id="changePasswordModal" tabindex="-1" aria-hidden="true">
+    <div class="modal fade" id="changePasswordModal" <?php if (erp_is_demo()) echo 'style="display:none!important"'; ?> tabindex="-1" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
                 <form method="POST">
@@ -261,27 +244,22 @@ if (!isset($page_map[$page])) { $page = 'dashboard'; }
                         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
-                        <?php if ($is_demo): ?>
-                            <div class="alert alert-warning py-2 mb-3">
-                                <i class="fa-solid fa-lock me-1"></i> <strong>Demo Sandbox:</strong> পাসওয়ার্ড পরিবর্তন সুবিধা ডেমো অ্যাকাউন্টের জন্য নিষ্ক্রিয় রাখা হয়েছে।
-                            </div>
-                        <?php endif; ?>
                         <div class="mb-3">
                             <label class="form-label fw-bold" style="font-size:13px;">Current Password</label>
-                            <input type="password" name="current_password" class="form-control" <?php echo $is_demo ? 'disabled' : 'required'; ?>>
+                            <input type="password" name="current_password" class="form-control" required>
                         </div>
                         <div class="mb-3">
                             <label class="form-label fw-bold" style="font-size:13px;">New Password</label>
-                            <input type="password" name="new_password" class="form-control" <?php echo $is_demo ? 'disabled' : 'required'; ?>>
+                            <input type="password" name="new_password" class="form-control" required>
                         </div>
                         <div class="mb-3">
                             <label class="form-label fw-bold" style="font-size:13px;">Confirm New Password</label>
-                            <input type="password" name="confirm_password" class="form-control" <?php echo $is_demo ? 'disabled' : 'required'; ?>>
+                            <input type="password" name="confirm_password" class="form-control" required>
                         </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
-                        <button type="submit" name="change_password" class="btn btn-sm text-white" style="background:#0f766e;" <?php echo $is_demo ? 'disabled' : ''; ?>>Update Password</button>
+                        <button type="submit" name="change_password" <?php if (erp_is_demo()) echo 'disabled title="Disabled in public demo"'; ?> class="btn btn-sm text-white" style="background:#0f766e;">Update Password</button>
                     </div>
                 </form>
             </div>
