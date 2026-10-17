@@ -28,42 +28,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $lines = [];
         $total = 0.0;
+        // একই Item একাধিক লাইনে থাকলে qty যোগ হবে; একই Item-এর শেষ rate ধরা হবে
+        $merged = [];
         foreach ($item_ids as $i => $iid) {
             $iid = (int) $iid;
             $qty = (int) ($qtys[$i] ?? 0);
             $rate = (float) ($rates[$i] ?? 0);
             if ($iid > 0 && $qty > 0 && $rate >= 0) {
-                $amount = $qty * $rate;
-                $lines[] = ['item_id' => $iid, 'qty' => $qty, 'rate' => $rate, 'amount' => $amount];
-                $total += $amount;
+                if (!isset($merged[$iid])) { $merged[$iid] = ['qty' => 0, 'amount' => 0.0]; }
+                $merged[$iid]['qty'] += $qty;
+                $merged[$iid]['amount'] += $qty * $rate;
             }
+        }
+        foreach ($merged as $iid => $m) {
+            $lines[] = ['item_id' => $iid, 'qty' => $m['qty'], 'rate' => $m['amount'] / $m['qty'], 'amount' => $m['amount']];
+            $total += $m['amount'];
         }
 
         if ($supplier_name === '' || !$lines) {
             $error_msg = "Supplier নাম এবং কমপক্ষে একটা Item লাইন দিতে হবে!";
+        } elseif ($paid_amount < 0 || $paid_amount > $total + 0.001) {
+            $error_msg = "Paid Amount ০ থেকে মোট বিলের (৳" . number_format($total, 2) . ") মধ্যে হতে হবে!";
         } else {
             $due = max(0, $total - $paid_amount);
-            $purchase_no = 'PUR-' . date('Ymd') . '-' . mt_rand(1000, 9999);
 
             $pdo->beginTransaction();
             try {
+                $purchase_no = inv_unique_no($pdo, 'PUR', 'inv_purchases', 'purchase_no');
                 $ins = $pdo->prepare("INSERT INTO inv_purchases (purchase_no, supplier_name, total_amount, paid_amount, due_amount, branch_id) VALUES (?, ?, ?, ?, ?, ?)");
                 $ins->execute([$purchase_no, $supplier_name, $total, $paid_amount, $due, branch_id_for_insert()]);
                 $purchase_id = (int) $pdo->lastInsertId();
 
                 $insItem = $pdo->prepare("INSERT INTO inv_purchase_items (purchase_id, item_id, qty, rate, amount) VALUES (?, ?, ?, ?, ?)");
-                $updStock = $pdo->prepare("UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id = ?");
+                // Stock বাড়ানো + Cost Price = weighted average (পুরনো stock × পুরনো cost + নতুন qty × rate) / মোট qty
+                $updStock = $pdo->prepare("UPDATE inventory_items SET stock_qty = ?, cost_price = ? WHERE id = ?");
 
                 foreach ($lines as $ln) {
+                    $itemRow = inv_lock_row($pdo, 'inventory_items', $ln['item_id'], 'stock_qty, cost_price');
+                    if (!$itemRow) { throw new RuntimeException('Item পাওয়া যায়নি (অথবা অন্য branch-এর)।'); }
+                    $old_stock = max(0, (int) $itemRow['stock_qty']);
+                    $new_stock = (int) $itemRow['stock_qty'] + $ln['qty'];
+                    $base = $old_stock + $ln['qty'];
+                    $new_cost = $base > 0 ? (($old_stock * (float) $itemRow['cost_price']) + $ln['amount']) / $base : $ln['rate'];
                     $insItem->execute([$purchase_id, $ln['item_id'], $ln['qty'], $ln['rate'], $ln['amount']]);
-                    $updStock->execute([$ln['qty'], $ln['item_id']]);
+                    $updStock->execute([$new_stock, round($new_cost, 2), $ln['item_id']]);
                 }
 
                 $pdo->commit();
                 sec_log_activity($pdo, 'Inventory', 'Create', "নতুন Purchase তৈরি করা হয়েছে: {$purchase_no} (Supplier: {$supplier_name}), মোট: ৳{$total}");
                 $success_msg = "Purchase সম্পন্ন হয়েছে! Purchase No: $purchase_no";
+            } catch (RuntimeException $e) {
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
+                $error_msg = $e->getMessage();
             } catch (Exception $e) {
-                $pdo->rollBack();
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
                 error_log('Purchase failed: ' . $e->getMessage());
                 $error_msg = "Purchase ব্যর্থ হয়েছে, আবার চেষ্টা করুন।";
             }

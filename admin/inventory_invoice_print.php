@@ -8,13 +8,29 @@ if (!isset($_SESSION['admin_logged'])) {
     die('আপনি লগইন করা নেই। প্রথমে লগইন করুন।');
 }
 
+require_once __DIR__ . '/../config/permissions.php';
+require_once __DIR__ . '/../config/branch_scope.php';
+// Inventory/Sales পেজের অনুমতি না থাকলে Invoice দেখা যাবে না
+if (!perm_page_allowed($pdo, 'inventory_sales') && !perm_page_allowed($pdo, 'inventory_due') && !perm_page_allowed($pdo, 'inventory_sales_return')) {
+    http_response_code(403);
+    die('এই Invoice দেখার অনুমতি আপনার নেই।');
+}
+
 function ipv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 
 $sale_id = (int) ($_GET['id'] ?? 0);
 
-$stmt = $pdo->prepare("SELECT * FROM sales_invoices WHERE id = ?");
-$stmt->execute([$sale_id]);
-$sale = $stmt->fetch();
+// নিজের branch-এর Invoice-ই শুধু (All Branch মোডে ফিল্টার নেই)
+function inv_print_scoped_sale(PDO $pdo, int $id)
+{
+    $where = ['id = ?']; $params = [$id];
+    branch_apply_filter($where, $params);
+    $st = $pdo->prepare("SELECT * FROM sales_invoices WHERE " . implode(' AND ', $where));
+    $st->execute($params);
+    return $st->fetch();
+}
+
+$sale = inv_print_scoped_sale($pdo, $sale_id);
 
 if (!$sale) {
     die('এই Invoice পাওয়া যায়নি।');

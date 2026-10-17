@@ -18,20 +18,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($item_id > 0 && $qty > 0 && in_array($type, $valid_types, true)) {
             $pdo->beginTransaction();
             try {
+                $itemRow = inv_lock_row($pdo, 'inventory_items', $item_id, 'name, stock_qty');
+                if (!$itemRow) { throw new RuntimeException('Item পাওয়া যায়নি (অথবা অন্য branch-এর)।'); }
                 if (in_array($type, ['Damage', 'Lost'], true)) {
-                    $pdo->prepare("UPDATE inventory_items SET stock_qty = GREATEST(0, stock_qty - ?) WHERE id = ?")->execute([$qty, $item_id]);
+                    if ($qty > (int) $itemRow['stock_qty']) {
+                        throw new RuntimeException($itemRow['name'] . ' এর বর্তমান Stock ' . (int) $itemRow['stock_qty'] . ' — এর বেশি ' . $type . ' এন্ট্রি করা যাবে না।');
+                    }
+                    $pdo->prepare("UPDATE inventory_items SET stock_qty = stock_qty - ? WHERE id = ?")->execute([$qty, $item_id]);
                 } else {
                     $pdo->prepare("UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id = ?")->execute([$qty, $item_id]);
                 }
                 $pdo->prepare("INSERT INTO inv_stock_adjustments (item_id, adj_type, qty, reason, branch_id) VALUES (?, ?, ?, ?, ?)")
                     ->execute([$item_id, $type, $qty, $reason ?: null, branch_id_for_insert()]);
                 $pdo->commit();
-                $adj_item_name = '';
-                foreach ($all_items as $ai) { if ((int)$ai['id'] === $item_id) { $adj_item_name = $ai['name']; break; } }
-                sec_log_activity($pdo, 'Inventory', 'Update', "Stock Adjustment ({$type}): {$adj_item_name}, পরিমাণ: {$qty}");
+                sec_log_activity($pdo, 'Inventory', 'Update', "Stock Adjustment ({$type}): {$itemRow['name']}, পরিমাণ: {$qty}");
                 $success_msg = "Stock Adjustment সম্পন্ন হয়েছে।";
+            } catch (RuntimeException $e) {
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
+                $error_msg = $e->getMessage();
             } catch (Exception $e) {
-                $pdo->rollBack();
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
                 error_log('Stock adjust failed: ' . $e->getMessage());
                 $error_msg = "Adjustment ব্যর্থ হয়েছে।";
             }

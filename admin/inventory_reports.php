@@ -55,7 +55,27 @@ $stmt = $pdo->prepare("SELECT COALESCE(SUM(discount_amount), 0) FROM sales_invoi
 $stmt->execute($ir_bf_val !== null ? [$from_dt, $to_dt, $ir_bf_val] : [$from_dt, $to_dt]);
 $r_total_discount = (float) $stmt->fetchColumn();
 
-$r_profit = $r_gross_profit - $r_total_discount;
+// Return হওয়া Item-এর লাভ ও ফেরত দেওয়া ডিসকাউন্ট বাদ দেওয়া হচ্ছে (না হলে profit বেশি দেখাত)
+$stmt = $pdo->prepare(
+    "SELECT COALESCE(SUM(sri.amount - (sri.qty * i.cost_price)), 0), COALESCE(SUM(sri.amount), 0)
+     FROM inv_sale_return_items sri
+     JOIN inv_sale_returns sr ON sr.id = sri.return_id
+     JOIN inventory_items i ON i.id = sri.item_id
+     WHERE sr.created_at BETWEEN ? AND ?" . ($ir_bf_val !== null ? ' AND (i.branch_id = ?)' : '')
+);
+$stmt->execute($ir_bf_val !== null ? [$from_dt, $to_dt, $ir_bf_val] : [$from_dt, $to_dt]);
+[$r_ret_profit, $r_ret_gross] = array_map('floatval', $stmt->fetch(PDO::FETCH_NUM));
+
+$stmt = $pdo->prepare(
+    "SELECT COALESCE(SUM(sr.return_amount), 0) FROM inv_sale_returns sr
+     JOIN sales_invoices s ON s.id = sr.sale_id
+     WHERE sr.created_at BETWEEN ? AND ?" . ($ir_bf_val !== null ? ' AND (s.branch_id = ?)' : '')
+);
+$stmt->execute($ir_bf_val !== null ? [$from_dt, $to_dt, $ir_bf_val] : [$from_dt, $to_dt]);
+$r_ret_net = (float) $stmt->fetchColumn();
+$r_discount_reversed = max(0, $r_ret_gross - $r_ret_net);
+
+$r_profit = ($r_gross_profit - $r_ret_profit) - ($r_total_discount - $r_discount_reversed);
 
 // ---------- Loss (Damage/Lost হিসেবে Stock Adjustment থেকে, Cost Price ভিত্তিক ক্ষতির মূল্য) ----------
 $stmt = $pdo->prepare(

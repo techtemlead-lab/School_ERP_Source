@@ -156,3 +156,51 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS inv_stock_adjustments (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 inv_ensure_column($pdo, 'inv_stock_adjustments', 'branch_id', 'INT NULL');
+
+inv_ensure_column($pdo, 'inv_sale_returns', 'refund_amount', "DECIMAL(10,2) NOT NULL DEFAULT 0");
+
+/**
+ * Branch scope মেনে একটা রো লক করে (SELECT ... FOR UPDATE) আনে — transaction এর ভেতরে ডাকতে হবে।
+ * অন্য branch-এর রো হলে false ফেরত দেয়। $table অবশ্যই কোডের ভেতরের হার্ডকোডেড নাম হবে (ইউজার ইনপুট নয়)।
+ */
+function inv_lock_row(PDO $pdo, string $table, int $id, string $cols = '*')
+{
+    $where = ['id = ?']; $params = [$id];
+    branch_apply_filter($where, $params);
+    $st = $pdo->prepare("SELECT $cols FROM `$table` WHERE " . implode(' AND ', $where) . " FOR UPDATE");
+    $st->execute($params);
+    return $st->fetch();
+}
+
+/** Branch scope মেনে (লক ছাড়া) একটা রো আনে। */
+function inv_scoped_row(PDO $pdo, string $table, int $id, string $cols = '*')
+{
+    $where = ['id = ?']; $params = [$id];
+    branch_apply_filter($where, $params);
+    $st = $pdo->prepare("SELECT $cols FROM `$table` WHERE " . implode(' AND ', $where));
+    $st->execute($params);
+    return $st->fetch();
+}
+
+/** ইউনিক ডকুমেন্ট নম্বর (INV-/PUR-/RET-) — DB-তে আছে কিনা দেখে নেয়, ডুপ্লিকেট হয় না। */
+function inv_unique_no(PDO $pdo, string $prefix, string $table, string $column): string
+{
+    $chk = $pdo->prepare("SELECT 1 FROM `$table` WHERE `$column` = ? LIMIT 1");
+    for ($try = 0; $try < 30; $try++) {
+        $no = $prefix . '-' . date('Ymd') . '-' . random_int(100000, 999999);
+        $chk->execute([$no]);
+        if (!$chk->fetchColumn()) { return $no; }
+    }
+    return $prefix . '-' . date('Ymd') . '-' . bin2hex(random_bytes(4));
+}
+
+/** একই Item একাধিক লাইনে থাকলে qty যোগ করে একটা লাইন বানায়: [item_id => qty] */
+function inv_merge_lines(array $item_ids, array $qtys): array
+{
+    $out = [];
+    foreach ($item_ids as $i => $iid) {
+        $iid = (int) $iid; $q = (int) ($qtys[$i] ?? 0);
+        if ($iid > 0 && $q > 0) { $out[$iid] = ($out[$iid] ?? 0) + $q; }
+    }
+    return $out;
+}

@@ -12,22 +12,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $purchase_id = (int) ($_POST['purchase_id'] ?? 0);
         $amount = (float) ($_POST['pay_amount'] ?? 0);
 
-        $row = $pdo->prepare("SELECT due_amount, purchase_no, supplier_name FROM inv_purchases WHERE id = ?");
-        $row->execute([$purchase_id]);
-        $due_row = $row->fetch();
-        $due_now = (float) ($due_row['due_amount'] ?? 0);
-
-        if ($purchase_id > 0 && $amount > 0 && $amount <= $due_now) {
+        if ($purchase_id > 0 && $amount > 0) {
             $pdo->beginTransaction();
             try {
-                $pdo->prepare("INSERT INTO inv_supplier_payments (purchase_id, amount) VALUES (?, ?)")->execute([$purchase_id, $amount]);
-                $pdo->prepare("UPDATE inv_purchases SET paid_amount = paid_amount + ?, due_amount = due_amount - ? WHERE id = ?")
-                    ->execute([$amount, $amount, $purchase_id]);
-                $pdo->commit();
-                sec_log_activity($pdo, 'Inventory', 'Update', "Supplier Payment জমা হয়েছে: {$due_row['purchase_no']} ({$due_row['supplier_name']}), পরিমাণ: ৳{$amount}");
-                $success_msg = "Supplier Payment জমা হয়েছে।";
+                $due_row = inv_lock_row($pdo, 'inv_purchases', $purchase_id, 'due_amount, purchase_no, supplier_name');
+                $due_now = (float) ($due_row['due_amount'] ?? 0);
+                if (!$due_row || $amount > $due_now + 0.001) {
+                    $pdo->rollBack();
+                    $error_msg = "সঠিক Amount দিন (Due এর বেশি না)।";
+                } else {
+                    $pdo->prepare("INSERT INTO inv_supplier_payments (purchase_id, amount) VALUES (?, ?)")->execute([$purchase_id, $amount]);
+                    $pdo->prepare("UPDATE inv_purchases SET paid_amount = paid_amount + ?, due_amount = GREATEST(0, due_amount - ?) WHERE id = ?")
+                        ->execute([$amount, $amount, $purchase_id]);
+                    $pdo->commit();
+                    sec_log_activity($pdo, 'Inventory', 'Update', "Supplier Payment জমা হয়েছে: {$due_row['purchase_no']} ({$due_row['supplier_name']}), পরিমাণ: ৳{$amount}");
+                    $success_msg = "Supplier Payment জমা হয়েছে।";
+                }
             } catch (Exception $e) {
-                $pdo->rollBack();
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
                 error_log('Supplier pay failed: ' . $e->getMessage());
                 $error_msg = "Payment ব্যর্থ হয়েছে।";
             }
@@ -37,7 +39,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$sup_dues = $pdo->query("SELECT * FROM inv_purchases WHERE due_amount > 0 ORDER BY id DESC")->fetchAll();
+$sd_where = ['due_amount > 0']; $sd_params = [];
+branch_apply_filter($sd_where, $sd_params);
+$sd_stmt = $pdo->prepare("SELECT * FROM inv_purchases WHERE " . implode(' AND ', $sd_where) . " ORDER BY id DESC");
+$sd_stmt->execute($sd_params);
+$sup_dues = $sd_stmt->fetchAll();
 ?>
 
 <div class="card-custom">
