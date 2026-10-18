@@ -27,44 +27,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($buyer_type === 'walkin' && $customer_name === '') {
             $error_msg = "Customer এর নাম দিন!";
         } else {
-            $lines = [];
-            $subtotal = 0.0;
-            $stock_err = '';
-            foreach ($item_ids as $i => $iid) {
-                $iid = (int) $iid;
-                $qty = (int) ($qtys[$i] ?? 0);
-                if ($iid <= 0 || $qty <= 0) { continue; }
-
-                $itemStmt = $pdo->prepare("SELECT name, sale_price, stock_qty FROM inventory_items WHERE id = ?");
-                $itemStmt->execute([$iid]);
-                $itemRow = $itemStmt->fetch();
-
-                if (!$itemRow) { continue; }
-                if ($itemRow['stock_qty'] < $qty) {
-                    $stock_err = htmlspecialchars($itemRow['name']) . ' এর Stock যথেষ্ট নেই!';
-                    break;
-                }
-                $rate = (float) $itemRow['sale_price'];
-                $amount = $rate * $qty;
-                $lines[] = ['item_id' => $iid, 'qty' => $qty, 'rate' => $rate, 'amount' => $amount];
-                $subtotal += $amount;
+            $want = inv_merge_lines($item_ids, $qtys);
+            $student_row = null;
+            if ($buyer_type === 'student') {
+                $student_row = inv_scoped_row($pdo, 'students', (int) $student_pk, 'id, name_en, student_id');
+                if (!$student_row) { $error_msg = "Student পাওয়া যায়নি!"; }
             }
 
-            if ($stock_err) {
-                $error_msg = $stock_err;
-            } elseif (!$lines) {
+            if ($error_msg === '' && !$want) {
                 $error_msg = "কমপক্ষে একটা Item যোগ করুন!";
-            } elseif (!$inv_settings['allow_due_sale'] && $paid_amount < ($subtotal - $discount_amount)) {
-                $error_msg = "Due Sale বন্ধ আছে (Settings থেকে) — সম্পূর্ণ টাকা পরিশোধ করেই Sale সম্পন্ন করতে হবে।";
-            } else {
-                $discount_amount = min($discount_amount, $subtotal);
-                $total = $subtotal - $discount_amount;
-                $due = max(0, $total - $paid_amount);
-                $invoice_no = 'INV-' . date('Ymd') . '-' . mt_rand(1000, 9999);
-                $final_customer_name = $buyer_type === 'student' ? ($_POST['student_display_name'] ?? $customer_name) : $customer_name;
+            }
 
+            if ($error_msg === '') {
                 $pdo->beginTransaction();
                 try {
+                    // Item লক করে stock চেক (একই Item একাধিক লাইনে থাকলেও qty মিলিয়ে চেক হয়)
+                    $lines = [];
+                    $subtotal = 0.0;
+                    foreach ($want as $iid => $qty) {
+                        $itemRow = inv_lock_row($pdo, 'inventory_items', $iid, 'name, sale_price, stock_qty');
+                        if (!$itemRow) { throw new RuntimeException('এই Item পাওয়া যায়নি (অথবা অন্য branch-এর)।'); }
+                        if ((int) $itemRow['stock_qty'] < $qty) {
+                            throw new RuntimeException($itemRow['name'] . ' এর Stock যথেষ্ট নেই! (আছে: ' . (int) $itemRow['stock_qty'] . ')');
+                        }
+                        $rate = (float) $itemRow['sale_price'];
+                        $amount = $rate * $qty;
+                        $lines[] = ['item_id' => $iid, 'qty' => $qty, 'rate' => $rate, 'amount' => $amount];
+                        $subtotal += $amount;
+                    }
+
+                    $discount_amount = min($discount_amount, $subtotal);
+                    $total = $subtotal - $discount_amount;
+                    if ($paid_amount < 0) { throw new RuntimeException('জমার পরিমাণ ঋণাত্মক হতে পারে না।'); }
+                    if ($paid_amount > $total + 0.001) { throw new RuntimeException('জমার পরিমাণ মোট বিলের চেয়ে বেশি হতে পারবে না (মোট: ৳' . number_format($total, 2) . ')।'); }
+                    if (!$inv_settings['allow_due_sale'] && $paid_amount < $total) {
+                        throw new RuntimeException('Due Sale বন্ধ আছে (Settings থেকে) — সম্পূর্ণ টাকা পরিশোধ করেই Sale সম্পন্ন করতে হবে।');
+                    }
+                    $due = max(0, $total - $paid_amount);
+                    $invoice_no = inv_unique_no($pdo, 'INV', 'sales_invoices', 'invoice_no');
+                    // Student এর নাম/কোড সবসময় DB থেকে (ফর্মের hidden ফিল্ড বিশ্বাস করা হয় না)
+                    $final_customer_name = $student_row ? $student_row['name_en'] : $customer_name;
+                    if ($student_row) { $student_code = $student_row['student_id']; }
+
                     $ins = $pdo->prepare(
                         "INSERT INTO sales_invoices (customer_name, invoice_no, total_amount, paid_amount, due_amount, buyer_type, student_pk, student_code, discount_amount, branch_id)
                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -103,8 +107,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // যাতে আগের Student/Cart কোনো কিছুই থেকে না যায়, পরের কাস্টমারের জন্য পেজ পুরো ফাঁকা থাকে
                     header("Location: index.php?page=inventory_sales&last_invoice=$sale_id");
                     exit();
+                } catch (RuntimeException $e) {
+                    if ($pdo->inTransaction()) { $pdo->rollBack(); }
+                    $error_msg = $e->getMessage();
                 } catch (Exception $e) {
-                    $pdo->rollBack();
+                    if ($pdo->inTransaction()) { $pdo->rollBack(); }
                     error_log('Sale failed: ' . $e->getMessage());
                     $error_msg = "Sale ব্যর্থ হয়েছে, আবার চেষ্টা করুন।";
                 }
@@ -116,9 +123,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // এইমাত্র তৈরি হওয়া Invoice (redirect এর পর) — Print বাটন দেখানোর জন্য
 $last_invoice = null;
 if (!empty($_GET['last_invoice'])) {
-    $li = $pdo->prepare("SELECT * FROM sales_invoices WHERE id = ?");
-    $li->execute([(int) $_GET['last_invoice']]);
-    $last_invoice = $li->fetch() ?: null;
+    $last_invoice = inv_scoped_row($pdo, 'sales_invoices', (int) $_GET['last_invoice']) ?: null;
 }
 
 $is_where = []; $is_params = [];

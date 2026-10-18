@@ -15,85 +15,84 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $item_ids = $_POST['r_item_id'] ?? [];
         $return_qtys = $_POST['r_return_qty'] ?? [];
 
-        $sale_stmt = $pdo->prepare("SELECT * FROM sales_invoices WHERE id = ?");
-        $sale_stmt->execute([$sale_id]);
-        $sale = $sale_stmt->fetch();
-
-        if (!$sale) {
-            $error_msg = "এই Invoice পাওয়া যায়নি!";
+        $want = inv_merge_lines($item_ids, $return_qtys);
+        if (!$want) {
+            $error_msg = "কমপক্ষে একটা Item-এর Return Qty দিন!";
         } else {
-            $lines = [];
-            $return_total = 0.0;
-            $line_err = '';
+            $pdo->beginTransaction();
+            try {
+                // Invoice লক + branch চেক
+                $sale = inv_lock_row($pdo, 'sales_invoices', $sale_id);
+                if (!$sale) { throw new RuntimeException("এই Invoice পাওয়া যায়নি!"); }
 
-            foreach ($item_ids as $i => $iid) {
-                $iid = (int) $iid;
-                $ret_qty = (int) ($return_qtys[$i] ?? 0);
-                if ($iid <= 0 || $ret_qty <= 0) { continue; }
+                // Invoice-এর মোট (ডিসকাউন্টের আগে) — ডিসকাউন্ট আনুপাতিকভাবে ফেরত মূল্য থেকে বাদ যাবে
+                $subSt = $pdo->prepare("SELECT COALESCE(SUM(amount),0) FROM inv_sale_items WHERE sale_id = ?");
+                $subSt->execute([$sale_id]);
+                $sub_total = (float) $subSt->fetchColumn();
+                $ratio = $sub_total > 0 ? max(0, ($sub_total - (float) $sale['discount_amount']) / $sub_total) : 1;
 
-                // এই লাইনের বিক্রিত qty ও এখন পর্যন্ত কতটা ফেরত হয়েছে বের করা হচ্ছে
-                $li = $pdo->prepare("SELECT qty, rate FROM inv_sale_items WHERE sale_id = ? AND item_id = ?");
-                $li->execute([$sale_id, $iid]);
-                $line = $li->fetch();
-                if (!$line) { continue; }
+                $lines = [];
+                $return_total = 0.0;   // নিট (ডিসকাউন্ট বাদে)
+                $gross_total  = 0.0;   // গ্রস (সেল রেটে)
+                foreach ($want as $iid => $ret_qty) {
+                    // একই Item একাধিক লাইনে থাকলেও যোগফল ও গড় rate ধরা হয়
+                    $li = $pdo->prepare("SELECT COALESCE(SUM(qty),0) AS qty, COALESCE(SUM(amount),0) AS amount FROM inv_sale_items WHERE sale_id = ? AND item_id = ?");
+                    $li->execute([$sale_id, $iid]);
+                    $line = $li->fetch();
+                    if (!$line || (int) $line['qty'] <= 0) { throw new RuntimeException("এই Invoice-এ এমন Item নেই।"); }
 
-                $rt = $pdo->prepare("SELECT COALESCE(SUM(qty),0) FROM inv_sale_return_items sri JOIN inv_sale_returns sr ON sr.id = sri.return_id WHERE sr.sale_id = ? AND sri.item_id = ?");
-                $rt->execute([$sale_id, $iid]);
-                $already_returned = (int) $rt->fetchColumn();
+                    $rt = $pdo->prepare("SELECT COALESCE(SUM(sri.qty),0) FROM inv_sale_return_items sri JOIN inv_sale_returns sr ON sr.id = sri.return_id WHERE sr.sale_id = ? AND sri.item_id = ?");
+                    $rt->execute([$sale_id, $iid]);
+                    $already_returned = (int) $rt->fetchColumn();
 
-                $max_returnable = (int) $line['qty'] - $already_returned;
-                if ($ret_qty > $max_returnable) {
-                    $line_err = "সর্বোচ্চ $max_returnable পিস ফেরত দেওয়া যাবে (ইতিমধ্যে $already_returned পিস ফেরত হয়ে গেছে)।";
-                    break;
-                }
-
-                $rate = (float) $line['rate'];
-                $amount = $rate * $ret_qty;
-                $lines[] = ['item_id' => $iid, 'qty' => $ret_qty, 'rate' => $rate, 'amount' => $amount];
-                $return_total += $amount;
-            }
-
-            if ($line_err) {
-                $error_msg = $line_err;
-            } elseif (!$lines) {
-                $error_msg = "কমপক্ষে একটা Item-এর Return Qty দিন!";
-            } else {
-                $return_no = 'RET-' . date('Ymd') . '-' . mt_rand(1000, 9999);
-
-                $pdo->beginTransaction();
-                try {
-                    $ins = $pdo->prepare("INSERT INTO inv_sale_returns (sale_id, return_no, return_amount, reason) VALUES (?, ?, ?, ?)");
-                    $ins->execute([$sale_id, $return_no, $return_total, $reason ?: null]);
-                    $return_id = (int) $pdo->lastInsertId();
-
-                    $insItem = $pdo->prepare("INSERT INTO inv_sale_return_items (return_id, item_id, qty, rate, amount) VALUES (?, ?, ?, ?, ?)");
-                    $updStock = $pdo->prepare("UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id = ?");
-
-                    foreach ($lines as $ln) {
-                        $insItem->execute([$return_id, $ln['item_id'], $ln['qty'], $ln['rate'], $ln['amount']]);
-                        $updStock->execute([$ln['qty'], $ln['item_id']]);
+                    $max_returnable = (int) $line['qty'] - $already_returned;
+                    if ($ret_qty > $max_returnable) {
+                        throw new RuntimeException("সর্বোচ্চ $max_returnable পিস ফেরত দেওয়া যাবে (ইতিমধ্যে $already_returned পিস ফেরত হয়ে গেছে)।");
                     }
 
-                    // Invoice-এর Total/Due নতুন করে হিসাব — Total ০ এর নিচে যাবে না
-                    $new_total = max(0, (float) $sale['total_amount'] - $return_total);
-                    $new_due   = max(0, $new_total - (float) $sale['paid_amount']);
-                    $refund_owed = max(0, (float) $sale['paid_amount'] - $new_total);
-
-                    $pdo->prepare("UPDATE sales_invoices SET total_amount = ?, due_amount = ? WHERE id = ?")
-                        ->execute([$new_total, $new_due, $sale_id]);
-
-                    $pdo->commit();
-                    sec_log_activity($pdo, 'Inventory', 'Create', "Sale Return তৈরি করা হয়েছে: {$return_no} (Invoice: {$sale['invoice_no']}), ফেরত মূল্য: ৳" . number_format($return_total, 2));
-
-                    $success_msg = "Return সম্পন্ন হয়েছে! Return No: $return_no, ফেরত মূল্য: ৳" . number_format($return_total, 2);
-                    if ($refund_owed > 0) {
-                        $success_msg .= " — কাস্টমারকে নগদ ৳" . number_format($refund_owed, 2) . " ফেরত দিতে হবে (আগে বেশি টাকা জমা দেওয়া ছিল)।";
-                    }
-                } catch (Exception $e) {
-                    $pdo->rollBack();
-                    error_log('Sale return failed: ' . $e->getMessage());
-                    $error_msg = "Return ব্যর্থ হয়েছে, আবার চেষ্টা করুন।";
+                    $rate = (float) $line['amount'] / (int) $line['qty'];
+                    $gross = $rate * $ret_qty;
+                    $lines[] = ['item_id' => $iid, 'qty' => $ret_qty, 'rate' => $rate, 'amount' => $gross];
+                    $gross_total += $gross;
+                    $return_total += $gross * $ratio;
                 }
+                $return_total = round($return_total, 2);
+
+                // টাকা ফেরত: নতুন total এর চেয়ে বেশি জমা থাকলে বাড়তিটা ক্যাশ ফেরত যাবে
+                $new_total   = max(0, (float) $sale['total_amount'] - $return_total);
+                $refund_owed = max(0, (float) $sale['paid_amount'] - $new_total);
+                $new_paid    = (float) $sale['paid_amount'] - $refund_owed;
+                $new_due     = max(0, $new_total - $new_paid);
+
+                $return_no = inv_unique_no($pdo, 'RET', 'inv_sale_returns', 'return_no');
+                $ins = $pdo->prepare("INSERT INTO inv_sale_returns (sale_id, return_no, return_amount, refund_amount, reason) VALUES (?, ?, ?, ?, ?)");
+                $ins->execute([$sale_id, $return_no, $return_total, $refund_owed, $reason ?: null]);
+                $return_id = (int) $pdo->lastInsertId();
+
+                $insItem = $pdo->prepare("INSERT INTO inv_sale_return_items (return_id, item_id, qty, rate, amount) VALUES (?, ?, ?, ?, ?)");
+                $updStock = $pdo->prepare("UPDATE inventory_items SET stock_qty = stock_qty + ? WHERE id = ?");
+                foreach ($lines as $ln) {
+                    $insItem->execute([$return_id, $ln['item_id'], $ln['qty'], $ln['rate'], $ln['amount']]);
+                    $updStock->execute([$ln['qty'], $ln['item_id']]);
+                }
+
+                $pdo->prepare("UPDATE sales_invoices SET total_amount = ?, paid_amount = ?, due_amount = ? WHERE id = ?")
+                    ->execute([$new_total, $new_paid, $new_due, $sale_id]);
+
+                $pdo->commit();
+                sec_log_activity($pdo, 'Inventory', 'Create', "Sale Return তৈরি করা হয়েছে: {$return_no} (Invoice: {$sale['invoice_no']}), ফেরত মূল্য: ৳" . number_format($return_total, 2) . ", নগদ ফেরত: ৳" . number_format($refund_owed, 2));
+
+                $success_msg = "Return সম্পন্ন হয়েছে! Return No: $return_no, ফেরত মূল্য: ৳" . number_format($return_total, 2);
+                if ($refund_owed > 0) {
+                    $success_msg .= " — কাস্টমারকে নগদ ৳" . number_format($refund_owed, 2) . " ফেরত দিতে হবে (রেকর্ড করা হয়েছে)।";
+                }
+            } catch (RuntimeException $e) {
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
+                $error_msg = $e->getMessage();
+            } catch (Exception $e) {
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
+                error_log('Sale return failed: ' . $e->getMessage());
+                $error_msg = "Return ব্যর্থ হয়েছে, আবার চেষ্টা করুন।";
             }
         }
     }
@@ -113,15 +112,15 @@ if ($search_invoice_no !== '') {
 
     if ($found_sale) {
         $li = $pdo->prepare(
-            "SELECT si.item_id, si.qty, si.rate, i.name AS item_name
+            "SELECT si.item_id, SUM(si.qty) AS qty, SUM(si.amount) / SUM(si.qty) AS rate, i.name AS item_name
              FROM inv_sale_items si LEFT JOIN inventory_items i ON i.id = si.item_id
-             WHERE si.sale_id = ?"
+             WHERE si.sale_id = ? GROUP BY si.item_id, i.name"
         );
         $li->execute([$found_sale['id']]);
         $raw_lines = $li->fetchAll();
 
         foreach ($raw_lines as $rl) {
-            $rt = $pdo->prepare("SELECT COALESCE(SUM(qty),0) FROM inv_sale_return_items sri JOIN inv_sale_returns sr ON sr.id = sri.return_id WHERE sr.sale_id = ? AND sri.item_id = ?");
+            $rt = $pdo->prepare("SELECT COALESCE(SUM(sri.qty),0) FROM inv_sale_return_items sri JOIN inv_sale_returns sr ON sr.id = sri.return_id WHERE sr.sale_id = ? AND sri.item_id = ?");
             $rt->execute([$found_sale['id'], $rl['item_id']]);
             $already_returned = (int) $rt->fetchColumn();
             $rl['already_returned'] = $already_returned;
@@ -131,10 +130,14 @@ if ($search_invoice_no !== '') {
     }
 }
 
-$returns = $pdo->query(
+$rh_where = []; $rh_params = [];
+branch_apply_filter($rh_where, $rh_params, 's.branch_id');
+$rh_stmt = $pdo->prepare(
     "SELECT r.*, s.invoice_no, s.customer_name FROM inv_sale_returns r
-     LEFT JOIN sales_invoices s ON s.id = r.sale_id ORDER BY r.id DESC LIMIT 100"
-)->fetchAll();
+     LEFT JOIN sales_invoices s ON s.id = r.sale_id" . ($rh_where ? ' WHERE ' . implode(' AND ', $rh_where) : '') . " ORDER BY r.id DESC LIMIT 100"
+);
+$rh_stmt->execute($rh_params);
+$returns = $rh_stmt->fetchAll();
 ?>
 
 <div class="card-custom">
@@ -197,7 +200,7 @@ $returns = $pdo->query(
             <h5 class="fw-bold mb-3">Return History</h5>
             <div class="table-responsive">
             <table class="table table-bordered text-center align-middle">
-                <thead class="table-dark"><tr><th>Return No</th><th>Invoice</th><th>Customer</th><th>Return Amount</th><th>Reason</th><th>Date</th></tr></thead>
+                <thead class="table-dark"><tr><th>Return No</th><th>Invoice</th><th>Customer</th><th>Return Amount</th><th>নগদ ফেরত</th><th>Reason</th><th>Date</th></tr></thead>
                 <tbody>
                     <?php if ($returns): foreach ($returns as $r): ?>
                         <tr>
@@ -205,11 +208,12 @@ $returns = $pdo->query(
                             <td><?php echo htmlspecialchars($r['invoice_no'] ?? '-'); ?></td>
                             <td><?php echo htmlspecialchars($r['customer_name'] ?? '-'); ?></td>
                             <td class="text-danger">৳<?php echo number_format($r['return_amount'],2); ?></td>
+                            <td>৳<?php echo number_format($r['refund_amount'] ?? 0,2); ?></td>
                             <td><?php echo htmlspecialchars($r['reason'] ?? '-'); ?></td>
                             <td class="small text-muted"><?php echo htmlspecialchars($r['created_at']); ?></td>
                         </tr>
                     <?php endforeach; else: ?>
-                        <tr><td colspan="6" class="text-muted">কোনো Return নেই</td></tr>
+                        <tr><td colspan="7" class="text-muted">কোনো Return নেই</td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>

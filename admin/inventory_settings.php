@@ -20,7 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $allowed = ['jpg', 'jpeg', 'png'];
             if ($file['size'] > 2 * 1024 * 1024) {
                 $error_msg = 'লোগোর সাইজ সর্বোচ্চ 2MB হতে পারবে।';
-            } elseif (!in_array($ext, $allowed, true)) {
+            } elseif (!in_array($ext, $allowed, true) || !@getimagesize($file['tmp_name'])) {
                 $error_msg = 'শুধু jpg/png ছবি আপলোড করা যাবে।';
             } else {
                 $dir_abs = tenant_upload_abs(__DIR__ . '/..', 'inventory');

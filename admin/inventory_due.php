@@ -12,22 +12,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $sale_id = (int) ($_POST['sale_id'] ?? 0);
         $amount  = (float) ($_POST['collect_amount'] ?? 0);
 
-        $row = $pdo->prepare("SELECT due_amount, invoice_no, customer_name FROM sales_invoices WHERE id = ?");
-        $row->execute([$sale_id]);
-        $due_row = $row->fetch();
-        $due_now = (float) ($due_row['due_amount'] ?? 0);
-
-        if ($sale_id > 0 && $amount > 0 && $amount <= $due_now) {
+        if ($sale_id > 0 && $amount > 0) {
             $pdo->beginTransaction();
             try {
-                $pdo->prepare("INSERT INTO inv_sale_payments (sale_id, amount) VALUES (?, ?)")->execute([$sale_id, $amount]);
-                $pdo->prepare("UPDATE sales_invoices SET paid_amount = paid_amount + ?, due_amount = due_amount - ? WHERE id = ?")
-                    ->execute([$amount, $amount, $sale_id]);
-                $pdo->commit();
-                sec_log_activity($pdo, 'Inventory', 'Update', "Due Payment জমা হয়েছে: Invoice #{$due_row['invoice_no']} ({$due_row['customer_name']}), পরিমাণ: ৳{$amount}");
-                $success_msg = "Due Payment জমা হয়েছে।";
+                // রো লক + branch চেক — ডাবল সাবমিটে overpay ঠেকাতে due এখানেই পড়া হয়
+                $due_row = inv_lock_row($pdo, 'sales_invoices', $sale_id, 'due_amount, invoice_no, customer_name');
+                $due_now = (float) ($due_row['due_amount'] ?? 0);
+                if (!$due_row || $amount > $due_now + 0.001) {
+                    $pdo->rollBack();
+                    $error_msg = "সঠিক Amount দিন (Due এর বেশি না)।";
+                } else {
+                    $pdo->prepare("INSERT INTO inv_sale_payments (sale_id, amount) VALUES (?, ?)")->execute([$sale_id, $amount]);
+                    $pdo->prepare("UPDATE sales_invoices SET paid_amount = paid_amount + ?, due_amount = GREATEST(0, due_amount - ?) WHERE id = ?")
+                        ->execute([$amount, $amount, $sale_id]);
+                    $pdo->commit();
+                    sec_log_activity($pdo, 'Inventory', 'Update', "Due Payment জমা হয়েছে: Invoice #{$due_row['invoice_no']} ({$due_row['customer_name']}), পরিমাণ: ৳{$amount}");
+                    $success_msg = "Due Payment জমা হয়েছে।";
+                }
             } catch (Exception $e) {
-                $pdo->rollBack();
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
                 error_log('Collect due failed: ' . $e->getMessage());
                 $error_msg = "Payment ব্যর্থ হয়েছে।";
             }
