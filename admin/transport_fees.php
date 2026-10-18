@@ -98,6 +98,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         header('Location: index.php?page=transport_fees&tab=collect&month_year=' . urlencode($ref_month));
         exit();
+    } elseif (isset($_POST['generate_staff_invoices'])) {
+        $month_year = trim($_POST['month_year'] ?? date('Y-m'));
+        if (!tr_valid_month($month_year)) {
+            $_SESSION['tf_err'] = 'মাসের ফরম্যাট সঠিক নয় (YYYY-MM)।';
+            header('Location: index.php?page=transport_fees&tab=staff');
+            exit();
+        }
+        $gw = ["tfa.status = 'Active'", "e.status = 'Active'"]; $gp = [];
+        branch_apply_filter($gw, $gp, 'e.branch_id');
+        $gst = $pdo->prepare("SELECT tfa.employee_id, tfa.route_id, tfa.fee_override, tr.monthly_fee
+                              FROM transport_staff_assign tfa
+                              JOIN employees e ON e.id = tfa.employee_id
+                              JOIN transport_routes tr ON tr.id = tfa.route_id
+                              WHERE " . implode(' AND ', $gw));
+        $gst->execute($gp);
+        $created = 0; $skipped = 0;
+        $ins = $pdo->prepare("INSERT IGNORE INTO transport_staff_fee_invoices (employee_id, route_id, month_year, amount) VALUES (?,?,?,?)");
+        foreach ($gst->fetchAll() as $r) {
+            $amount = $r['fee_override'] !== null ? (float) $r['fee_override'] : (float) $r['monthly_fee'];
+            $ins->execute([$r['employee_id'], $r['route_id'], $month_year, $amount]);
+            if ($ins->rowCount() > 0) $created++; else $skipped++;
+        }
+        $_SESSION['tf_msg'] = "$month_year মাসের জন্য $created টি স্টাফ ইনভয়েস তৈরি হয়েছে" . ($skipped > 0 ? " ($skipped টি আগে থেকেই ছিল)" : '') . "।";
+        sec_log_activity($pdo, 'Transport', 'Create', "{$month_year} মাসের স্টাফ ট্রান্সপোর্ট ফি ইনভয়েস: {$created} টি নতুন, {$skipped} টি স্কিপ।");
+        header('Location: index.php?page=transport_fees&tab=staff&month_year=' . urlencode($month_year));
+        exit();
+    } elseif (isset($_POST['collect_staff_payment'])) {
+        $invoice_id     = (int) ($_POST['invoice_id'] ?? 0);
+        $pay_amount     = round((float) ($_POST['pay_amount'] ?? 0), 2);
+        $payment_method = trim($_POST['payment_method'] ?? 'Cash');
+        if (!in_array($payment_method, ['Cash', 'bKash', 'Nagad', 'Bank'], true)) { $payment_method = 'Cash'; }
+        $trx_id         = mb_substr(trim($_POST['trx_id'] ?? ''), 0, 100);
+        $ref_month      = tr_valid_month($_POST['month_year_ref'] ?? '') ? $_POST['month_year_ref'] : date('Y-m');
+        try {
+            $pdo->beginTransaction();
+            $cw = ['i.id = ?']; $cp = [$invoice_id];
+            branch_apply_filter($cw, $cp, 'e.branch_id');
+            $st = $pdo->prepare("SELECT i.*, e.name FROM transport_staff_fee_invoices i JOIN employees e ON e.id = i.employee_id WHERE " . implode(' AND ', $cw) . " FOR UPDATE");
+            $st->execute($cp);
+            $inv = $st->fetch();
+            if (!$inv) { throw new RuntimeException('ইনভয়েস খুঁজে পাওয়া যায়নি।'); }
+            if ($pay_amount <= 0) { throw new RuntimeException('সঠিক পরিমাণ দিন।'); }
+            $due_now = round((float) $inv['amount'] - (float) $inv['paid_amount'], 2);
+            if ($due_now <= 0) { throw new RuntimeException('এই ইনভয়েস ইতিমধ্যে পরিশোধিত।'); }
+            if ($pay_amount > $due_now + 0.001) { throw new RuntimeException('জমার পরিমাণ বাকির (৳' . number_format($due_now, 2) . ') চেয়ে বেশি হতে পারবে না।'); }
+            $new_paid = round((float) $inv['paid_amount'] + $pay_amount, 2);
+            $new_status = $new_paid >= (float) $inv['amount'] - 0.001 ? 'Paid' : 'Partial';
+            $pdo->prepare("UPDATE transport_staff_fee_invoices SET paid_amount=?, status=?, payment_date=CURDATE(), payment_method=?, trx_id=? WHERE id=?")
+                ->execute([$new_paid, $new_status, $payment_method, $trx_id, $invoice_id]);
+            $pdo->prepare("INSERT INTO transport_staff_fee_payments (invoice_id, amount, payment_method, trx_id, collected_by) VALUES (?,?,?,?,?)")
+                ->execute([$invoice_id, $pay_amount, $payment_method, $trx_id ?: null, $_SESSION['admin_user'] ?? '']);
+            $pdo->commit();
+            $_SESSION['tf_msg'] = '৳' . number_format($pay_amount, 2) . ' পেমেন্ট রেকর্ড করা হয়েছে (' . lv($inv['name']) . ')।';
+            sec_log_activity($pdo, 'Transport', 'Update', "স্টাফ ট্রান্সপোর্ট ফি পেমেন্ট: {$inv['name']} - ৳" . number_format($pay_amount, 2) . " ({$payment_method})");
+        } catch (RuntimeException $e) {
+            if ($pdo->inTransaction()) { $pdo->rollBack(); }
+            $_SESSION['tf_err'] = $e->getMessage();
+        }
+        header('Location: index.php?page=transport_fees&tab=staff&month_year=' . urlencode($ref_month));
+        exit();
     }
 }
 
@@ -108,6 +168,7 @@ $month_year = tr_valid_month($_GET['month_year'] ?? '') ? $_GET['month_year'] : 
 <ul class="nav nav-tabs mb-3">
     <li class="nav-item"><a class="nav-link <?php echo $tab === 'generate' ? 'active' : ''; ?>" href="index.php?page=transport_fees&tab=generate">Generate Invoices</a></li>
     <li class="nav-item"><a class="nav-link <?php echo $tab === 'collect' ? 'active' : ''; ?>" href="index.php?page=transport_fees&tab=collect">Collect Payment</a></li>
+    <li class="nav-item"><a class="nav-link <?php echo $tab === 'staff' ? 'active' : ''; ?>" href="index.php?page=transport_fees&tab=staff">Staff Fees</a></li>
     <li class="nav-item"><a class="nav-link <?php echo $tab === 'dues' ? 'active' : ''; ?>" href="index.php?page=transport_fees&tab=dues">Dues Report</a></li>
 </ul>
 
@@ -210,6 +271,69 @@ $month_year = tr_valid_month($_GET['month_year'] ?? '') ? $_GET['month_year'] : 
         </table>
     </div>
 
+<?php elseif ($tab === 'staff'): ?>
+    <h5 class="fw-normal mb-3">স্টাফ/শিক্ষকদের ট্রান্সপোর্ট ফি</h5>
+    <form method="POST" action="index.php?page=transport_fees" class="row g-2 align-items-end mb-3" style="max-width:520px;">
+        <?php echo csrf_field(); ?>
+        <div class="col-md-6"><label class="form-label fw-bold">Month</label><input type="month" name="month_year" class="form-control" value="<?php echo lv($month_year); ?>" required></div>
+        <div class="col-md-6"><button type="submit" name="generate_staff_invoices" class="btn btn-primary fw-bold w-100" style="background-color:#1e3a8a;"><i class="fa-solid fa-file-invoice"></i> Generate Staff Invoices</button></div>
+    </form>
+    <?php
+    $sw = ['i.month_year = ?']; $sp = [$month_year];
+    branch_apply_filter($sw, $sp, 'e.branch_id');
+    $sst = $pdo->prepare("SELECT i.*, e.name, e.employee_id AS emp_code, tr.route_name
+                          FROM transport_staff_fee_invoices i
+                          JOIN employees e ON e.id = i.employee_id
+                          JOIN transport_routes tr ON tr.id = i.route_id
+                          WHERE " . implode(' AND ', $sw) . " ORDER BY i.status ASC, e.name ASC");
+    $sst->execute($sp);
+    $srows = $sst->fetchAll();
+    $shist = [];
+    if ($srows) {
+        $in = implode(',', array_map('intval', array_column($srows, 'id')));
+        foreach ($pdo->query("SELECT invoice_id, amount, payment_method, trx_id, paid_at FROM transport_staff_fee_payments WHERE invoice_id IN ($in) ORDER BY id")->fetchAll() as $ph) { $shist[(int) $ph['invoice_id']][] = $ph; }
+    }
+    ?>
+    <form method="GET" action="index.php" class="mb-3" style="max-width:260px;">
+        <input type="hidden" name="page" value="transport_fees"><input type="hidden" name="tab" value="staff">
+        <input type="month" name="month_year" class="form-control" value="<?php echo lv($month_year); ?>" onchange="this.form.submit()">
+    </form>
+    <div class="table-responsive">
+        <table class="table table-bordered align-middle">
+            <thead class="table-light"><tr><th>Staff</th><th>Route</th><th>Amount</th><th>Paid</th><th>Due</th><th>Status</th><th>Collect</th></tr></thead>
+            <tbody>
+            <?php if ($srows): foreach ($srows as $row): $due = (float) $row['amount'] - (float) $row['paid_amount']; ?>
+                <tr>
+                    <td><?php echo lv($row['name']); ?> <span class="text-muted small">(<?php echo lv($row['emp_code']); ?>)</span>
+                        <?php foreach (($shist[(int) $row['id']] ?? []) as $ph): ?>
+                            <div class="small text-success">✔ ৳<?php echo number_format((float) $ph['amount'], 2); ?> — <?php echo lv($ph['payment_method']); ?><?php echo $ph['trx_id'] ? ' (' . lv($ph['trx_id']) . ')' : ''; ?> <span class="text-muted"><?php echo lv($ph['paid_at']); ?></span></div>
+                        <?php endforeach; ?>
+                    </td>
+                    <td><?php echo lv($row['route_name']); ?></td>
+                    <td>৳<?php echo number_format((float) $row['amount'], 2); ?></td>
+                    <td>৳<?php echo number_format((float) $row['paid_amount'], 2); ?></td>
+                    <td class="<?php echo $due > 0 ? 'text-danger fw-bold' : ''; ?>">৳<?php echo number_format($due, 2); ?></td>
+                    <td><span class="badge <?php echo ['Unpaid' => 'bg-danger', 'Partial' => 'bg-warning text-dark', 'Paid' => 'bg-success'][$row['status']]; ?>"><?php echo lv($row['status']); ?></span></td>
+                    <td>
+                        <?php if ($row['status'] !== 'Paid'): ?>
+                        <form method="POST" action="index.php?page=transport_fees" class="d-flex gap-1">
+                            <?php echo csrf_field(); ?>
+                            <input type="hidden" name="invoice_id" value="<?php echo (int) $row['id']; ?>">
+                            <input type="hidden" name="month_year_ref" value="<?php echo lv($month_year); ?>">
+                            <input type="number" step="0.01" min="0.01" max="<?php echo $due; ?>" name="pay_amount" class="form-control form-control-sm" style="width:90px;" value="<?php echo $due; ?>" required>
+                            <select name="payment_method" class="form-select form-select-sm" style="width:90px;"><option>Cash</option><option>bKash</option><option>Nagad</option><option>Bank</option></select>
+                            <button type="submit" name="collect_staff_payment" class="btn btn-sm btn-success">Collect</button>
+                        </form>
+                        <?php else: ?><span class="text-muted small">পরিশোধিত</span><?php endif; ?>
+                    </td>
+                </tr>
+            <?php endforeach; else: ?>
+                <tr><td colspan="7" class="text-center text-muted py-3">এই মাসের কোনো স্টাফ ইনভয়েস নেই — উপরের বাটন থেকে তৈরি করুন</td></tr>
+            <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+
 <?php elseif ($tab === 'dues'): ?>
     <?php
     $dw = ["tfi.status != 'Paid'"]; $dp = [];
@@ -241,6 +365,30 @@ $month_year = tr_valid_month($_GET['month_year'] ?? '') ? $_GET['month_year'] : 
                 <?php endforeach; else: ?>
                     <tr><td colspan="6" class="text-center text-muted py-3">কোনো বকেয়া নেই — চমৎকার!</td></tr>
                 <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+
+    <?php
+    $sdw = ["i.status != 'Paid'"]; $sdp = [];
+    branch_apply_filter($sdw, $sdp, 'e.branch_id');
+    $sds = $pdo->prepare("SELECT i.month_year, e.name, e.employee_id AS emp_code, tr.route_name, i.amount, i.paid_amount, (i.amount - i.paid_amount) AS due_amt
+                          FROM transport_staff_fee_invoices i JOIN employees e ON e.id = i.employee_id JOIN transport_routes tr ON tr.id = i.route_id
+                          WHERE " . implode(' AND ', $sdw) . " ORDER BY i.month_year DESC, e.name ASC");
+    $sds->execute($sdp);
+    $srows_d = $sds->fetchAll();
+    ?>
+    <h6 class="fw-bold mt-4">স্টাফ বকেয়া: ৳<?php echo number_format(array_sum(array_column($srows_d, 'due_amt')), 2); ?> (<?php echo count($srows_d); ?> টি ইনভয়েস)</h6>
+    <div class="table-responsive">
+        <table class="table table-bordered align-middle">
+            <thead class="table-light"><tr><th>Month</th><th>Staff</th><th>Route</th><th>Amount</th><th>Paid</th><th>Due</th></tr></thead>
+            <tbody>
+            <?php foreach ($srows_d as $r): ?>
+                <tr><td><?php echo lv($r['month_year']); ?></td><td><?php echo lv($r['name']); ?> (<?php echo lv($r['emp_code']); ?>)</td><td><?php echo lv($r['route_name']); ?></td>
+                    <td>৳<?php echo number_format((float) $r['amount'], 2); ?></td><td>৳<?php echo number_format((float) $r['paid_amount'], 2); ?></td><td class="fw-bold text-danger">৳<?php echo number_format((float) $r['due_amt'], 2); ?></td></tr>
+            <?php endforeach; if (!$srows_d): ?>
+                <tr><td colspan="6" class="text-center text-muted py-3">স্টাফের কোনো বকেয়া নেই</td></tr>
+            <?php endif; ?>
             </tbody>
         </table>
     </div>
