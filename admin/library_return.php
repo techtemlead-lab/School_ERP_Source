@@ -8,6 +8,7 @@ if (!$pdo->query("SELECT id FROM library_settings WHERE id=1")->fetch()) {
     $pdo->exec("INSERT INTO library_settings (id, fine_per_day, max_days_allowed, max_books_per_student) VALUES (1, 5.00, 14, 2)");
 }
 $settings = $pdo->query("SELECT * FROM library_settings WHERE id=1")->fetch();
+require_once __DIR__ . '/library_common.php';
 
 function lv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 
@@ -23,49 +24,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $issue_id = (int) ($_POST['issue_id'] ?? 0);
 
-    if (isset($_POST['return_book'])) {
-        $return_date = trim($_POST['return_date'] ?? date('Y-m-d'));
+    try {
+        if (isset($_POST['return_book'])) {
+            $return_date = trim($_POST['return_date'] ?? date('Y-m-d'));
+            if (!lib_valid_date($return_date)) { throw new RuntimeException('ফেরতের তারিখ সঠিক নয়।'); }
 
-        $stmt = $pdo->prepare("SELECT li.*, lb.title, lb.book_code, s.name_en FROM library_issues li LEFT JOIN library_books lb ON lb.id = li.book_id LEFT JOIN students s ON s.id = li.student_id WHERE li.id = ? AND li.status = 'Issued'");
-        $stmt->execute([$issue_id]);
-        $issue = $stmt->fetch();
+            $pdo->beginTransaction();
+            $issue = lib_issue_scoped($pdo, $issue_id);
+            if (!$issue || $issue['status'] !== 'Issued') {
+                throw new RuntimeException('রেকর্ড খুঁজে পাওয়া যায়নি অথবা ইতিমধ্যে ফেরত দেওয়া হয়েছে।');
+            }
+            if ($return_date < $issue['issue_date']) { throw new RuntimeException('ফেরতের তারিখ ইস্যুর তারিখের আগে হতে পারবে না।'); }
+            if ($return_date > date('Y-m-d')) { throw new RuntimeException('ভবিষ্যতের তারিখে ফেরত নেওয়া যাবে না।'); }
 
-        if (!$issue) {
-            $_SESSION['lr_err'] = 'রেকর্ড খুঁজে পাওয়া যায়নি অথবা ইতিমধ্যে ফেরত দেওয়া হয়েছে।';
-        } else {
             $days_late = (int) floor((strtotime($return_date) - strtotime($issue['due_date'])) / 86400);
             $fine = $days_late > 0 ? round($days_late * (float) $settings['fine_per_day'], 2) : 0;
 
-            $pdo->beginTransaction();
             $pdo->prepare("UPDATE library_issues SET return_date=?, fine_amount=?, status='Returned' WHERE id=?")
                 ->execute([$return_date, $fine, $issue_id]);
             $pdo->prepare("UPDATE library_books SET available_copies = available_copies + 1 WHERE id = ?")
                 ->execute([$issue['book_id']]);
             $pdo->commit();
             sec_log_activity($pdo, 'Library', 'Update', "বই ফেরত নেওয়া হয়েছে: {$issue['title']} ({$issue['book_code']}) - {$issue['name_en']}" . ($fine > 0 ? ", জরিমানা: ৳" . number_format($fine, 2) : ''));
-
             $_SESSION['lr_msg'] = 'বই ফেরত নেওয়া হয়েছে।' . ($fine > 0 ? ' জরিমানা: ৳' . number_format($fine, 2) . ' (' . $days_late . ' দিন দেরি)' : '');
-        }
-    } elseif (isset($_POST['mark_fine_paid'])) {
-        $fp_stmt = $pdo->prepare("SELECT li.fine_amount, lb.title, s.name_en FROM library_issues li LEFT JOIN library_books lb ON lb.id = li.book_id LEFT JOIN students s ON s.id = li.student_id WHERE li.id = ?");
-        $fp_stmt->execute([$issue_id]);
-        $fp_row = $fp_stmt->fetch();
-        $pdo->prepare("UPDATE library_issues SET fine_paid = 1 WHERE id = ?")->execute([$issue_id]);
-        if ($fp_row) {
+        } elseif (isset($_POST['mark_fine_paid'])) {
+            $pdo->beginTransaction();
+            $fp_row = lib_issue_scoped($pdo, $issue_id);
+            if (!$fp_row || $fp_row['status'] === 'Issued') { throw new RuntimeException('রেকর্ড খুঁজে পাওয়া যায়নি অথবা বইটি এখনো ফেরত হয়নি।'); }
+            if ((float) $fp_row['fine_amount'] <= 0) { throw new RuntimeException('এই রেকর্ডে কোনো জরিমানা নেই।'); }
+            if ((int) $fp_row['fine_paid'] === 1) { throw new RuntimeException('এই জরিমানা আগেই আদায় হয়েছে।'); }
+            $pdo->prepare("UPDATE library_issues SET fine_paid = 1 WHERE id = ?")->execute([$issue_id]);
+            $pdo->commit();
             sec_log_activity($pdo, 'Library', 'Update', "জরিমানা আদায় হয়েছে: {$fp_row['title']} - {$fp_row['name_en']}, ৳" . number_format((float) $fp_row['fine_amount'], 2));
-        }
-        $_SESSION['lr_msg'] = 'জরিমানা আদায় হিসেবে চিহ্নিত করা হয়েছে।';
-    } elseif (isset($_POST['mark_lost'])) {
-        $stmt = $pdo->prepare("SELECT li.*, lb.title, lb.book_code, s.name_en FROM library_issues li LEFT JOIN library_books lb ON lb.id = li.book_id LEFT JOIN students s ON s.id = li.student_id WHERE li.id = ? AND li.status = 'Issued'");
-        $stmt->execute([$issue_id]);
-        $issue = $stmt->fetch();
-        if ($issue) {
-            $pdo->prepare("UPDATE library_issues SET status='Lost' WHERE id=?")->execute([$issue_id]);
+            $_SESSION['lr_msg'] = 'জরিমানা আদায় হিসেবে চিহ্নিত করা হয়েছে।';
+        } elseif (isset($_POST['mark_lost'])) {
+            $pdo->beginTransaction();
+            $issue = lib_issue_scoped($pdo, $issue_id);
+            if (!$issue || $issue['status'] !== 'Issued') { throw new RuntimeException('রেকর্ড খুঁজে পাওয়া যায়নি অথবা ইতিমধ্যে নিষ্পত্তি হয়েছে।'); }
+            // হারানো বইয়ের জরিমানা = বইয়ের দাম (দাম ০ হলে ০, অর্থাৎ কিছু ধরা হবে না)
+            $lost_fine = round((float) ($issue['book_price'] ?? 0), 2);
+            $pdo->prepare("UPDATE library_issues SET status='Lost', return_date=CURDATE(), fine_amount=?, fine_paid=0 WHERE id=?")->execute([$lost_fine, $issue_id]);
             // হারিয়ে যাওয়া কপি স্টক থেকে কমিয়ে দেওয়া হচ্ছে (available_copies এ ফেরত আসবে না)
             $pdo->prepare("UPDATE library_books SET total_copies = GREATEST(total_copies - 1, 0) WHERE id = ?")->execute([$issue['book_id']]);
-            sec_log_activity($pdo, 'Library', 'Update', "বই হারিয়ে গেছে হিসেবে চিহ্নিত করা হয়েছে: {$issue['title']} ({$issue['book_code']}) - {$issue['name_en']}");
-            $_SESSION['lr_msg'] = 'বইটি হারিয়ে গেছে হিসেবে চিহ্নিত করা হয়েছে এবং মোট কপি সংখ্যা থেকে বাদ দেওয়া হয়েছে।';
+            $pdo->commit();
+            sec_log_activity($pdo, 'Library', 'Update', "বই হারিয়ে গেছে হিসেবে চিহ্নিত করা হয়েছে: {$issue['title']} ({$issue['book_code']}) - {$issue['name_en']}, জরিমানা ৳" . number_format($lost_fine, 2));
+            $_SESSION['lr_msg'] = 'বইটি হারিয়ে গেছে হিসেবে চিহ্নিত করা হয়েছে এবং মোট কপি থেকে বাদ দেওয়া হয়েছে।' . ($lost_fine > 0 ? ' জরিমানা (বইয়ের দাম): ৳' . number_format($lost_fine, 2) : '');
         }
+    } catch (RuntimeException $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        $_SESSION['lr_err'] = $e->getMessage();
     }
 
     header('Location: index.php?page=library_return');
@@ -99,12 +106,15 @@ $overdue_count = 0;
 foreach ($rows as $r) { if (strtotime($r['due_date']) < strtotime($today)) $overdue_count++; }
 
 // সম্প্রতি ফেরত দেওয়া (শেষ ১৫টি) — যাদের জরিমানা এখনো আদায় হয়নি তাদের জন্য
-$unpaid_stmt = $pdo->query("SELECT li.*, lb.title, lb.book_code, students.student_id AS stu_code, students.name_en
+$up_where = ["li.status IN ('Returned','Lost')", 'li.fine_amount > 0', 'li.fine_paid = 0']; $up_params = [];
+branch_apply_filter($up_where, $up_params, 'students.branch_id');
+$unpaid_stmt = $pdo->prepare("SELECT li.*, lb.title, lb.book_code, students.student_id AS stu_code, students.name_en
                              FROM library_issues li
                              JOIN library_books lb ON lb.id = li.book_id
                              JOIN students ON students.id = li.student_id
-                             WHERE li.status = 'Returned' AND li.fine_amount > 0 AND li.fine_paid = 0
+                             WHERE " . implode(' AND ', $up_where) . "
                              ORDER BY li.return_date DESC LIMIT 20");
+$unpaid_stmt->execute($up_params);
 $unpaid_rows = $unpaid_stmt->fetchAll();
 ?>
 
@@ -202,7 +212,7 @@ $unpaid_rows = $unpaid_stmt->fetchAll();
                 <?php foreach ($unpaid_rows as $row): $csrf = htmlspecialchars(csrf_token()); ?>
                     <tr>
                         <td><?php echo lv($row['name_en']); ?> <span class="text-muted small">(<?php echo lv($row['stu_code']); ?>)</span></td>
-                        <td><?php echo lv($row['title']); ?></td>
+                        <td><?php echo lv($row['title']); ?><?php if (($row['status'] ?? '') === 'Lost'): ?> <span class="badge bg-danger">Lost</span><?php endif; ?></td>
                         <td><?php echo lv($row['return_date']); ?></td>
                         <td class="fw-bold text-danger">৳<?php echo number_format((float) $row['fine_amount'], 2); ?></td>
                         <td>
