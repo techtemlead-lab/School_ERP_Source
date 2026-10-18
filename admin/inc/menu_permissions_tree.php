@@ -342,6 +342,7 @@ return [
             ['type'=>'leaf','key'=>'canteen_menu','label'=>'Items'],
             ['type'=>'leaf','key'=>'canteen_raw_materials','label'=>'Raw Materials'],
             ['type'=>'leaf','key'=>'canteen_purchase','label'=>'Purchase'],
+            ['type'=>'leaf','key'=>'canteen_supplier','label'=>'Supplier Payment'],
             ['type'=>'leaf','key'=>'canteen_stock_adjustment','label'=>'Stock Adjustment'],
             ['type'=>'leaf','key'=>'canteen_reports','label'=>'Reports'],
             ['type'=>'leaf','key'=>'canteen_settings','label'=>'Settings'],

@@ -14,7 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $sname = trim($_POST['supplier_name_new'] ?? '');
         $sphone = trim($_POST['supplier_phone'] ?? '');
         if ($sname !== '') {
-            $pdo->prepare("INSERT INTO canteen_suppliers (name, phone) VALUES (?, ?)")->execute([$sname, $sphone ?: null]);
+            $pdo->prepare("INSERT INTO canteen_suppliers (name, phone, branch_id) VALUES (?, ?, ?)")->execute([$sname, $sphone ?: null, branch_id_for_insert()]);
             sec_log_activity($pdo, 'Canteen', 'Create', "নতুন Canteen Supplier যোগ করা হয়েছে: {$sname}");
             $msg = 'নতুন Supplier যোগ করা হয়েছে।';
         }
@@ -25,51 +25,69 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $qtys    = $_POST['p_qty'] ?? [];
         $rates   = $_POST['p_rate'] ?? [];
 
+        // একই কাঁচামাল একাধিক লাইনে থাকলে qty/amount যোগ হবে
+        $merged = [];
+        foreach ($mat_ids as $i => $mid) {
+            $mid  = (int) $mid;
+            $qty  = (float) ($qtys[$i] ?? 0);
+            $rate = (float) ($rates[$i] ?? 0);
+            if ($mid <= 0 || $qty <= 0 || $rate < 0) { continue; }
+            if (!isset($merged[$mid])) { $merged[$mid] = ['qty' => 0.0, 'amount' => 0.0]; }
+            $merged[$mid]['qty'] += $qty;
+            $merged[$mid]['amount'] += $qty * $rate;
+        }
+        $lines = []; $total = 0.0;
+        foreach ($merged as $mid => $m) {
+            $lines[] = ['material_id' => $mid, 'qty' => $m['qty'], 'rate' => $m['amount'] / $m['qty'], 'amount' => $m['amount']];
+            $total += $m['amount'];
+        }
+
         if ($supplier_name === '') {
             $err = 'Supplier এর নাম দিন!';
+        } elseif (!$lines) {
+            $err = 'কমপক্ষে একটা কাঁচামাল যোগ করুন!';
+        } elseif ($paid_amount < 0 || $paid_amount > $total + 0.001) {
+            $err = 'Paid Amount ০ থেকে মোট বিলের (৳' . number_format($total, 2) . ') মধ্যে হতে হবে!';
         } else {
-            $lines = [];
-            $total = 0.0;
-            foreach ($mat_ids as $i => $mid) {
-                $mid  = (int) $mid;
-                $qty  = (float) ($qtys[$i] ?? 0);
-                $rate = (float) ($rates[$i] ?? 0);
-                if ($mid <= 0 || $qty <= 0) { continue; }
-                $amount = $qty * $rate;
-                $lines[] = ['material_id' => $mid, 'qty' => $qty, 'rate' => $rate, 'amount' => $amount];
-                $total += $amount;
-            }
+            $due = max(0, $total - $paid_amount);
 
-            if (!$lines) {
-                $err = 'কমপক্ষে একটা কাঁচামাল যোগ করুন!';
-            } else {
-                $due = max(0, $total - $paid_amount);
-                $purchase_no = 'CPUR-' . date('Ymd') . '-' . mt_rand(1000, 9999);
+            $pdo->beginTransaction();
+            try {
+                $purchase_no = canteen_unique_no($pdo, 'CPUR', 'canteen_purchases', 'purchase_no');
+                $pdo->prepare("INSERT INTO canteen_purchases (purchase_no, supplier_name, total_amount, paid_amount, due_amount, branch_id) VALUES (?, ?, ?, ?, ?, ?)")
+                    ->execute([$purchase_no, $supplier_name, $total, $paid_amount, $due, branch_id_for_insert()]);
+                $purchase_id = (int) $pdo->lastInsertId();
 
-                $pdo->beginTransaction();
-                try {
-                    $pdo->prepare("INSERT INTO canteen_purchases (purchase_no, supplier_name, total_amount, paid_amount, due_amount, branch_id) VALUES (?, ?, ?, ?, ?, ?)")
-                        ->execute([$purchase_no, $supplier_name, $total, $paid_amount, $due, branch_id_for_insert()]);
-                    $purchase_id = (int) $pdo->lastInsertId();
+                $insItem  = $pdo->prepare("INSERT INTO canteen_purchase_items (purchase_id, raw_material_id, qty, rate, amount) VALUES (?, ?, ?, ?, ?)");
+                $updStock = $pdo->prepare("UPDATE canteen_raw_materials SET current_stock = ?, unit_cost = ? WHERE id = ?");
 
-                    $insItem  = $pdo->prepare("INSERT INTO canteen_purchase_items (purchase_id, raw_material_id, qty, rate, amount) VALUES (?, ?, ?, ?, ?)");
-                    $updStock = $pdo->prepare("UPDATE canteen_raw_materials SET current_stock = current_stock + ? WHERE id = ?");
-
-                    foreach ($lines as $ln) {
-                        $insItem->execute([$purchase_id, $ln['material_id'], $ln['qty'], $ln['rate'], $ln['amount']]);
-                        $updStock->execute([$ln['qty'], $ln['material_id']]);
-                    }
-
-                    $pdo->commit();
-                    sec_log_activity($pdo, 'Canteen', 'Create', "নতুন Canteen Purchase করা হয়েছে: {$purchase_no} ({$supplier_name}, ৳{$total})");
-                    $_SESSION['canteen_msg'] = "✅ Purchase সম্পন্ন হয়েছে! ({$purchase_no})";
-                    header('Location: index.php?page=canteen_purchase');
-                    exit();
-                } catch (Exception $e) {
-                    $pdo->rollBack();
-                    error_log('Canteen purchase failed: ' . $e->getMessage());
-                    $err = 'Purchase ব্যর্থ হয়েছে, আবার চেষ্টা করুন।';
+                foreach ($lines as $ln) {
+                    $mat = canteen_lock_row($pdo, 'canteen_raw_materials', $ln['material_id'], 'current_stock, unit_cost, status');
+                    if (!$mat) { throw new RuntimeException('কাঁচামাল পাওয়া যায়নি (অথবা অন্য branch-এর)।'); }
+                    if (($mat['status'] ?? 'Active') !== 'Active') { throw new RuntimeException('Inactive কাঁচামালে Purchase করা যাবে না।'); }
+                    $old = max(0.0, (float) $mat['current_stock']);
+                    $base = $old + $ln['qty'];
+                    // unit_cost = weighted average
+                    $new_cost = $base > 0 ? (($old * (float) $mat['unit_cost']) + $ln['amount']) / $base : $ln['rate'];
+                    $insItem->execute([$purchase_id, $ln['material_id'], $ln['qty'], $ln['rate'], $ln['amount']]);
+                    $updStock->execute([(float) $mat['current_stock'] + $ln['qty'], round($new_cost, 2), $ln['material_id']]);
                 }
+                if ($paid_amount > 0) {
+                    $pdo->prepare("INSERT INTO canteen_supplier_payments (purchase_id, amount, note) VALUES (?, ?, 'Initial')")->execute([$purchase_id, $paid_amount]);
+                }
+
+                $pdo->commit();
+                sec_log_activity($pdo, 'Canteen', 'Create', "নতুন Canteen Purchase করা হয়েছে: {$purchase_no} ({$supplier_name}, ৳{$total})");
+                $_SESSION['canteen_msg'] = "✅ Purchase সম্পন্ন হয়েছে! ({$purchase_no})";
+                header('Location: index.php?page=canteen_purchase');
+                exit();
+            } catch (RuntimeException $e) {
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
+                $err = $e->getMessage();
+            } catch (Exception $e) {
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
+                error_log('Canteen purchase failed: ' . $e->getMessage());
+                $err = 'Purchase ব্যর্থ হয়েছে, আবার চেষ্টা করুন।';
             }
         }
     }
@@ -86,11 +104,18 @@ $materials = $cp_stmt->fetchAll();
 $materials_for_js = [];
 foreach ($materials as $m) { $materials_for_js[$m['id']] = ['name' => $m['name'], 'rate' => (float) $m['unit_cost']]; }
 
-$suppliers = $pdo->query("SELECT * FROM canteen_suppliers ORDER BY name ASC")->fetchAll();
+$sup_w = []; $sup_p = []; canteen_branch_or_shared($sup_w, $sup_p);
+$sup_st = $pdo->prepare("SELECT * FROM canteen_suppliers" . ($sup_w ? ' WHERE ' . implode(' AND ', $sup_w) : '') . " ORDER BY name ASC");
+$sup_st->execute($sup_p);
+$suppliers = $sup_st->fetchAll();
 $cp2_where = []; $cp2_params = [];
 branch_apply_filter($cp2_where, $cp2_params);
 $cp2_where_sql = $cp2_where ? (' WHERE ' . implode(' AND ', $cp2_where)) : '';
-$cp2_stmt = $pdo->prepare("SELECT * FROM canteen_purchases$cp2_where_sql ORDER BY id DESC LIMIT 100");
+[$hp_page, $hp_per, $hp_off] = canteen_page_params(50);
+$cnt = $pdo->prepare("SELECT COUNT(*) FROM canteen_purchases$cp2_where_sql");
+$cnt->execute($cp2_params);
+$purch_total = (int) $cnt->fetchColumn();
+$cp2_stmt = $pdo->prepare("SELECT * FROM canteen_purchases$cp2_where_sql ORDER BY id DESC LIMIT $hp_per OFFSET $hp_off");
 $cp2_stmt->execute($cp2_params);
 $purchases = $cp2_stmt->fetchAll();
 ?>
@@ -158,6 +183,7 @@ $purchases = $cp2_stmt->fetchAll();
                 </tbody>
             </table>
             </div>
+            <?php echo canteen_pager_html($purch_total, $hp_page, $hp_per); ?>
         </div>
 
         <div id="paneSuppliers" class="inv-tab-pane card p-3 mb-4 d-none">
@@ -272,5 +298,13 @@ document.querySelectorAll('.phone-11').forEach(function (input) {
     }
     input.addEventListener('input', checkPhone11);
     input.addEventListener('blur', checkPhone11);
+});
+</script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    if (new URLSearchParams(location.search).has('pg')) {
+        const btn = document.querySelector('#purTabGroup .inv-tab-box:nth-child(2)');
+        if (btn) { btn.click(); }
+    }
 });
 </script>

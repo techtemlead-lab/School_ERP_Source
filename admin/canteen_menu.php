@@ -45,7 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['add_category'])) {
         $name = trim($_POST['category_name'] ?? '');
         if ($name !== '') {
-            $pdo->prepare("INSERT INTO canteen_categories (name) VALUES (?)")->execute([$name]);
+            $pdo->prepare("INSERT INTO canteen_categories (name, branch_id) VALUES (?, ?)")->execute([$name, branch_id_for_insert()]);
             sec_log_activity($pdo, 'Canteen', 'Create', "নতুন Canteen Category যোগ করা হয়েছে: {$name}");
             $_SESSION['canteen_msg'] = 'Category যোগ করা হয়েছে।';
         }
@@ -55,8 +55,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (isset($_POST['add_subcategory'])) {
         $category_id = (int) ($_POST['sub_category_id'] ?? 0);
         $name = trim($_POST['subcategory_name'] ?? '');
-        if ($category_id > 0 && $name !== '') {
-            $pdo->prepare("INSERT INTO canteen_subcategories (category_id, name) VALUES (?, ?)")->execute([$category_id, $name]);
+        if ($category_id > 0 && $name !== '' && canteen_master_id_in_scope($pdo, 'canteen_categories', $category_id)) {
+            $pdo->prepare("INSERT INTO canteen_subcategories (category_id, name, branch_id) VALUES (?, ?, ?)")->execute([$category_id, $name, branch_id_for_insert()]);
             sec_log_activity($pdo, 'Canteen', 'Create', "নতুন Canteen Sub Category যোগ করা হয়েছে: {$name}");
             $_SESSION['canteen_msg'] = 'Sub Category যোগ করা হয়েছে।';
         } else {
@@ -68,7 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (isset($_POST['add_unit'])) {
         $name = trim($_POST['unit_name'] ?? '');
         if ($name !== '') {
-            $pdo->prepare("INSERT INTO canteen_units (name) VALUES (?)")->execute([$name]);
+            $pdo->prepare("INSERT INTO canteen_units (name, branch_id) VALUES (?, ?)")->execute([$name, branch_id_for_insert()]);
             sec_log_activity($pdo, 'Canteen', 'Create', "নতুন Canteen Unit যোগ করা হয়েছে: {$name}");
             $_SESSION['canteen_msg'] = 'Unit যোগ করা হয়েছে।';
         }
@@ -86,6 +86,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $description    = trim($_POST['description'] ?? '');
         $status         = ($_POST['status'] ?? 'Active') === 'Inactive' ? 'Inactive' : 'Active';
 
+        $category_id    = canteen_master_id_in_scope($pdo, 'canteen_categories', $category_id);
+        $subcategory_id = canteen_master_id_in_scope($pdo, 'canteen_subcategories', $subcategory_id);
+        $unit_id        = canteen_master_id_in_scope($pdo, 'canteen_units', $unit_id);
+
+        if ($id > 0 && !canteen_scoped_row($pdo, 'canteen_menu_items', $id, 'id')) {
+            $_SESSION['canteen_err'] = 'Item পাওয়া যায়নি (অথবা অন্য branch-এর)।';
+            header('Location: index.php?page=canteen_menu');
+            exit();
+        }
         if ($name === '' || $price <= 0) {
             $_SESSION['canteen_err'] = 'Name এবং সঠিক Price আবশ্যক।';
             header('Location: index.php?page=canteen_menu' . ($id ? "&edit=$id" : ''));
@@ -118,13 +127,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     } elseif (isset($_POST['delete_item'])) {
         $id = (int) ($_POST['id'] ?? 0);
-        $del_item_stmt = $pdo->prepare("SELECT name FROM canteen_menu_items WHERE id = ?");
-        $del_item_stmt->execute([$id]);
-        $del_item_name = $del_item_stmt->fetchColumn();
-        $pdo->prepare("DELETE FROM canteen_recipe_items WHERE menu_item_id = ?")->execute([$id]);
-        $pdo->prepare("DELETE FROM canteen_menu_items WHERE id = ?")->execute([$id]);
-        sec_log_activity($pdo, 'Canteen', 'Delete', "Canteen Item মুছে ফেলা হয়েছে: " . ($del_item_name ?: "#$id"));
-        $_SESSION['canteen_msg'] = 'Item মুছে ফেলা হয়েছে।';
+        $it = canteen_scoped_row($pdo, 'canteen_menu_items', $id, 'id, name');
+        if (!$it) {
+            $_SESSION['canteen_err'] = 'Item পাওয়া যায়নি (অথবা অন্য branch-এর)।';
+        } else {
+            $c = $pdo->prepare("SELECT COUNT(*) FROM canteen_sale_items WHERE menu_item_id = ?");
+            $c->execute([$id]);
+            if ((int) $c->fetchColumn() > 0) {
+                // বিক্রির হিস্ট্রি আছে — মুছলে ইনভয়েস/রিপোর্টের নাম হারাবে, তাই শুধু Inactive
+                $pdo->prepare("UPDATE canteen_menu_items SET status='Inactive' WHERE id=?")->execute([$id]);
+                sec_log_activity($pdo, 'Canteen', 'Update', "Canteen Item বিক্রিতে ব্যবহৃত, তাই Inactive করা হয়েছে: {$it['name']}");
+                $_SESSION['canteen_msg'] = 'এই Item বিক্রি হয়েছে, তাই মুছে না ফেলে Inactive করা হয়েছে।';
+            } else {
+                $pdo->prepare("DELETE FROM canteen_recipe_items WHERE menu_item_id = ?")->execute([$id]);
+                $pdo->prepare("DELETE FROM canteen_menu_items WHERE id = ?")->execute([$id]);
+                sec_log_activity($pdo, 'Canteen', 'Delete', "Canteen Item মুছে ফেলা হয়েছে: {$it['name']}");
+                $_SESSION['canteen_msg'] = 'Item মুছে ফেলা হয়েছে।';
+            }
+        }
         header('Location: index.php?page=canteen_menu');
         exit();
 
@@ -132,7 +152,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $menu_item_id    = (int) ($_POST['menu_item_id'] ?? 0);
         $raw_material_id = (int) ($_POST['raw_material_id'] ?? 0);
         $qty_required    = (float) ($_POST['qty_required'] ?? 0);
-        if ($menu_item_id > 0 && $raw_material_id > 0 && $qty_required > 0) {
+        if ($menu_item_id > 0 && $raw_material_id > 0 && $qty_required > 0
+            && canteen_scoped_row($pdo, 'canteen_menu_items', $menu_item_id, 'id')
+            && canteen_scoped_row($pdo, 'canteen_raw_materials', $raw_material_id, 'id')) {
+            $dup = $pdo->prepare("SELECT id FROM canteen_recipe_items WHERE menu_item_id = ? AND raw_material_id = ?");
+            $dup->execute([$menu_item_id, $raw_material_id]);
+            if ($dup_id = $dup->fetchColumn()) {
+                $pdo->prepare("UPDATE canteen_recipe_items SET qty_required = ? WHERE id = ?")->execute([$qty_required, $dup_id]);
+                $_SESSION['canteen_msg'] = 'Recipe-তে আগে থেকেই থাকা কাঁচামালের পরিমাণ আপডেট হয়েছে।';
+                header("Location: index.php?page=canteen_menu&edit=$menu_item_id");
+                exit();
+            }
             $pdo->prepare("INSERT INTO canteen_recipe_items (menu_item_id, raw_material_id, qty_required) VALUES (?, ?, ?)")
                 ->execute([$menu_item_id, $raw_material_id, $qty_required]);
             $_SESSION['canteen_msg'] = 'Recipe-তে কাঁচামাল যোগ করা হয়েছে।';
@@ -143,17 +173,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (isset($_POST['delete_recipe_line'])) {
         $line_id      = (int) ($_POST['line_id'] ?? 0);
         $menu_item_id = (int) ($_POST['menu_item_id'] ?? 0);
-        $pdo->prepare("DELETE FROM canteen_recipe_items WHERE id = ?")->execute([$line_id]);
+        // শুধু নিজের branch-এর menu item-এর recipe লাইন মোছা যাবে
+        if (canteen_scoped_row($pdo, 'canteen_menu_items', $menu_item_id, 'id')) {
+            $pdo->prepare("DELETE FROM canteen_recipe_items WHERE id = ? AND menu_item_id = ?")->execute([$line_id, $menu_item_id]);
+        }
         header("Location: index.php?page=canteen_menu&edit=$menu_item_id");
         exit();
     }
 }
 
-$categories    = $pdo->query("SELECT * FROM canteen_categories ORDER BY name")->fetchAll();
-$subcategories = $pdo->query(
-    "SELECT s.*, c.name AS category_name FROM canteen_subcategories s LEFT JOIN canteen_categories c ON c.id = s.category_id ORDER BY c.name, s.name"
-)->fetchAll();
-$units     = $pdo->query("SELECT * FROM canteen_units ORDER BY name")->fetchAll();
+$m_w = []; $m_p = []; canteen_branch_or_shared($m_w, $m_p);
+$m_sql = $m_w ? (' WHERE ' . implode(' AND ', $m_w)) : '';
+$st = $pdo->prepare("SELECT * FROM canteen_categories$m_sql ORDER BY name"); $st->execute($m_p); $categories = $st->fetchAll();
+$m_w2 = []; $m_p2 = []; canteen_branch_or_shared($m_w2, $m_p2, 's.branch_id');
+$st = $pdo->prepare("SELECT s.*, c.name AS category_name FROM canteen_subcategories s LEFT JOIN canteen_categories c ON c.id = s.category_id" . ($m_w2 ? ' WHERE ' . implode(' AND ', $m_w2) : '') . " ORDER BY c.name, s.name");
+$st->execute($m_p2); $subcategories = $st->fetchAll();
+$st = $pdo->prepare("SELECT * FROM canteen_units$m_sql ORDER BY name"); $st->execute($m_p); $units = $st->fetchAll();
 $crm2_where = ["status='Active'"]; $crm2_params = [];
 branch_apply_filter($crm2_where, $crm2_params);
 $crm2_stmt = $pdo->prepare("SELECT * FROM canteen_raw_materials WHERE " . implode(' AND ', $crm2_where) . " ORDER BY name ASC");
@@ -178,9 +213,7 @@ $all_items = $cm_stmt->fetchAll();
 $edit_item = null;
 $recipe_lines = [];
 if ($edit_id > 0) {
-    $stmt = $pdo->prepare("SELECT * FROM canteen_menu_items WHERE id = ?");
-    $stmt->execute([$edit_id]);
-    $edit_item = $stmt->fetch();
+    $edit_item = canteen_scoped_row($pdo, 'canteen_menu_items', $edit_id) ?: null;
 
     if ($edit_item) {
         $rstmt = $pdo->prepare(

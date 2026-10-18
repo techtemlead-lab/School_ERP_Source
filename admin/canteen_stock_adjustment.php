@@ -20,22 +20,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $pdo->beginTransaction();
             try {
+                $mat = canteen_lock_row($pdo, 'canteen_raw_materials', $material_id, 'name, current_stock');
+                if (!$mat) { throw new RuntimeException('কাঁচামাল পাওয়া যায়নি (অথবা অন্য branch-এর)।'); }
+                if ($adj_type === 'remove' && $qty > (float) $mat['current_stock'] + 0.0001) {
+                    throw new RuntimeException($mat['name'] . ' এর বর্তমান স্টক ' . (float) $mat['current_stock'] . ' — এর বেশি Remove করা যাবে না।');
+                }
                 $pdo->prepare("INSERT INTO canteen_stock_adjustments (raw_material_id, adj_type, qty, reason, branch_id) VALUES (?, ?, ?, ?, ?)")
                     ->execute([$material_id, $adj_type, $qty, $reason ?: null, branch_id_for_insert()]);
 
                 if ($adj_type === 'add') {
                     $pdo->prepare("UPDATE canteen_raw_materials SET current_stock = current_stock + ? WHERE id = ?")->execute([$qty, $material_id]);
                 } else {
-                    $pdo->prepare("UPDATE canteen_raw_materials SET current_stock = GREATEST(0, current_stock - ?) WHERE id = ?")->execute([$qty, $material_id]);
+                    $pdo->prepare("UPDATE canteen_raw_materials SET current_stock = current_stock - ? WHERE id = ?")->execute([$qty, $material_id]);
                 }
                 $pdo->commit();
-                $adj_mat_stmt = $pdo->prepare("SELECT name FROM canteen_raw_materials WHERE id = ?");
-                $adj_mat_stmt->execute([$material_id]);
-                $adj_mat_name = $adj_mat_stmt->fetchColumn() ?: "#$material_id";
-                sec_log_activity($pdo, 'Canteen', 'Update', "Canteen Stock Adjustment করা হয়েছে: {$adj_mat_name} ({$adj_type}, {$qty})" . ($reason ? " — {$reason}" : ''));
+                sec_log_activity($pdo, 'Canteen', 'Update', "Canteen Stock Adjustment করা হয়েছে: {$mat['name']} ({$adj_type}, {$qty})" . ($reason ? " — {$reason}" : ''));
                 $msg = 'Stock Adjustment সফল হয়েছে।';
+            } catch (RuntimeException $e) {
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
+                $err = $e->getMessage();
             } catch (Exception $e) {
-                $pdo->rollBack();
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
                 error_log('Canteen stock adjustment failed: ' . $e->getMessage());
                 $err = 'ব্যর্থ হয়েছে, আবার চেষ্টা করুন।';
             }
@@ -108,7 +113,7 @@ $history = $csa2_stmt->fetchAll();
                 <?php if ($history): foreach ($history as $h): ?>
                     <tr>
                         <td><?php echo cv($h['material_name']); ?></td>
-                        <td><?php echo $h['adj_type'] === 'add' ? '<span class="badge bg-success">Add</span>' : '<span class="badge bg-danger">Remove</span>'; ?></td>
+                        <td><?php echo $h['adj_type'] === 'add' ? '<span class="badge bg-success">Add</span>' : ($h['adj_type'] === 'opening' ? '<span class="badge bg-secondary">Opening</span>' : '<span class="badge bg-danger">Remove</span>'); ?></td>
                         <td><?php echo number_format((float) $h['qty'], 3); ?> <?php echo cv($h['unit_name'] ?: ''); ?></td>
                         <td><?php echo cv($h['reason'] ?: '-'); ?></td>
                         <td class="small text-muted"><?php echo cv($h['created_at']); ?></td>

@@ -11,8 +11,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $err = 'ফর্মের মেয়াদ শেষ হয়ে গেছে, পেজ রিলোড করে আবার চেষ্টা করুন।';
     } elseif (isset($_POST['save_settings'])) {
         $allow_due_sale = isset($_POST['allow_due_sale']) ? 1 : 0;
-        $pdo->prepare("UPDATE canteen_settings SET allow_due_sale = ? WHERE id = 1")->execute([$allow_due_sale]);
-        sec_log_activity($pdo, 'Canteen', 'Update', 'Canteen Settings আপডেট করা হয়েছে: Allow Due Sale = ' . ($allow_due_sale ? 'On' : 'Off'));
+        $block_low = isset($_POST['block_on_low_stock']) ? 1 : 0;
+        $pdo->prepare("UPDATE canteen_settings SET allow_due_sale = ?, block_on_low_stock = ? WHERE id = 1")->execute([$allow_due_sale, $block_low]);
+        sec_log_activity($pdo, 'Canteen', 'Update', 'Canteen Settings আপডেট করা হয়েছে: Allow Due Sale = ' . ($allow_due_sale ? 'On' : 'Off') . ', কাঁচামাল কম হলে Sale আটকাও = ' . ($block_low ? 'On' : 'Off'));
         $msg = 'Settings সেভ হয়েছে।';
     }
 }
@@ -33,6 +34,13 @@ $settings = canteen_get_settings($pdo);
             <label class="form-check-label fw-bold" for="allowDueSale">Due Sale (বাকিতে বিক্রি) চালু রাখো</label>
             <div class="small text-muted mt-1">
                 বন্ধ করলে POS-এ Paid Amount সবসময় Grand Total-এর সমান হয়ে যাবে — কোনো বাকি রাখা যাবে না, প্রতিটা বিক্রি সাথে সাথে পুরো টাকা নিয়ে সম্পন্ন করতে হবে।
+            </div>
+        </div>
+        <div class="form-check form-switch mb-3">
+            <input class="form-check-input" type="checkbox" role="switch" id="blockLowStock" name="block_on_low_stock" <?php echo !empty($settings['block_on_low_stock']) ? 'checked' : ''; ?>>
+            <label class="form-check-label fw-bold" for="blockLowStock">কাঁচামালের স্টক কম হলে Sale আটকাও</label>
+            <div class="small text-muted mt-1">
+                চালু করলে Recipe অনুযায়ী কাঁচামাল না থাকলে POS-এ বিক্রি হবে না। বন্ধ থাকলে (ডিফল্ট) বিক্রি হবে, স্টক মাইনাসে যেতে পারে এবং "মাইনাস" সতর্কতা দেখাবে।
             </div>
         </div>
         <button type="submit" name="save_settings" class="btn btn-primary fw-bold px-4" style="background-color:#1e3a8a;">সেভ করো</button>
