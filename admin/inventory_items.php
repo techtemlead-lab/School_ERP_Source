@@ -13,7 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (isset($_POST['add_category'])) {
             $name = trim($_POST['category_name'] ?? '');
             if ($name !== '') {
-                $pdo->prepare("INSERT INTO inv_categories (name) VALUES (?)")->execute([$name]);
+                $pdo->prepare("INSERT INTO inv_categories (name, branch_id) VALUES (?, ?)")->execute([$name, branch_id_for_insert()]);
                 sec_log_activity($pdo, 'Inventory', 'Create', "নতুন Category যোগ করা হয়েছে: {$name}");
                 $success_msg = "ক্যাটাগরি যোগ করা হয়েছে।";
             }
@@ -22,8 +22,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (isset($_POST['add_subcategory'])) {
             $category_id = (int) ($_POST['sub_category_id'] ?? 0);
             $name = trim($_POST['subcategory_name'] ?? '');
-            if ($category_id > 0 && $name !== '') {
-                $pdo->prepare("INSERT INTO inv_subcategories (category_id, name) VALUES (?, ?)")->execute([$category_id, $name]);
+            if ($category_id > 0 && $name !== '' && inv_master_id_in_scope($pdo, 'inv_categories', $category_id)) {
+                $pdo->prepare("INSERT INTO inv_subcategories (category_id, name, branch_id) VALUES (?, ?, ?)")->execute([$category_id, $name, branch_id_for_insert()]);
                 sec_log_activity($pdo, 'Inventory', 'Create', "নতুন Sub Category যোগ করা হয়েছে: {$name}");
                 $success_msg = "সাব-ক্যাটাগরি যোগ করা হয়েছে।";
             } else {
@@ -34,7 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (isset($_POST['add_unit'])) {
             $name = trim($_POST['unit_name'] ?? '');
             if ($name !== '') {
-                $pdo->prepare("INSERT INTO inv_units (name) VALUES (?)")->execute([$name]);
+                $pdo->prepare("INSERT INTO inv_units (name, branch_id) VALUES (?, ?)")->execute([$name, branch_id_for_insert()]);
                 sec_log_activity($pdo, 'Inventory', 'Create', "নতুন Unit যোগ করা হয়েছে: {$name}");
                 $success_msg = "ইউনিট যোগ করা হয়েছে।";
             }
@@ -51,24 +51,85 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $reorder_level = (int) ($_POST['reorder_level'] ?? 0);
             $opening_stock = (int) ($_POST['opening_stock'] ?? 0);
 
+            $category_id    = inv_master_id_in_scope($pdo, 'inv_categories', $category_id);
+            $subcategory_id = inv_master_id_in_scope($pdo, 'inv_subcategories', $subcategory_id);
+            $unit_id        = inv_master_id_in_scope($pdo, 'inv_units', $unit_id);
+            $cost_price = max(0, $cost_price); $sale_price = max(0, $sale_price);
+            $reorder_level = max(0, $reorder_level); $opening_stock = max(0, $opening_stock);
             if ($name !== '') {
                 $stmt = $pdo->prepare(
                     "INSERT INTO inventory_items (name, stock_qty, category_id, subcategory_id, unit_id, item_code, cost_price, sale_price, reorder_level, status, branch_id)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?)"
                 );
                 $stmt->execute([$name, $opening_stock, $category_id, $subcategory_id, $unit_id, $item_code ?: null, $cost_price, $sale_price, $reorder_level, branch_id_for_insert()]);
+                if ($opening_stock > 0) {
+                    $pdo->prepare("INSERT INTO inv_stock_adjustments (item_id, adj_type, qty, reason, branch_id) VALUES (?, 'Opening', ?, 'Opening Stock', ?)")
+                        ->execute([(int) $pdo->lastInsertId(), $opening_stock, branch_id_for_insert()]);
+                }
                 sec_log_activity($pdo, 'Inventory', 'Create', "নতুন Item যোগ করা হয়েছে: {$name}, Sale Price: ৳{$sale_price}, Opening Stock: {$opening_stock}");
                 $success_msg = "নতুন Item যোগ করা হয়েছে।";
+            }
+        }
+
+        if (isset($_POST['edit_item'])) {
+            $eid = (int) ($_POST['item_id'] ?? 0);
+            $name = trim($_POST['item_name'] ?? '');
+            $status = ($_POST['status'] ?? 'Active') === 'Inactive' ? 'Inactive' : 'Active';
+            $cat = inv_master_id_in_scope($pdo, 'inv_categories', (int) ($_POST['category_id'] ?? 0) ?: null);
+            $sub = inv_master_id_in_scope($pdo, 'inv_subcategories', (int) ($_POST['subcategory_id'] ?? 0) ?: null);
+            $unit = inv_master_id_in_scope($pdo, 'inv_units', (int) ($_POST['unit_id'] ?? 0) ?: null);
+            $code = trim($_POST['item_code'] ?? '');
+            $sale_price = (float) ($_POST['sale_price'] ?? 0);
+            $cost_price = (float) ($_POST['cost_price'] ?? 0);
+            $reorder = max(0, (int) ($_POST['reorder_level'] ?? 0));
+            if ($name === '' || $sale_price < 0 || $cost_price < 0) {
+                $error_msg = "Item-এর নাম দিন এবং দাম ঋণাত্মক হতে পারবে না!";
+            } elseif (!inv_scoped_row($pdo, 'inventory_items', $eid, 'id')) {
+                $error_msg = "Item পাওয়া যায়নি!";
+            } else {
+                $pdo->prepare("UPDATE inventory_items SET name=?, item_code=?, category_id=?, subcategory_id=?, unit_id=?, cost_price=?, sale_price=?, reorder_level=?, status=? WHERE id=?")
+                    ->execute([$name, $code ?: null, $cat, $sub, $unit, $cost_price, $sale_price, $reorder, $status, $eid]);
+                sec_log_activity($pdo, 'Inventory', 'Update', "Item আপডেট করা হয়েছে: {$name} (#{$eid}), Sale Price: ৳{$sale_price}, Status: {$status}");
+                $success_msg = "Item আপডেট হয়েছে। (Stock বদলাতে Stock Adjustment ব্যবহার করুন)";
+            }
+        }
+
+        if (isset($_POST['delete_item'])) {
+            $did = (int) ($_POST['item_id'] ?? 0);
+            $row = inv_scoped_row($pdo, 'inventory_items', $did, 'id, name');
+            if (!$row) {
+                $error_msg = "Item পাওয়া যায়নি!";
+            } else {
+                $used = 0;
+                foreach (['inv_purchase_items', 'inv_sale_items', 'inv_sale_return_items', 'inv_stock_adjustments'] as $t) {
+                    $c = $pdo->prepare("SELECT COUNT(*) FROM `$t` WHERE item_id = ?");
+                    $c->execute([$did]);
+                    $used += (int) $c->fetchColumn();
+                }
+                if ($used > 0) {
+                    // লেনদেন আছে — হিসাব ঠিক রাখতে delete না করে Inactive করা হয়
+                    $pdo->prepare("UPDATE inventory_items SET status='Inactive' WHERE id=?")->execute([$did]);
+                    sec_log_activity($pdo, 'Inventory', 'Update', "Item লেনদেনে ব্যবহৃত, তাই Inactive করা হয়েছে: {$row['name']} (#{$did})");
+                    $success_msg = "এই Item-এর লেনদেন আছে, তাই মুছে না ফেলে Inactive করা হয়েছে।";
+                } else {
+                    $pdo->prepare("DELETE FROM inventory_items WHERE id=?")->execute([$did]);
+                    sec_log_activity($pdo, 'Inventory', 'Delete', "Item মুছে ফেলা হয়েছে: {$row['name']} (#{$did})");
+                    $success_msg = "Item মুছে ফেলা হয়েছে।";
+                }
             }
         }
     }
 }
 
-$categories    = $pdo->query("SELECT * FROM inv_categories ORDER BY name")->fetchAll();
-$subcategories = $pdo->query(
-    "SELECT s.*, c.name AS category_name FROM inv_subcategories s LEFT JOIN inv_categories c ON c.id = s.category_id ORDER BY c.name, s.name"
-)->fetchAll();
-$units = $pdo->query("SELECT * FROM inv_units ORDER BY name")->fetchAll();
+$m_w = []; $m_p = []; inv_branch_or_shared($m_w, $m_p);
+$m_sql = $m_w ? (' WHERE ' . implode(' AND ', $m_w)) : '';
+$st = $pdo->prepare("SELECT * FROM inv_categories$m_sql ORDER BY name"); $st->execute($m_p); $categories = $st->fetchAll();
+$m_w2 = []; $m_p2 = []; inv_branch_or_shared($m_w2, $m_p2, 's.branch_id');
+$st = $pdo->prepare(
+    "SELECT s.*, c.name AS category_name FROM inv_subcategories s LEFT JOIN inv_categories c ON c.id = s.category_id" . ($m_w2 ? ' WHERE ' . implode(' AND ', $m_w2) : '') . " ORDER BY c.name, s.name"
+);
+$st->execute($m_p2); $subcategories = $st->fetchAll();
+$st = $pdo->prepare("SELECT * FROM inv_units$m_sql ORDER BY name"); $st->execute($m_p); $units = $st->fetchAll();
 $ii_where = []; $ii_params = [];
 branch_apply_filter($ii_where, $ii_params, 'i.branch_id');
 $ii_where_sql = $ii_where ? (' WHERE ' . implode(' AND ', $ii_where)) : '';
@@ -196,12 +257,33 @@ $all_items = $ii_stmt->fetchAll();
             </table>
         </div>
 
+        <!-- Edit Item -->
+        <div id="paneEditItem" class="inv-tab-pane card p-3 mb-4 d-none">
+            <h5 class="fw-bold mb-3">Item Edit <small class="text-muted">(Stock বদলাতে Stock Adjustment ব্যবহার করুন)</small></h5>
+            <form method="POST" class="row g-2">
+                <?php echo csrf_field(); ?>
+                <input type="hidden" name="item_id" id="editItemId">
+                <div class="col-md-4"><input type="text" name="item_name" id="editItemName" class="form-control form-control-sm" placeholder="Item Name" required></div>
+                <div class="col-md-4"><input type="text" name="item_code" id="editItemCode" class="form-control form-control-sm" placeholder="Item Code"></div>
+                <div class="col-md-4">
+                    <select name="status" id="editItemStatus" class="form-select form-select-sm"><option value="Active">Active</option><option value="Inactive">Inactive</option></select>
+                </div>
+                <div class="col-md-4"><select name="category_id" id="editItemCat" class="form-select form-select-sm"><option value="">Category</option><?php foreach ($categories as $c): ?><option value="<?php echo (int)$c['id']; ?>"><?php echo htmlspecialchars($c['name']); ?></option><?php endforeach; ?></select></div>
+                <div class="col-md-4"><select name="subcategory_id" id="editItemSub" class="form-select form-select-sm"><option value="">Sub Category</option><?php foreach ($subcategories as $sc): ?><option value="<?php echo (int)$sc['id']; ?>"><?php echo htmlspecialchars($sc['name']); ?></option><?php endforeach; ?></select></div>
+                <div class="col-md-4"><select name="unit_id" id="editItemUnit" class="form-select form-select-sm"><option value="">Unit</option><?php foreach ($units as $u): ?><option value="<?php echo (int)$u['id']; ?>"><?php echo htmlspecialchars($u['name']); ?></option><?php endforeach; ?></select></div>
+                <div class="col-md-4"><input type="number" step="0.01" min="0" name="cost_price" id="editItemCost" class="form-control form-control-sm" placeholder="Cost Price" required></div>
+                <div class="col-md-4"><input type="number" step="0.01" min="0" name="sale_price" id="editItemPrice" class="form-control form-control-sm" placeholder="Sale Price" required></div>
+                <div class="col-md-4"><input type="number" min="0" name="reorder_level" id="editItemReorder" class="form-control form-control-sm" placeholder="Reorder Level"></div>
+                <div class="col-md-12"><button type="submit" name="edit_item" class="btn btn-primary btn-sm">Update Item</button></div>
+            </form>
+        </div>
+
         <!-- Item List -->
         <div id="paneItemList" class="inv-tab-pane card p-3 mb-4 d-none">
             <div class="table-responsive">
             <table class="table table-bordered table-striped text-center align-middle mb-0">
                 <thead class="table-dark">
-                    <tr><th>ID</th><th>Code</th><th>Name</th><th>Category</th><th>Sub Category</th><th>Unit</th><th>Cost</th><th>Sale Price</th><th>Stock</th></tr>
+                    <tr><th>ID</th><th>Code</th><th>Name</th><th>Category</th><th>Sub Category</th><th>Unit</th><th>Cost</th><th>Sale Price</th><th>Stock</th><th>Status</th><th>Action</th></tr>
                 </thead>
                 <tbody>
                     <?php if ($all_items): foreach ($all_items as $it):
@@ -220,9 +302,18 @@ $all_items = $ii_stmt->fetchAll();
                                 <span class="badge <?php echo $low ? 'bg-danger' : 'bg-success'; ?> fs-6"><?php echo (int)$it['stock_qty']; ?></span>
                                 <?php if ($low): ?><br><span class="badge bg-warning text-dark mt-1">Low Stock</span><?php endif; ?>
                             </td>
+                            <td><span class="badge <?php echo ($it['status'] ?? 'Active') === 'Active' ? 'bg-success' : 'bg-secondary'; ?>"><?php echo htmlspecialchars($it['status'] ?? 'Active'); ?></span></td>
+                            <td class="text-nowrap">
+                                <button type="button" class="btn btn-sm btn-outline-primary" onclick='invEditItem(<?php echo json_encode(["id"=>(int)$it["id"],"name"=>$it["name"],"code"=>$it["item_code"],"cat"=>(int)$it["category_id"],"sub"=>(int)$it["subcategory_id"],"unit"=>(int)$it["unit_id"],"cost"=>(float)$it["cost_price"],"price"=>(float)$it["sale_price"],"reorder"=>(int)$it["reorder_level"],"status"=>$it["status"] ?? "Active"], JSON_UNESCAPED_UNICODE | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_HEX_TAG); ?>)'>Edit</button>
+                                <form method="POST" class="d-inline" onsubmit="return confirm('এই Item মুছে ফেলবেন? (লেনদেন থাকলে শুধু Inactive হবে)');">
+                                    <?php echo csrf_field(); ?>
+                                    <input type="hidden" name="item_id" value="<?php echo (int)$it['id']; ?>">
+                                    <button type="submit" name="delete_item" class="btn btn-sm btn-outline-danger">Delete</button>
+                                </form>
+                            </td>
                         </tr>
                     <?php endforeach; else: ?>
-                        <tr><td colspan="9" class="text-muted">কোনো Item নেই</td></tr>
+                        <tr><td colspan="11" class="text-muted">কোনো Item নেই</td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>
@@ -267,4 +358,16 @@ function invFilterSubcategory() {
     subSelect.value = '';
 }
 document.addEventListener('DOMContentLoaded', invFilterSubcategory);
+
+function invEditItem(d) {
+    const g = id => document.getElementById(id);
+    g('editItemId').value = d.id; g('editItemName').value = d.name; g('editItemCode').value = d.code || '';
+    g('editItemCat').value = d.cat || ''; g('editItemSub').value = d.sub || ''; g('editItemUnit').value = d.unit || '';
+    g('editItemCost').value = d.cost; g('editItemPrice').value = d.price; g('editItemReorder').value = d.reorder; g('editItemStatus').value = d.status;
+    const group = document.getElementById('itemsTabGroup');
+    group.querySelectorAll('.inv-tab-pane').forEach(p => p.classList.add('d-none'));
+    g('paneEditItem').classList.remove('d-none');
+    group.querySelectorAll('.inv-tab-box').forEach(b => b.classList.remove('active'));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
 </script>

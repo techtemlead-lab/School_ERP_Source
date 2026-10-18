@@ -45,8 +45,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $lines = [];
                     $subtotal = 0.0;
                     foreach ($want as $iid => $qty) {
-                        $itemRow = inv_lock_row($pdo, 'inventory_items', $iid, 'name, sale_price, stock_qty');
+                        $itemRow = inv_lock_row($pdo, 'inventory_items', $iid, 'name, sale_price, stock_qty, status');
                         if (!$itemRow) { throw new RuntimeException('এই Item পাওয়া যায়নি (অথবা অন্য branch-এর)।'); }
+                        if (($itemRow['status'] ?? 'Active') !== 'Active') { throw new RuntimeException($itemRow['name'] . ' Inactive — বিক্রি করা যাবে না।'); }
                         if ((int) $itemRow['stock_qty'] < $qty) {
                             throw new RuntimeException($itemRow['name'] . ' এর Stock যথেষ্ট নেই! (আছে: ' . (int) $itemRow['stock_qty'] . ')');
                         }
@@ -82,6 +83,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     foreach ($lines as $ln) {
                         $insItem->execute([$sale_id, $ln['item_id'], $ln['qty'], $ln['rate'], $ln['amount']]);
                         $updStock->execute([$ln['qty'], $ln['item_id']]);
+                    }
+
+                    if ($paid_amount > 0) {
+                        $pdo->prepare("INSERT INTO inv_sale_payments (sale_id, amount, note) VALUES (?, ?, 'Initial')")->execute([$sale_id, $paid_amount]);
                     }
 
                     $pdo->commit();
@@ -129,6 +134,8 @@ if (!empty($_GET['last_invoice'])) {
 $is_where = []; $is_params = [];
 branch_apply_filter($is_where, $is_params);
 $is_where_sql = $is_where ? (' WHERE ' . implode(' AND ', $is_where)) : '';
+$is_where[] = "status = 'Active'";
+$is_where_sql = ' WHERE ' . implode(' AND ', $is_where);
 $iis_stmt = $pdo->prepare("SELECT id, name, sale_price, stock_qty FROM inventory_items$is_where_sql ORDER BY name");
 $iis_stmt->execute($is_params);
 $all_items = $iis_stmt->fetchAll();
@@ -136,7 +143,11 @@ $all_items = $iis_stmt->fetchAll();
 $is2_where = []; $is2_params = [];
 branch_apply_filter($is2_where, $is2_params);
 $is2_where_sql = $is2_where ? (' WHERE ' . implode(' AND ', $is2_where)) : '';
-$sales_stmt = $pdo->prepare("SELECT * FROM sales_invoices$is2_where_sql ORDER BY id DESC");
+[$hp_page, $hp_per, $hp_off] = inv_page_params(50);
+$cnt = $pdo->prepare("SELECT COUNT(*) FROM sales_invoices$is2_where_sql");
+$cnt->execute($is2_params);
+$sales_total = (int) $cnt->fetchColumn();
+$sales_stmt = $pdo->prepare("SELECT * FROM sales_invoices$is2_where_sql ORDER BY id DESC LIMIT $hp_per OFFSET $hp_off");
 $sales_stmt->execute($is2_params);
 $sales = $sales_stmt->fetchAll();
 $items_for_js = [];
@@ -243,9 +254,19 @@ $page_settings = inv_get_settings($pdo);
                 </tbody>
             </table>
             </div>
+            <?php echo inv_pager_html($sales_total, $hp_page, $hp_per); ?>
         </div>
     </div>
 </div>
+<script>
+// পেজিনেশন লিংকে (?pg=) এলে History ট্যাব নিজে খুলে যাবে
+document.addEventListener('DOMContentLoaded', function () {
+    if (new URLSearchParams(location.search).has('pg')) {
+        const btn = document.querySelector('#salesTabGroup .inv-tab-box:nth-child(2)');
+        if (btn) { btn.click(); }
+    }
+});
+</script>
 
 <style>
 .inv-tab-boxes { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }

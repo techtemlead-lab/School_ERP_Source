@@ -79,6 +79,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare("UPDATE sales_invoices SET total_amount = ?, paid_amount = ?, due_amount = ? WHERE id = ?")
                     ->execute([$new_total, $new_paid, $new_due, $sale_id]);
 
+                if ($refund_owed > 0) {
+                    $pdo->prepare("INSERT INTO inv_sale_payments (sale_id, amount, note) VALUES (?, ?, 'Refund')")->execute([$sale_id, -$refund_owed]);
+                }
+
                 $pdo->commit();
                 sec_log_activity($pdo, 'Inventory', 'Create', "Sale Return তৈরি করা হয়েছে: {$return_no} (Invoice: {$sale['invoice_no']}), ফেরত মূল্য: ৳" . number_format($return_total, 2) . ", নগদ ফেরত: ৳" . number_format($refund_owed, 2));
 
