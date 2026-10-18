@@ -30,21 +30,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $status                = $_POST['status'] ?? 'Active';
         $remarks               = trim($_POST['remarks'] ?? '');
 
-        if ($vehicle_no === '') {
-            $_SESSION['tv_err'] = 'Vehicle Number খালি রাখা যাবে না।';
+        $errs = [];
+        if ($vehicle_no === '') { $errs[] = 'Vehicle Number খালি রাখা যাবে না।'; }
+        if (!in_array($vehicle_type, ['Bus', 'Microbus', 'Car', 'Van', 'Other'], true)) { $errs[] = 'গাড়ির ধরন সঠিক নয়।'; }
+        if (!in_array($status, ['Active', 'Inactive', 'Maintenance'], true)) { $errs[] = 'স্ট্যাটাস সঠিক নয়।'; }
+        if ($capacity < 0) { $errs[] = 'Capacity ঋণাত্মক হতে পারবে না।'; }
+        foreach (['fitness_expiry' => 'Fitness', 'insurance_expiry' => 'Insurance', 'tax_token_expiry' => 'Tax Token'] as $k => $lbl) {
+            if ($$k !== null && !tr_valid_date($$k)) { $errs[] = "$lbl Expiry তারিখ সঠিক নয়।"; }
+        }
+        if ($driver_id && $driver_id === $helper_id) { $errs[] = 'ড্রাইভার ও হেলপার একই ব্যক্তি হতে পারবে না।'; }
+        // ড্রাইভার/হেলপার HR এর সক্রিয় Staff হতে হবে এবং অন্য সক্রিয় গাড়িতে থাকা চলবে না
+        foreach (['driver_id' => 'ড্রাইভার', 'helper_id' => 'হেলপার'] as $k => $lbl) {
+            if (!$$k) { continue; }
+            $e = tr_employee_scoped($pdo, (int) $$k);
+            if (!$e || ($e['type'] ?? '') !== 'Staffs' || ($e['status'] ?? 'Active') !== 'Active') { $errs[] = "নির্বাচিত $lbl পাওয়া যায়নি (সক্রিয় Staff হতে হবে)।"; continue; }
+            $busy = $pdo->prepare("SELECT vehicle_no FROM transport_vehicles WHERE (driver_id = ? OR helper_id = ?) AND id <> ? AND status <> 'Inactive' LIMIT 1");
+            $busy->execute([$$k, $$k, $id]);
+            if ($bv = $busy->fetchColumn()) { $errs[] = "এই $lbl ইতিমধ্যে অন্য গাড়িতে ($bv) নিযুক্ত আছেন।"; }
+        }
+        if ($gps_device_identifier !== '') {
+            $g = $pdo->prepare("SELECT vehicle_no FROM transport_vehicles WHERE gps_device_identifier = ? AND id <> ? LIMIT 1");
+            $g->execute([$gps_device_identifier, $id]);
+            if ($gv = $g->fetchColumn()) { $errs[] = "এই GPS Device ইতিমধ্যে অন্য গাড়িতে ($gv) যুক্ত আছে।"; }
+        }
+        if ($errs) {
+            $_SESSION['tv_err'] = implode(' ', $errs);
         } else {
             try {
                 if ($id > 0) {
+                    $own = tr_scoped($pdo, 'transport_vehicles', $id);
+                    if (!$own) { throw new RuntimeException('গাড়ি খুঁজে পাওয়া যায়নি।'); }
                     $stmt = $pdo->prepare("UPDATE transport_vehicles SET vehicle_no=?, bus_no=?, vehicle_name=?, vehicle_type=?, capacity=?, driver_id=?, helper_id=?, gps_device_identifier=?, fitness_expiry=?, insurance_expiry=?, tax_token_expiry=?, status=?, remarks=? WHERE id=?");
                     $stmt->execute([$vehicle_no, $bus_no ?: null, $vehicle_name, $vehicle_type, $capacity, $driver_id, $helper_id, $gps_device_identifier ?: null, $fitness_expiry, $insurance_expiry, $tax_token_expiry, $status, $remarks, $id]);
                     $_SESSION['tv_msg'] = 'গাড়ির তথ্য আপডেট করা হয়েছে।';
                     sec_log_activity($pdo, 'Transport', 'Update', "গাড়ির তথ্য আপডেট করা হয়েছে: {$vehicle_no} ({$vehicle_name})");
                 } else {
-                    $stmt = $pdo->prepare("INSERT INTO transport_vehicles (vehicle_no, bus_no, vehicle_name, vehicle_type, capacity, driver_id, helper_id, gps_device_identifier, fitness_expiry, insurance_expiry, tax_token_expiry, status, remarks) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)");
-                    $stmt->execute([$vehicle_no, $bus_no ?: null, $vehicle_name, $vehicle_type, $capacity, $driver_id, $helper_id, $gps_device_identifier ?: null, $fitness_expiry, $insurance_expiry, $tax_token_expiry, $status, $remarks]);
+                    $stmt = $pdo->prepare("INSERT INTO transport_vehicles (vehicle_no, bus_no, vehicle_name, vehicle_type, capacity, driver_id, helper_id, gps_device_identifier, fitness_expiry, insurance_expiry, tax_token_expiry, status, remarks, branch_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+                    $stmt->execute([$vehicle_no, $bus_no ?: null, $vehicle_name, $vehicle_type, $capacity, $driver_id, $helper_id, $gps_device_identifier ?: null, $fitness_expiry, $insurance_expiry, $tax_token_expiry, $status, $remarks, branch_id_for_insert()]);
                     $_SESSION['tv_msg'] = 'নতুন গাড়ি যোগ করা হয়েছে।';
                     sec_log_activity($pdo, 'Transport', 'Create', "নতুন গাড়ি যোগ করা হয়েছে: {$vehicle_no} ({$vehicle_name})");
                 }
+            } catch (RuntimeException $e) {
+                $_SESSION['tv_err'] = $e->getMessage();
             } catch (PDOException $e) {
                 $_SESSION['tv_err'] = (str_contains($e->getMessage(), 'uniq_vehicle_no'))
                     ? 'এই Vehicle Number দিয়ে ইতিমধ্যে একটি গাড়ি রেজিস্টার করা আছে।'
@@ -53,17 +80,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif (isset($_POST['delete_vehicle'])) {
         $id = (int) ($_POST['id'] ?? 0);
+        $del_veh = tr_scoped($pdo, 'transport_vehicles', $id);
         $check = $pdo->prepare("SELECT COUNT(*) c FROM transport_routes WHERE vehicle_id = ?");
         $check->execute([$id]);
-        if ((int) $check->fetch()['c'] > 0) {
+        if (!$del_veh) {
+            $_SESSION['tv_err'] = 'গাড়ি খুঁজে পাওয়া যায়নি।';
+        } elseif ((int) $check->fetch()['c'] > 0) {
             $_SESSION['tv_err'] = 'এই গাড়ি কোনো রুটের সাথে যুক্ত আছে, আগে রুট থেকে সরিয়ে নিন।';
         } else {
-            $del_veh_row = $pdo->prepare("SELECT vehicle_no, vehicle_name FROM transport_vehicles WHERE id = ?");
-            $del_veh_row->execute([$id]);
-            $del_veh = $del_veh_row->fetch();
             $pdo->prepare("DELETE FROM transport_vehicles WHERE id = ?")->execute([$id]);
+            $pdo->prepare("DELETE FROM transport_vehicle_live WHERE vehicle_id = ?")->execute([$id]);
             $_SESSION['tv_msg'] = 'গাড়ি মুছে ফেলা হয়েছে।';
-            sec_log_activity($pdo, 'Transport', 'Delete', "গাড়ি মুছে ফেলা হয়েছে: " . ($del_veh ? "{$del_veh['vehicle_no']} ({$del_veh['vehicle_name']})" : "#$id"));
+            sec_log_activity($pdo, 'Transport', 'Delete', "গাড়ি মুছে ফেলা হয়েছে: {$del_veh['vehicle_no']} ({$del_veh['vehicle_name']})");
         }
     }
 
@@ -73,12 +101,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $view = $_GET['view'] ?? 'list';
 // Driver/Helper আপনার existing HR মডিউলের employees টেবিল থেকে আসে (type='Staffs')
-$staff_pool = $pdo->query(
+$__sp_w = []; $__sp_params = [];
+branch_apply_filter($__sp_w, $__sp_params, 'e.branch_id');
+$__sp_sql = $__sp_w ? (' AND ' . implode(' AND ', $__sp_w)) : '';
+$__sp_stmt = $pdo->prepare(
     "SELECT e.id, e.name, e.employee_id, d.title AS designation_title
      FROM employees e LEFT JOIN designations d ON d.id = e.designation_id
-     WHERE e.type = 'Staffs' AND e.status = 'Active' AND e.is_current = 1
+     WHERE e.type = 'Staffs' AND e.status = 'Active' AND e.is_current = 1" . $__sp_sql . "
      ORDER BY e.name ASC"
-)->fetchAll();
+);
+$__sp_stmt->execute($__sp_params);
+$staff_pool = $__sp_stmt->fetchAll();
 ?>
 
 <?php if ($view === 'add' || $view === 'edit'): ?>
@@ -86,9 +119,7 @@ $staff_pool = $pdo->query(
     $edit_row = null;
     if ($view === 'edit') {
         $edit_id = (int) ($_GET['id'] ?? 0);
-        $stmt = $pdo->prepare("SELECT * FROM transport_vehicles WHERE id = ?");
-        $stmt->execute([$edit_id]);
-        $edit_row = $stmt->fetch();
+        $edit_row = tr_scoped($pdo, 'transport_vehicles', $edit_id);
     }
     $d = $edit_row ?: [
         'id' => 0, 'vehicle_no' => '', 'bus_no' => '', 'vehicle_name' => '', 'vehicle_type' => 'Bus', 'capacity' => 0,
@@ -210,12 +241,16 @@ $staff_pool = $pdo->query(
 
 <?php else: ?>
     <?php
-    $stmt = $pdo->query("SELECT tv.*, d.name AS driver_name, h.name AS helper_name,
+    $tvl_w = []; $tvl_p = [];
+    tr_branch_or_shared($tvl_w, $tvl_p, 'tv.branch_id');
+    $stmt = $pdo->prepare("SELECT tv.*, d.name AS driver_name, h.name AS helper_name,
                                  (SELECT COUNT(*) FROM transport_routes tr WHERE tr.vehicle_id = tv.id) AS route_count
                           FROM transport_vehicles tv
                           LEFT JOIN employees d ON d.id = tv.driver_id
                           LEFT JOIN employees h ON h.id = tv.helper_id
+                          " . ($tvl_w ? 'WHERE ' . implode(' AND ', $tvl_w) : '') . "
                           ORDER BY tv.id DESC");
+    $stmt->execute($tvl_p);
     $rows = $stmt->fetchAll();
     $today = date('Y-m-d');
     ?>

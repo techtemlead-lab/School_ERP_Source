@@ -56,9 +56,11 @@ $upd_live = $pdo->prepare(
                              ignition=VALUES(ignition), device_time=VALUES(device_time), connection_status=VALUES(connection_status)"
 );
 $ins_log = $pdo->prepare("INSERT INTO transport_gps_logs (vehicle_id, lat, lng, speed_kmh, course_deg, ignition, device_time) VALUES (?,?,?,?,?,?,?)");
-$ins_event = $pdo->prepare("INSERT INTO transport_events (vehicle_id, event_type, stop_id, event_time, lat, lng, sms_sent) VALUES (?,?,?,?,?,?,1)");
-$last_event_stmt = $pdo->prepare("SELECT event_type FROM transport_events WHERE vehicle_id = ? ORDER BY event_time DESC LIMIT 1");
-$last_stop_event_stmt = $pdo->prepare("SELECT id FROM transport_events WHERE vehicle_id = ? AND event_type = 'Stop Reached' AND stop_id = ? AND event_time > (NOW() - INTERVAL 15 MINUTE) LIMIT 1");
+$ins_event = $pdo->prepare("INSERT INTO transport_events (vehicle_id, event_type, stop_id, event_time, lat, lng, sms_sent) VALUES (?,?,?,?,?,?,?)");
+// স্কুল Arrive/Depart অবস্থা শুধু স্কুল-সংক্রান্ত ইভেন্ট থেকে ধরা হয় (মাঝে "Stop Reached" ঢুকলে অবস্থা হারিয়ে বারবার SMS যাওয়া ঠেকাতে)
+$last_event_stmt = $pdo->prepare("SELECT event_type FROM transport_events WHERE vehicle_id = ? AND event_type IN ('Arrived School','Departed School') ORDER BY event_time DESC, id DESC LIMIT 1");
+// একই স্টপে একই গাড়ির জন্য ২ ঘণ্টার মধ্যে আবার SMS নয় (গাড়ি দাঁড়িয়ে থাকলে ১৫ মিনিট পর পর SMS যেত)
+$last_stop_event_stmt = $pdo->prepare("SELECT id FROM transport_events WHERE vehicle_id = ? AND event_type = 'Stop Reached' AND stop_id = ? AND event_time > (NOW() - INTERVAL 2 HOUR) LIMIT 1");
 
 $processed = 0;
 foreach ($vehicles as $v) {
@@ -92,12 +94,12 @@ foreach ($vehicles as $v) {
         $was_at_school = $last_type === 'Arrived School';
 
         if ($currently_at_school && !$was_at_school) {
-            $ins_event->execute([$v['id'], 'Arrived School', null, date('Y-m-d H:i:s'), $lat, $lng]);
-            transport_notify_route_guardians($pdo, (int) $v['id'], "{NAME} এর স্কুল বাস (" . transport_bus_label($v) . ") স্কুলে পৌঁছেছে।");
+            $sent = transport_notify_route_guardians($pdo, (int) $v['id'], "{NAME} এর স্কুল বাস (" . transport_bus_label($v) . ") স্কুলে পৌঁছেছে।");
+            $ins_event->execute([$v['id'], 'Arrived School', null, date('Y-m-d H:i:s'), $lat, $lng, $sent > 0 ? 1 : 0]);
             tlog("Vehicle #{$v['id']}: Arrived School event + SMS পাঠানো হয়েছে।");
         } elseif (!$currently_at_school && $was_at_school) {
-            $ins_event->execute([$v['id'], 'Departed School', null, date('Y-m-d H:i:s'), $lat, $lng]);
-            transport_notify_route_guardians($pdo, (int) $v['id'], "{NAME} এর স্কুল বাস (" . transport_bus_label($v) . ") স্কুল ছেড়ে রওনা দিয়েছে।");
+            $sent = transport_notify_route_guardians($pdo, (int) $v['id'], "{NAME} এর স্কুল বাস (" . transport_bus_label($v) . ") স্কুল ছেড়ে রওনা দিয়েছে।");
+            $ins_event->execute([$v['id'], 'Departed School', null, date('Y-m-d H:i:s'), $lat, $lng, $sent > 0 ? 1 : 0]);
             tlog("Vehicle #{$v['id']}: Departed School event + SMS পাঠানো হয়েছে।");
         }
     }
@@ -112,13 +114,17 @@ foreach ($vehicles as $v) {
         if ($dist_stop <= (int) $stop['radius_m']) {
             $last_stop_event_stmt->execute([$v['id'], $stop['id']]);
             if (!$last_stop_event_stmt->fetch()) {
-                $ins_event->execute([$v['id'], 'Stop Reached', $stop['id'], date('Y-m-d H:i:s'), $lat, $lng]);
-                transport_notify_stop_guardians($pdo, (int) $v['id'], (int) $stop['id'], "{NAME} এর স্কুল বাস (" . transport_bus_label($v) . ") আপনার স্টপেজ (" . $stop['stop_name'] . ") এ পৌঁছেছে।");
+                $sent = transport_notify_stop_guardians($pdo, (int) $v['id'], (int) $stop['id'], "{NAME} এর স্কুল বাস (" . transport_bus_label($v) . ") আপনার স্টপেজ (" . $stop['stop_name'] . ") এ পৌঁছেছে।");
+                $ins_event->execute([$v['id'], 'Stop Reached', $stop['id'], date('Y-m-d H:i:s'), $lat, $lng, $sent > 0 ? 1 : 0]);
                 tlog("Vehicle #{$v['id']}: Stop Reached ({$stop['stop_name']}) event + SMS পাঠানো হয়েছে।");
             }
         }
     }
 }
+
+// GPS log অনির্দিষ্টকাল জমতে দেওয়া হয় না — ৩০ দিনের পুরনো লগ ও ৯০ দিনের পুরনো ইভেন্ট মোছা হয় (প্রতি রানে সীমিত সংখ্যক)
+$pdo->exec("DELETE FROM transport_gps_logs WHERE device_time < (NOW() - INTERVAL 30 DAY) LIMIT 5000");
+$pdo->exec("DELETE FROM transport_events WHERE event_time < (NOW() - INTERVAL 90 DAY) LIMIT 2000");
 
 tlog("সম্পন্ন — {$processed} টি গাড়ির পজিশন আপডেট হয়েছে।");
 
@@ -133,7 +139,7 @@ function transport_bus_label(array $v): string
 }
 
 /** এই গাড়ির রুটে থাকা সব সক্রিয় শিক্ষার্থীর অভিভাবককে SMS (School Arrive/Depart এর জন্য) */
-function transport_notify_route_guardians(PDO $pdo, int $vehicle_id, string $template): void
+function transport_notify_route_guardians(PDO $pdo, int $vehicle_id, string $template): int
 {
     $stmt = $pdo->prepare(
         "SELECT s.name_en, s.guardian_phone FROM transport_student_assign tsa
@@ -142,13 +148,16 @@ function transport_notify_route_guardians(PDO $pdo, int $vehicle_id, string $tem
          WHERE tr.vehicle_id = ? AND tsa.status = 'Active' AND s.guardian_phone IS NOT NULL AND s.guardian_phone != ''"
     );
     $stmt->execute([$vehicle_id]);
+    $sent = 0;
     foreach ($stmt->fetchAll() as $row) {
-        send_sms($pdo, $row['guardian_phone'], str_replace('{NAME}', $row['name_en'], $template));
+        $r = send_sms($pdo, $row['guardian_phone'], str_replace('{NAME}', $row['name_en'], $template));
+        if (!empty($r['success'])) { $sent++; }
     }
+    return $sent;
 }
 
 /** নির্দিষ্ট স্টপেজের শিক্ষার্থীদের অভিভাবককে SMS (Stop Reached এর জন্য — শুধু ওই স্টপেজেরটাই, সব রুট না) */
-function transport_notify_stop_guardians(PDO $pdo, int $vehicle_id, int $stop_id, string $template): void
+function transport_notify_stop_guardians(PDO $pdo, int $vehicle_id, int $stop_id, string $template): int
 {
     $stmt = $pdo->prepare(
         "SELECT s.name_en, s.guardian_phone FROM transport_student_assign tsa
@@ -156,7 +165,10 @@ function transport_notify_stop_guardians(PDO $pdo, int $vehicle_id, int $stop_id
          WHERE tsa.stop_id = ? AND tsa.status = 'Active' AND s.guardian_phone IS NOT NULL AND s.guardian_phone != ''"
     );
     $stmt->execute([$stop_id]);
+    $sent = 0;
     foreach ($stmt->fetchAll() as $row) {
-        send_sms($pdo, $row['guardian_phone'], str_replace('{NAME}', $row['name_en'], $template));
+        $r = send_sms($pdo, $row['guardian_phone'], str_replace('{NAME}', $row['name_en'], $template));
+        if (!empty($r['success'])) { $sent++; }
     }
+    return $sent;
 }

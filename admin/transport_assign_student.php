@@ -23,22 +23,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $fee_override = trim($_POST['fee_override'] ?? '') !== '' ? (float) $_POST['fee_override'] : null;
         $remarks      = trim($_POST['remarks'] ?? '');
 
-        $check = $pdo->prepare("SELECT id FROM transport_student_assign WHERE student_id = ? AND status = 'Active'");
-        $check->execute([$student_pk]);
-        $existing = $check->fetch();
+        try {
+            if ($fee_override !== null && $fee_override < 0) { throw new RuntimeException('Fee Override ঋণাত্মক হতে পারবে না।'); }
+            if (!$route_id || !$stop_id) { throw new RuntimeException('Route ও Stop নির্বাচন করুন।'); }
+            $pdo->beginTransaction();
+            // শিক্ষার্থীর row লক (branch scope সহ): একই সময়ে দুইবার assign হলে একটাই টিকবে
+            $stu = tr_student_scoped($pdo, $student_pk, true);
+            if (!$stu) { throw new RuntimeException('শিক্ষার্থী খুঁজে পাওয়া যায়নি।'); }
+            if (($stu['status'] ?? 'Active') !== 'Active') { throw new RuntimeException('এই শিক্ষার্থী Active নয়।'); }
+            $route_row = tr_scoped($pdo, 'transport_routes', $route_id);
+            if (!$route_row || $route_row['status'] !== 'Active') { throw new RuntimeException('রুটটি পাওয়া যায়নি অথবা Inactive।'); }
+            if (!in_array($route_row['route_category'], ['Student', 'Mixed'], true)) { throw new RuntimeException('এটি Staff-এর রুট, শিক্ষার্থী যুক্ত করা যাবে না।'); }
+            $stop_chk = $pdo->prepare("SELECT id FROM transport_stops WHERE id = ? AND route_id = ?");
+            $stop_chk->execute([$stop_id, $route_id]);
+            if (!$stop_chk->fetch()) { throw new RuntimeException('নির্বাচিত স্টপেজ এই রুটের নয়।'); }
+            $check = $pdo->prepare("SELECT id FROM transport_student_assign WHERE student_id = ? AND status = 'Active'");
+            $check->execute([$student_pk]);
+            if ($check->fetch()) { throw new RuntimeException('এই শিক্ষার্থী ইতিমধ্যে একটি রুটে সক্রিয় আছে। আগে সেটি Unassign করুন, তারপর নতুন রুট দিন।'); }
 
-        if (!$route_id || !$stop_id) {
-            $_SESSION['ta_err'] = 'Route ও Stop নির্বাচন করুন।';
-        } elseif ($existing) {
-            $_SESSION['ta_err'] = 'এই শিক্ষার্থী ইতিমধ্যে একটি রুটে সক্রিয় আছে। আগে সেটি Unassign করুন, তারপর নতুন রুট দিন।';
-        } else {
             $token = bin2hex(random_bytes(16)); // Parent Tracking Link এর জন্য ইউনিক টোকেন
             $stmt = $pdo->prepare("INSERT INTO transport_student_assign (student_id, route_id, stop_id, fee_override, tracking_token, assigned_date, remarks) VALUES (?,?,?,?,?,CURDATE(),?)");
             $stmt->execute([$student_pk, $route_id, $stop_id, $fee_override, $token, $remarks]);
+            $pdo->commit();
             $_SESSION['ta_msg'] = 'শিক্ষার্থীকে ট্রান্সপোর্ট রুটে যুক্ত করা হয়েছে। নিচে "Parent Tracking Link" থেকে লিংকটি অভিভাবককে শেয়ার করতে পারেন।';
-            $ta_stu_name = $pdo->prepare("SELECT name_en FROM students WHERE id = ?");
-            $ta_stu_name->execute([$student_pk]);
-            sec_log_activity($pdo, 'Transport', 'Create', "শিক্ষার্থীকে ট্রান্সপোর্ট রুটে যুক্ত করা হয়েছে: " . ($ta_stu_name->fetchColumn() ?: "#$student_pk"));
+            sec_log_activity($pdo, 'Transport', 'Create', "শিক্ষার্থীকে ট্রান্সপোর্ট রুটে যুক্ত করা হয়েছে: " . ($stu['name_en'] ?: "#$student_pk"));
+        } catch (RuntimeException $e) {
+            if ($pdo->inTransaction()) { $pdo->rollBack(); }
+            $_SESSION['ta_err'] = $e->getMessage();
         }
 
         header('Location: index.php?page=transport_assign_student&student_pk=' . $student_pk);
@@ -46,9 +57,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (isset($_POST['unassign_student'])) {
         $id = (int) ($_POST['id'] ?? 0);
         $student_pk = (int) ($_POST['student_pk'] ?? 0);
-        $pdo->prepare("UPDATE transport_student_assign SET status='Inactive' WHERE id = ?")->execute([$id]);
-        $_SESSION['ta_msg'] = 'শিক্ষার্থীকে রুট থেকে সরিয়ে নেওয়া হয়েছে।';
-        sec_log_activity($pdo, 'Transport', 'Update', "শিক্ষার্থীকে ট্রান্সপোর্ট রুট থেকে সরিয়ে নেওয়া হয়েছে (Assign #{$id})।");
+        $uw = ['tsa.id = ?', "tsa.status = 'Active'"]; $up = [$id];
+        branch_apply_filter($uw, $up, 'students.branch_id');
+        $ust = $pdo->prepare("SELECT tsa.id, tsa.student_id FROM transport_student_assign tsa JOIN students ON students.id = tsa.student_id WHERE " . implode(' AND ', $uw));
+        $ust->execute($up);
+        $urow = $ust->fetch();
+        if (!$urow) {
+            $_SESSION['ta_err'] = 'অ্যাসাইনমেন্ট খুঁজে পাওয়া যায়নি।';
+        } else {
+            $student_pk = (int) $urow['student_id'];
+            $pdo->prepare("UPDATE transport_student_assign SET status='Inactive' WHERE id = ?")->execute([$id]);
+            $_SESSION['ta_msg'] = 'শিক্ষার্থীকে রুট থেকে সরিয়ে নেওয়া হয়েছে।';
+            sec_log_activity($pdo, 'Transport', 'Update', "শিক্ষার্থীকে ট্রান্সপোর্ট রুট থেকে সরিয়ে নেওয়া হয়েছে (Assign #{$id})।");
+        }
         header('Location: index.php?page=transport_assign_student&student_pk=' . $student_pk);
         exit();
     }
@@ -101,6 +122,7 @@ if ($student_pk > 0) {
                             WHERE students.id = ?");
     $stmt->execute([$student_pk]);
     $selected_student = $stmt->fetch();
+    if ($selected_student && !tr_student_scoped($pdo, $student_pk)) { $selected_student = null; }
 
     $astmt = $pdo->prepare("SELECT tsa.*, tr.route_no, tr.route_name, tr.monthly_fee, ts.stop_name
                              FROM transport_student_assign tsa
@@ -112,7 +134,11 @@ if ($student_pk > 0) {
 }
 
 // Student/Mixed — উভয় ক্যাটাগরির রুটে ছাত্র এসাইন করা যাবে
-$routes = $pdo->query("SELECT id, route_no, route_name, monthly_fee, route_category FROM transport_routes WHERE status='Active' AND route_category IN ('Student','Mixed') ORDER BY route_name ASC")->fetchAll();
+$__rw = ["status='Active'", "route_category IN ('Student','Mixed')"]; $__rp = [];
+tr_branch_or_shared($__rw, $__rp);
+$__rs = $pdo->prepare("SELECT id, route_no, route_name, monthly_fee, route_category FROM transport_routes WHERE " . implode(' AND ', $__rw) . " ORDER BY route_name ASC");
+$__rs->execute($__rp);
+$routes = $__rs->fetchAll();
 
 // track.php এর সম্পূর্ণ URL বানানোর জন্য বর্তমান ডোমেইন বের করা (admin/ ফোল্ডারের এক লেভেল উপরে track.php থাকে)
 $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
@@ -263,7 +289,11 @@ $track_base_url = $scheme . '://' . $host . $base_path . '/track.php?token=';
 <script>
 const routeStopsData = <?php
     $all_stops_by_route = [];
-    $stops_all = $pdo->query("SELECT id, route_id, stop_name FROM transport_stops ORDER BY stop_order ASC")->fetchAll();
+    $__sw = []; $__sp = [];
+    tr_branch_or_shared($__sw, $__sp, 'r.branch_id');
+    $__ss = $pdo->prepare("SELECT s.id, s.route_id, s.stop_name FROM transport_stops s JOIN transport_routes r ON r.id = s.route_id" . ($__sw ? ' WHERE ' . implode(' AND ', $__sw) : '') . " ORDER BY s.stop_order ASC");
+    $__ss->execute($__sp);
+    $stops_all = $__ss->fetchAll();
     foreach ($stops_all as $st) { $all_stops_by_route[$st['route_id']][] = ['id' => $st['id'], 'name' => $st['stop_name']]; }
     echo json_encode($all_stops_by_route, JSON_UNESCAPED_UNICODE);
 ?>;

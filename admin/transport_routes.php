@@ -23,36 +23,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $monthly_fee    = (float) ($_POST['monthly_fee'] ?? 0);
         $status         = ($_POST['status'] ?? 'Active') === 'Inactive' ? 'Inactive' : 'Active';
 
-        if ($route_name === '') {
-            $_SESSION['tr_err'] = 'Route Name খালি রাখা যাবে না।';
+        $errs = [];
+        if ($route_name === '') { $errs[] = 'Route Name খালি রাখা যাবে না।'; }
+        if ($monthly_fee < 0) { $errs[] = 'Monthly Fee ঋণাত্মক হতে পারবে না।'; }
+        if ($vehicle_id && !tr_scoped($pdo, 'transport_vehicles', $vehicle_id)) { $errs[] = 'নির্বাচিত গাড়ি পাওয়া যায়নি।'; }
+        if ($route_no !== '') {
+            $dq = $pdo->prepare("SELECT id FROM transport_routes WHERE route_no = ? AND id <> ? LIMIT 1");
+            $dq->execute([$route_no, $id]);
+            if ($dq->fetch()) { $errs[] = 'এই Route No ইতিমধ্যে ব্যবহৃত হয়েছে।'; }
+        }
+        if ($errs) {
+            $_SESSION['tr_err'] = implode(' ', $errs);
         } else {
             if ($id > 0) {
-                $stmt = $pdo->prepare("UPDATE transport_routes SET route_no=?, route_name=?, route_category=?, vehicle_id=?, monthly_fee=?, status=? WHERE id=?");
-                $stmt->execute([$route_no ?: null, $route_name, $route_category, $vehicle_id, $monthly_fee, $status, $id]);
-                $_SESSION['tr_msg'] = 'রুট আপডেট করা হয়েছে।';
-                sec_log_activity($pdo, 'Transport', 'Update', "ট্রান্সপোর্ট রুট আপডেট করা হয়েছে: {$route_name} ({$route_no})");
+                if (!tr_scoped($pdo, 'transport_routes', $id)) {
+                    $_SESSION['tr_err'] = 'রুট খুঁজে পাওয়া যায়নি।';
+                } else {
+                    $stmt = $pdo->prepare("UPDATE transport_routes SET route_no=?, route_name=?, route_category=?, vehicle_id=?, monthly_fee=?, status=? WHERE id=?");
+                    $stmt->execute([$route_no ?: null, $route_name, $route_category, $vehicle_id, $monthly_fee, $status, $id]);
+                    $_SESSION['tr_msg'] = 'রুট আপডেট করা হয়েছে।';
+                    sec_log_activity($pdo, 'Transport', 'Update', "ট্রান্সপোর্ট রুট আপডেট করা হয়েছে: {$route_name} ({$route_no})");
+                }
             } else {
-                $stmt = $pdo->prepare("INSERT INTO transport_routes (route_no, route_name, route_category, vehicle_id, monthly_fee, status) VALUES (?,?,?,?,?,?)");
-                $stmt->execute([$route_no ?: null, $route_name, $route_category, $vehicle_id, $monthly_fee, $status]);
+                $stmt = $pdo->prepare("INSERT INTO transport_routes (route_no, route_name, route_category, vehicle_id, monthly_fee, status, branch_id) VALUES (?,?,?,?,?,?,?)");
+                $stmt->execute([$route_no ?: null, $route_name, $route_category, $vehicle_id, $monthly_fee, $status, branch_id_for_insert()]);
                 $_SESSION['tr_msg'] = 'নতুন রুট যোগ করা হয়েছে। এখন এই রুটে স্টপেজ যোগ করুন।';
                 sec_log_activity($pdo, 'Transport', 'Create', "নতুন ট্রান্সপোর্ট রুট তৈরি করা হয়েছে: {$route_name} ({$route_no})");
             }
         }
     } elseif (isset($_POST['delete_route'])) {
         $id = (int) ($_POST['id'] ?? 0);
+        $del_route = tr_scoped($pdo, 'transport_routes', $id);
         $check1 = $pdo->prepare("SELECT COUNT(*) c FROM transport_student_assign WHERE route_id = ? AND status='Active'");
         $check1->execute([$id]);
         $check2 = $pdo->prepare("SELECT COUNT(*) c FROM transport_staff_assign WHERE route_id = ? AND status='Active'");
         $check2->execute([$id]);
-        if ((int) $check1->fetch()['c'] > 0 || (int) $check2->fetch()['c'] > 0) {
+        $check3 = $pdo->prepare("SELECT COUNT(*) c FROM transport_fee_invoices WHERE route_id = ?");
+        $check3->execute([$id]);
+        if (!$del_route) {
+            $_SESSION['tr_err'] = 'রুট খুঁজে পাওয়া যায়নি।';
+        } elseif ((int) $check1->fetch()['c'] > 0 || (int) $check2->fetch()['c'] > 0) {
             $_SESSION['tr_err'] = 'এই রুটে এখনো সক্রিয় শিক্ষার্থী/স্টাফ যুক্ত আছে, মুছে ফেলা যাবে না।';
+        } elseif ((int) $check3->fetch()['c'] > 0) {
+            // ইনভয়েস ইতিহাস আছে: মুছলে হিসাব নষ্ট হবে, তাই Inactive করা হচ্ছে
+            $pdo->prepare("UPDATE transport_routes SET status='Inactive' WHERE id = ?")->execute([$id]);
+            $_SESSION['tr_msg'] = 'এই রুটের ফি-ইনভয়েস ইতিহাস আছে, তাই মুছে না ফেলে Inactive করা হয়েছে।';
         } else {
-            $del_route_row = $pdo->prepare("SELECT route_no, route_name FROM transport_routes WHERE id = ?");
-            $del_route_row->execute([$id]);
-            $del_route = $del_route_row->fetch();
+            $pdo->prepare("DELETE FROM transport_stops WHERE route_id = ?")->execute([$id]);
             $pdo->prepare("DELETE FROM transport_routes WHERE id = ?")->execute([$id]);
             $_SESSION['tr_msg'] = 'রুট মুছে ফেলা হয়েছে।';
-            sec_log_activity($pdo, 'Transport', 'Delete', "ট্রান্সপোর্ট রুট মুছে ফেলা হয়েছে: " . ($del_route ? "{$del_route['route_name']} ({$del_route['route_no']})" : "#$id"));
+            sec_log_activity($pdo, 'Transport', 'Delete', "ট্রান্সপোর্ট রুট মুছে ফেলা হয়েছে: {$del_route['route_name']} ({$del_route['route_no']})");
         }
     }
 
@@ -61,7 +81,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $view = $_GET['view'] ?? 'list';
-$vehicles = $pdo->query("SELECT id, vehicle_no, bus_no, vehicle_name FROM transport_vehicles WHERE status != 'Inactive' ORDER BY vehicle_no ASC")->fetchAll();
+$__vw = ["status != 'Inactive'"]; $__vp = [];
+tr_branch_or_shared($__vw, $__vp);
+$__vs = $pdo->prepare("SELECT id, vehicle_no, bus_no, vehicle_name FROM transport_vehicles WHERE " . implode(' AND ', $__vw) . " ORDER BY vehicle_no ASC");
+$__vs->execute($__vp);
+$vehicles = $__vs->fetchAll();
 ?>
 
 <?php if ($view === 'add' || $view === 'edit'): ?>
@@ -69,9 +93,7 @@ $vehicles = $pdo->query("SELECT id, vehicle_no, bus_no, vehicle_name FROM transp
     $edit_row = null;
     if ($view === 'edit') {
         $edit_id = (int) ($_GET['id'] ?? 0);
-        $stmt = $pdo->prepare("SELECT * FROM transport_routes WHERE id = ?");
-        $stmt->execute([$edit_id]);
-        $edit_row = $stmt->fetch();
+        $edit_row = tr_scoped($pdo, 'transport_routes', $edit_id);
     }
     $d = $edit_row ?: ['id' => 0, 'route_no' => '', 'route_name' => '', 'route_category' => 'Student', 'vehicle_id' => '', 'monthly_fee' => 0, 'status' => 'Active'];
     ?>
@@ -146,13 +168,17 @@ $vehicles = $pdo->query("SELECT id, vehicle_no, bus_no, vehicle_name FROM transp
 
 <?php else: ?>
     <?php
-    $stmt = $pdo->query("SELECT tr.*, tv.vehicle_no, tv.bus_no, tv.vehicle_name,
+    $trl_w = []; $trl_p = [];
+    tr_branch_or_shared($trl_w, $trl_p, 'tr.branch_id');
+    $stmt = $pdo->prepare("SELECT tr.*, tv.vehicle_no, tv.bus_no, tv.vehicle_name,
                                  (SELECT COUNT(*) FROM transport_stops ts WHERE ts.route_id = tr.id) AS stop_count,
                                  (SELECT COUNT(*) FROM transport_student_assign tsa WHERE tsa.route_id = tr.id AND tsa.status='Active') AS student_count,
                                  (SELECT COUNT(*) FROM transport_staff_assign tfa WHERE tfa.route_id = tr.id AND tfa.status='Active') AS staff_count
                           FROM transport_routes tr
                           LEFT JOIN transport_vehicles tv ON tv.id = tr.vehicle_id
+                          " . ($trl_w ? 'WHERE ' . implode(' AND ', $trl_w) : '') . "
                           ORDER BY tr.id DESC");
+    $stmt->execute($trl_p);
     $rows = $stmt->fetchAll();
     ?>
     <div class="card-custom">
