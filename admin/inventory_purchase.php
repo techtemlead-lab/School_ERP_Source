@@ -64,14 +64,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $updStock = $pdo->prepare("UPDATE inventory_items SET stock_qty = ?, cost_price = ? WHERE id = ?");
 
                 foreach ($lines as $ln) {
-                    $itemRow = inv_lock_row($pdo, 'inventory_items', $ln['item_id'], 'stock_qty, cost_price');
+                    $itemRow = inv_lock_row($pdo, 'inventory_items', $ln['item_id'], 'stock_qty, cost_price, status');
                     if (!$itemRow) { throw new RuntimeException('Item পাওয়া যায়নি (অথবা অন্য branch-এর)।'); }
+                    if (($itemRow['status'] ?? 'Active') !== 'Active') { throw new RuntimeException('Inactive Item-এ Purchase করা যাবে না।'); }
                     $old_stock = max(0, (int) $itemRow['stock_qty']);
                     $new_stock = (int) $itemRow['stock_qty'] + $ln['qty'];
                     $base = $old_stock + $ln['qty'];
                     $new_cost = $base > 0 ? (($old_stock * (float) $itemRow['cost_price']) + $ln['amount']) / $base : $ln['rate'];
                     $insItem->execute([$purchase_id, $ln['item_id'], $ln['qty'], $ln['rate'], $ln['amount']]);
                     $updStock->execute([$new_stock, round($new_cost, 2), $ln['item_id']]);
+                }
+
+                if ($paid_amount > 0) {
+                    $pdo->prepare("INSERT INTO inv_supplier_payments (purchase_id, amount, note) VALUES (?, ?, 'Initial')")->execute([$purchase_id, $paid_amount]);
                 }
 
                 $pdo->commit();
@@ -92,6 +97,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $ip_where = []; $ip_params = [];
 branch_apply_filter($ip_where, $ip_params);
 $ip_where_sql = $ip_where ? (' WHERE ' . implode(' AND ', $ip_where)) : '';
+$ip_where[] = "status = 'Active'";
+$ip_where_sql = ' WHERE ' . implode(' AND ', $ip_where);
 $ii_stmt = $pdo->prepare("SELECT id, name, stock_qty FROM inventory_items$ip_where_sql ORDER BY name");
 $ii_stmt->execute($ip_params);
 $all_items = $ii_stmt->fetchAll();
@@ -101,7 +108,11 @@ foreach ($all_items as $it) { $items_for_js[$it['id']] = ['name' => $it['name'],
 $ip2_where = []; $ip2_params = [];
 branch_apply_filter($ip2_where, $ip2_params);
 $ip2_where_sql = $ip2_where ? (' WHERE ' . implode(' AND ', $ip2_where)) : '';
-$purch_stmt = $pdo->prepare("SELECT * FROM inv_purchases$ip2_where_sql ORDER BY id DESC");
+[$hp_page, $hp_per, $hp_off] = inv_page_params(50);
+$cnt = $pdo->prepare("SELECT COUNT(*) FROM inv_purchases$ip2_where_sql");
+$cnt->execute($ip2_params);
+$purch_total = (int) $cnt->fetchColumn();
+$purch_stmt = $pdo->prepare("SELECT * FROM inv_purchases$ip2_where_sql ORDER BY id DESC LIMIT $hp_per OFFSET $hp_off");
 $purch_stmt->execute($ip2_params);
 $purchases = $purch_stmt->fetchAll();
 
@@ -195,9 +206,20 @@ $suppliers = $pdo->query("SELECT * FROM inv_suppliers ORDER BY name")->fetchAll(
                 </tbody>
             </table>
             </div>
+            <?php echo inv_pager_html($purch_total, $hp_page, $hp_per); ?>
         </div>
     </div>
 </div>
+<script>
+// পেজিনেশন লিংকে (?pg=) এলে History ট্যাব নিজে খুলে যাবে
+document.addEventListener('DOMContentLoaded', function () {
+    if (new URLSearchParams(location.search).has('pg')) {
+        const btn = document.querySelector('#purchaseTabGroup .inv-tab-box:nth-child(3)');
+        if (btn) { btn.click(); }
+    }
+});
+</script>
+
 
 <style>
 .inv-tab-boxes { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }

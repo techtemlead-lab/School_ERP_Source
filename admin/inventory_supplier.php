@@ -21,7 +21,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->rollBack();
                     $error_msg = "সঠিক Amount দিন (Due এর বেশি না)।";
                 } else {
-                    $pdo->prepare("INSERT INTO inv_supplier_payments (purchase_id, amount) VALUES (?, ?)")->execute([$purchase_id, $amount]);
+                    $pdo->prepare("INSERT INTO inv_supplier_payments (purchase_id, amount, note) VALUES (?, ?, 'Installment')")->execute([$purchase_id, $amount]);
                     $pdo->prepare("UPDATE inv_purchases SET paid_amount = paid_amount + ?, due_amount = GREATEST(0, due_amount - ?) WHERE id = ?")
                         ->execute([$amount, $amount, $purchase_id]);
                     $pdo->commit();

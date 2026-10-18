@@ -204,3 +204,53 @@ function inv_merge_lines(array $item_ids, array $qtys): array
     }
     return $out;
 }
+
+// Category/Sub Category/Unit এখন branch ভিত্তিক (NULL = আগের তৈরি, সব branch দেখতে পাবে)
+inv_ensure_column($pdo, 'inv_categories',    'branch_id', 'INT NULL');
+inv_ensure_column($pdo, 'inv_subcategories', 'branch_id', 'INT NULL');
+inv_ensure_column($pdo, 'inv_units',         'branch_id', 'INT NULL');
+// Payment হিস্ট্রি: প্রথম জমা (Initial), কিস্তি (Installment) ও Refund আলাদা চেনা যাবে
+inv_ensure_column($pdo, 'inv_sale_payments',     'note', 'VARCHAR(30) NULL');
+inv_ensure_column($pdo, 'inv_supplier_payments', 'note', 'VARCHAR(30) NULL');
+
+/** branch_id = বর্তমান branch অথবা NULL (পুরনো/শেয়ার্ড রেকর্ড) — master তালিকার (category/unit) জন্য */
+function inv_branch_or_shared(array &$where, array &$params, string $column = 'branch_id'): void
+{
+    $bid = branch_current_id();
+    if ($bid === null) { return; }
+    $where[] = "($column = ? OR $column IS NULL)";
+    $params[] = $bid;
+}
+
+/** master রো (category/subcategory/unit) বর্তমান branch-এ ব্যবহারযোগ্য কিনা — না হলে null ফেরত */
+function inv_master_id_in_scope(PDO $pdo, string $table, ?int $id): ?int
+{
+    if (!$id) { return null; }
+    $where = ['id = ?']; $params = [$id];
+    inv_branch_or_shared($where, $params);
+    $st = $pdo->prepare("SELECT id FROM `$table` WHERE " . implode(' AND ', $where));
+    $st->execute($params);
+    return $st->fetchColumn() ? $id : null;
+}
+
+/** পেজিনেশন হেল্পার: [$page, $per, $offset] */
+function inv_page_params(int $per = 50): array
+{
+    $page = max(1, (int) ($_GET['pg'] ?? 1));
+    return [$page, $per, ($page - 1) * $per];
+}
+
+/** সহজ পেজার HTML (বর্তমান query string রেখে শুধু pg বদলায়) */
+function inv_pager_html(int $total, int $page, int $per): string
+{
+    $pages = (int) ceil($total / max(1, $per));
+    if ($pages <= 1) { return ''; }
+    $q = $_GET; unset($q['pg']);
+    $html = '<nav class="mt-2"><ul class="pagination pagination-sm mb-0 flex-wrap">';
+    $start = max(1, $page - 3); $end = min($pages, $page + 3);
+    for ($p = $start; $p <= $end; $p++) {
+        $url = '?' . http_build_query($q + ['pg' => $p]);
+        $html .= '<li class="page-item' . ($p === $page ? ' active' : '') . '"><a class="page-link" href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '">' . $p . '</a></li>';
+    }
+    return $html . '</ul></nav><div class="small text-muted mt-1">মোট ' . $total . ' টি, পেজ ' . $page . '/' . $pages . '</div>';
+}
