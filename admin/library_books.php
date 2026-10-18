@@ -84,45 +84,92 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $total_copies = max(1, (int) ($_POST['total_copies'] ?? 1));
         $status       = ($_POST['status'] ?? 'Active') === 'Inactive' ? 'Inactive' : 'Active';
 
+        $dup = false;
+        if ($book_code !== '') {
+            $dq = $pdo->prepare("SELECT id FROM library_books WHERE book_code = ? AND id <> ? LIMIT 1");
+            $dq->execute([$book_code, $id]);
+            $dup = (bool) $dq->fetch();
+        }
         if ($title === '') {
             $_SESSION['lb_err'] = 'Book Title খালি রাখা যাবে না।';
+        } elseif ($price < 0) {
+            $_SESSION['lb_err'] = 'বইয়ের দাম ঋণাত্মক হতে পারবে না।';
+        } elseif ($dup) {
+            $_SESSION['lb_err'] = 'এই Book Code (' . $book_code . ') আগে থেকেই অন্য বইয়ে আছে।';
         } else {
-            if ($id > 0) {
-                // ইতিমধ্যে ইস্যু হওয়া কপি বাদে available_copies রিক্যালকুলেট করা হচ্ছে
-                $issued_stmt = $pdo->prepare("SELECT COUNT(*) c FROM library_issues WHERE book_id = ? AND status = 'Issued'");
-                $issued_stmt->execute([$id]);
-                $issued_count = (int) $issued_stmt->fetch()['c'];
-                $available = max(0, $total_copies - $issued_count);
+            try {
+                if ($id > 0) {
+                    $pdo->beginTransaction();
+                    $cur = $pdo->prepare("SELECT book_code FROM library_books WHERE id = ? FOR UPDATE");
+                    $cur->execute([$id]);
+                    $cur_row = $cur->fetch();
+                    if (!$cur_row) { throw new RuntimeException('বই খুঁজে পাওয়া যায়নি।'); }
+                    // কোড খালি রাখলে আগের কোডই থাকবে
+                    if ($book_code === '') { $book_code = (string) ($cur_row['book_code'] ?? ''); }
+                    // ইস্যু + হারানো কপি বাদ দিয়ে মোট কপি যাচাই (Lost কপি total থেকে আগেই বাদ গেছে)
+                    $issued_stmt = $pdo->prepare("SELECT COUNT(*) c FROM library_issues WHERE book_id = ? AND status = 'Issued'");
+                    $issued_stmt->execute([$id]);
+                    $issued_count = (int) $issued_stmt->fetch()['c'];
+                    if ($total_copies < $issued_count) {
+                        throw new RuntimeException("এখন {$issued_count}টি কপি ইস্যু করা আছে, তাই মোট কপি {$issued_count}-এর কম করা যাবে না।");
+                    }
+                    $available = $total_copies - $issued_count;
 
-                $stmt = $pdo->prepare("UPDATE library_books SET book_code=?, isbn=?, title=?, title_bn=?, author=?, publisher=?, category_id=?, edition=?, language=?, shelf_no=?, rack_no=?, price=?, total_copies=?, available_copies=?, status=? WHERE id=?");
-                $stmt->execute([$book_code ?: null, $isbn, $title, $title_bn, $author, $publisher, $category_id, $edition, $language, $shelf_no, $rack_no, $price, $total_copies, $available, $status, $id]);
-                sec_log_activity($pdo, 'Library', 'Update', "বইয়ের তথ্য আপডেট করা হয়েছে: {$title} (Code: {$book_code})");
-                $_SESSION['lb_msg'] = 'বইয়ের তথ্য আপডেট করা হয়েছে।';
-            } else {
-                $stmt = $pdo->prepare("INSERT INTO library_books (book_code, isbn, title, title_bn, author, publisher, category_id, edition, language, shelf_no, rack_no, price, total_copies, available_copies, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
-                $stmt->execute([$book_code ?: null, $isbn, $title, $title_bn, $author, $publisher, $category_id, $edition, $language, $shelf_no, $rack_no, $price, $total_copies, $total_copies, $status]);
-                $new_id = (int) $pdo->lastInsertId();
-                if ($book_code === '') {
-                    $book_code = 'LIB-' . str_pad((string) $new_id, 4, '0', STR_PAD_LEFT);
-                    $pdo->prepare("UPDATE library_books SET book_code = ? WHERE id = ?")->execute([$book_code, $new_id]);
+                    $stmt = $pdo->prepare("UPDATE library_books SET book_code=?, isbn=?, title=?, title_bn=?, author=?, publisher=?, category_id=?, edition=?, language=?, shelf_no=?, rack_no=?, price=?, total_copies=?, available_copies=?, status=? WHERE id=?");
+                    $stmt->execute([$book_code ?: null, $isbn, $title, $title_bn, $author, $publisher, $category_id, $edition, $language, $shelf_no, $rack_no, $price, $total_copies, $available, $status, $id]);
+                    $pdo->commit();
+                    sec_log_activity($pdo, 'Library', 'Update', "বইয়ের তথ্য আপডেট করা হয়েছে: {$title} (Code: {$book_code})");
+                    $_SESSION['lb_msg'] = 'বইয়ের তথ্য আপডেট করা হয়েছে।';
+                } else {
+                    $pdo->beginTransaction();
+                    $stmt = $pdo->prepare("INSERT INTO library_books (book_code, isbn, title, title_bn, author, publisher, category_id, edition, language, shelf_no, rack_no, price, total_copies, available_copies, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+                    $stmt->execute([$book_code ?: null, $isbn, $title, $title_bn, $author, $publisher, $category_id, $edition, $language, $shelf_no, $rack_no, $price, $total_copies, $total_copies, $status]);
+                    $new_id = (int) $pdo->lastInsertId();
+                    if ($book_code === '') {
+                        $book_code = 'LIB-' . str_pad((string) $new_id, 4, '0', STR_PAD_LEFT);
+                        $pdo->prepare("UPDATE library_books SET book_code = ? WHERE id = ?")->execute([$book_code, $new_id]);
+                    }
+                    $pdo->commit();
+                    sec_log_activity($pdo, 'Library', 'Create', "নতুন বই যোগ করা হয়েছে: {$title} (Code: {$book_code})");
+                    $_SESSION['lb_msg'] = 'নতুন বই যোগ করা হয়েছে।';
                 }
-                sec_log_activity($pdo, 'Library', 'Create', "নতুন বই যোগ করা হয়েছে: {$title} (Code: {$book_code})");
-                $_SESSION['lb_msg'] = 'নতুন বই যোগ করা হয়েছে।';
+            } catch (RuntimeException $e) {
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
+                $_SESSION['lb_err'] = $e->getMessage();
+            } catch (PDOException $e) {
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
+                $_SESSION['lb_err'] = 'বই সংরক্ষণ করা যায়নি (Book Code ডুপ্লিকেট হতে পারে)।';
             }
         }
     } elseif (isset($_POST['delete_book'])) {
         $id = (int) ($_POST['id'] ?? 0);
-        $check = $pdo->prepare("SELECT COUNT(*) c FROM library_issues WHERE book_id = ? AND status = 'Issued'");
-        $check->execute([$id]);
-        if ((int) $check->fetch()['c'] > 0) {
-            $_SESSION['lb_err'] = 'এই বইয়ের কপি এখনো কারো কাছে ইস্যু করা আছে, মুছে ফেলা যাবে না।';
-        } else {
-            $del_stmt = $pdo->prepare("SELECT title, book_code FROM library_books WHERE id = ?");
+        try {
+            $pdo->beginTransaction();
+            $del_stmt = $pdo->prepare("SELECT title, book_code FROM library_books WHERE id = ? FOR UPDATE");
             $del_stmt->execute([$id]);
             $del_book = $del_stmt->fetch();
-            $pdo->prepare("DELETE FROM library_books WHERE id = ?")->execute([$id]);
-            sec_log_activity($pdo, 'Library', 'Delete', "বই মুছে ফেলা হয়েছে: " . ($del_book['title'] ?? "#$id") . " (Code: " . ($del_book['book_code'] ?? '-') . ")");
-            $_SESSION['lb_msg'] = 'বই মুছে ফেলা হয়েছে।';
+            if (!$del_book) { throw new RuntimeException('বই খুঁজে পাওয়া যায়নি।'); }
+            $check = $pdo->prepare("SELECT SUM(status = 'Issued') AS open_c, COUNT(*) AS all_c FROM library_issues WHERE book_id = ?");
+            $check->execute([$id]);
+            $cnt = $check->fetch();
+            if ((int) $cnt['open_c'] > 0) {
+                throw new RuntimeException('এই বইয়ের কপি এখনো কারো কাছে ইস্যু করা আছে, মুছে ফেলা যাবে না।');
+            }
+            if ((int) $cnt['all_c'] > 0) {
+                // ইস্যু-ইতিহাস আছে: মুছলে রেকর্ড এতিম হয়ে যাবে, তাই Inactive করা হচ্ছে
+                $pdo->prepare("UPDATE library_books SET status = 'Inactive' WHERE id = ?")->execute([$id]);
+                $pdo->commit();
+                sec_log_activity($pdo, 'Library', 'Update', "ইতিহাস থাকায় বই Inactive করা হয়েছে: {$del_book['title']} (Code: {$del_book['book_code']})");
+                $_SESSION['lb_msg'] = 'এই বইয়ের ইস্যু-ইতিহাস আছে, তাই মুছে না ফেলে Inactive করা হয়েছে।';
+            } else {
+                $pdo->prepare("DELETE FROM library_books WHERE id = ?")->execute([$id]);
+                $pdo->commit();
+                sec_log_activity($pdo, 'Library', 'Delete', "বই মুছে ফেলা হয়েছে: " . ($del_book['title'] ?? "#$id") . " (Code: " . ($del_book['book_code'] ?? '-') . ")");
+                $_SESSION['lb_msg'] = 'বই মুছে ফেলা হয়েছে।';
+            }
+        } catch (RuntimeException $e) {
+            if ($pdo->inTransaction()) { $pdo->rollBack(); }
+            $_SESSION['lb_err'] = $e->getMessage();
         }
     }
 

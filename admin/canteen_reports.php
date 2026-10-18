@@ -12,7 +12,7 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $f_date_to))   { $f_date_to   = date('Y
 $cr_bf_val = branch_current_id();
 $cr_bf_sql = $cr_bf_val !== null ? ' AND (branch_id = ?)' : '';
 $daily = $pdo->prepare(
-    "SELECT DATE(created_at) AS d, COUNT(*) AS total_sales, SUM(total_amount) AS total_amount, SUM(paid_amount) AS total_paid, SUM(due_amount) AS total_due
+    "SELECT DATE(created_at) AS d, COUNT(*) AS total_sales, SUM(total_amount - returned_amount) AS total_amount, SUM(paid_amount) AS total_paid, SUM(due_amount) AS total_due
      FROM canteen_sales WHERE DATE(created_at) BETWEEN ? AND ?$cr_bf_sql
      GROUP BY DATE(created_at) ORDER BY d DESC"
 );
@@ -21,10 +21,12 @@ $daily_rows = $daily->fetchAll();
 
 // আইটেম-ভিত্তিক বিক্রি
 $cr_bf_sql_s = $cr_bf_val !== null ? ' AND (s.branch_id = ?)' : '';
+$ret_sub = "(SELECT x.sale_item_id, SUM(x.qty) AS rq, SUM(x.line_amount) AS ra FROM canteen_sale_return_items x GROUP BY x.sale_item_id)";
 $item_wise = $pdo->prepare(
-    "SELECT COALESCE(mi.name, '(মুছে ফেলা আইটেম)') AS name, SUM(si.qty) AS total_qty, SUM(si.amount) AS total_amount
+    "SELECT COALESCE(mi.name, '(মুছে ফেলা আইটেম)') AS name, SUM(si.qty - COALESCE(r.rq,0)) AS total_qty, SUM(si.amount - COALESCE(r.ra,0)) AS total_amount
      FROM canteen_sale_items si
      JOIN canteen_sales s ON s.id = si.sale_id
+     LEFT JOIN $ret_sub r ON r.sale_item_id = si.id
      LEFT JOIN canteen_menu_items mi ON mi.id = si.menu_item_id
      WHERE DATE(s.created_at) BETWEEN ? AND ?$cr_bf_sql_s
      GROUP BY si.menu_item_id ORDER BY total_amount DESC"
@@ -47,10 +49,13 @@ $due_stmt->execute($cr_bf_val !== null ? [$cr_bf_val] : []);
 $due_summary = $due_stmt->fetch();
 
 // অনুমানিক কাঁচামাল খরচ = বিক্রিত qty × Recipe qty × কাঁচামালের unit_cost (Recipe না থাকলে ০ ধরা হয়)
+// যে Return-এ কাঁচামাল স্টকে ফিরেছে, সেই অংশের খরচ বাদ যায়
+$cost_ret_sub = "(SELECT x.sale_item_id, SUM(x.qty) AS rq FROM canteen_sale_return_items x JOIN canteen_sale_returns t ON t.id = x.return_id AND t.restored_stock = 1 GROUP BY x.sale_item_id)";
 $cost_stmt = $pdo->prepare(
-    "SELECT COALESCE(SUM(si.qty * ri.qty_required * rm.unit_cost), 0)
+    "SELECT COALESCE(SUM((si.qty - COALESCE(r.rq,0)) * ri.qty_required * rm.unit_cost), 0)
      FROM canteen_sale_items si
      JOIN canteen_sales s ON s.id = si.sale_id
+     LEFT JOIN $cost_ret_sub r ON r.sale_item_id = si.id
      JOIN canteen_recipe_items ri ON ri.menu_item_id = si.menu_item_id
      JOIN canteen_raw_materials rm ON rm.id = ri.raw_material_id
      WHERE DATE(s.created_at) BETWEEN ? AND ?$cr_bf_sql_s"

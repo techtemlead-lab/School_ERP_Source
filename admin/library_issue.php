@@ -37,6 +37,7 @@ if (!$pdo->query("SELECT id FROM library_settings WHERE id=1")->fetch()) {
     $pdo->exec("INSERT INTO library_settings (id, fine_per_day, max_days_allowed, max_books_per_student) VALUES (1, 5.00, 14, 2)");
 }
 $settings = $pdo->query("SELECT * FROM library_settings WHERE id=1")->fetch();
+require_once __DIR__ . '/library_common.php';
 
 function lv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 
@@ -56,39 +57,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['issue_book'])) {
     $due_date   = trim($_POST['due_date'] ?? '');
     $remarks    = trim($_POST['remarks'] ?? '');
 
-    $stu_stmt = $pdo->prepare("SELECT * FROM students WHERE id = ?");
-    $stu_stmt->execute([$student_pk]);
-    $student = $stu_stmt->fetch();
+    try {
+        if (!lib_valid_date($issue_date)) { throw new RuntimeException('ইস্যুর তারিখ সঠিক নয়।'); }
+        if ($due_date !== '' && !lib_valid_date($due_date)) { throw new RuntimeException('ফেরতের তারিখ সঠিক নয়।'); }
+        if ($due_date === '') {
+            $due_date = date('Y-m-d', strtotime($issue_date . ' + ' . max(1, (int) $settings['max_days_allowed']) . ' days'));
+        }
+        if ($due_date < $issue_date) { throw new RuntimeException('ফেরতের তারিখ ইস্যুর তারিখের আগে হতে পারবে না।'); }
 
-    $book_stmt = $pdo->prepare("SELECT * FROM library_books WHERE id = ?");
-    $book_stmt->execute([$book_id]);
-    $book = $book_stmt->fetch();
+        $pdo->beginTransaction();
+        // শিক্ষার্থী (branch scope) ও বই row লক: একই সময়ে দুজন শেষ কপি বা সীমা পার করতে পারবে না
+        $student = lib_student_scoped($pdo, $student_pk, true);
+        if (!$student) { throw new RuntimeException('শিক্ষার্থী খুঁজে পাওয়া যায়নি।'); }
+        if (($student['status'] ?? 'Active') !== 'Active') { throw new RuntimeException('এই শিক্ষার্থী Active নয়।'); }
+        $book_stmt = $pdo->prepare("SELECT * FROM library_books WHERE id = ? FOR UPDATE");
+        $book_stmt->execute([$book_id]);
+        $book = $book_stmt->fetch();
+        if (!$book) { throw new RuntimeException('বই খুঁজে পাওয়া যায়নি।'); }
+        if ($book['status'] !== 'Active') { throw new RuntimeException('এই বইটি Inactive, ইস্যু করা যাবে না।'); }
+        if ((int) $book['available_copies'] <= 0) { throw new RuntimeException('এই বইয়ের কোনো কপি এই মুহূর্তে উপলব্ধ নেই।'); }
 
-    if (!$student) {
-        $_SESSION['li_err'] = 'শিক্ষার্থী খুঁজে পাওয়া যায়নি।';
-    } elseif (!$book) {
-        $_SESSION['li_err'] = 'বই খুঁজে পাওয়া যায়নি।';
-    } elseif ((int) $book['available_copies'] <= 0) {
-        $_SESSION['li_err'] = 'এই বইয়ের কোনো কপি এই মুহূর্তে উপলব্ধ নেই।';
-    } else {
+        $dupq = $pdo->prepare("SELECT COUNT(*) FROM library_issues WHERE student_id = ? AND book_id = ? AND status = 'Issued'");
+        $dupq->execute([$student_pk, $book_id]);
+        if ((int) $dupq->fetchColumn() > 0) { throw new RuntimeException('এই শিক্ষার্থীর কাছে এই বইটি ইতিমধ্যে ইস্যু করা আছে।'); }
+
         $count_stmt = $pdo->prepare("SELECT COUNT(*) c FROM library_issues WHERE student_id = ? AND status = 'Issued'");
         $count_stmt->execute([$student_pk]);
         $current_issued = (int) $count_stmt->fetch()['c'];
-
         if ($current_issued >= (int) $settings['max_books_per_student']) {
-            $_SESSION['li_err'] = 'এই শিক্ষার্থীর সর্বোচ্চ বই ধারণের সীমা (' . (int) $settings['max_books_per_student'] . 'টি) পূর্ণ হয়ে গেছে। আগে একটি বই ফেরত দিতে হবে।';
-        } else {
-            if ($due_date === '') {
-                $due_date = date('Y-m-d', strtotime($issue_date . ' + ' . (int) $settings['max_days_allowed'] . ' days'));
-            }
-            $pdo->beginTransaction();
-            $ins = $pdo->prepare("INSERT INTO library_issues (book_id, student_id, issue_date, due_date, remarks, issued_by) VALUES (?,?,?,?,?,?)");
-            $ins->execute([$book_id, $student_pk, $issue_date, $due_date, $remarks, $_SESSION['admin_user'] ?? '']);
-            $pdo->prepare("UPDATE library_books SET available_copies = available_copies - 1 WHERE id = ?")->execute([$book_id]);
-            $pdo->commit();
-            sec_log_activity($pdo, 'Library', 'Create', "বই ইস্যু করা হয়েছে: {$book['title']} ({$book['book_code']}) - {$student['name_en']}, ফেরতের তারিখ: {$due_date}");
-            $_SESSION['li_msg'] = lv($book['title']) . ' বইটি ' . lv($student['name_en']) . ' কে ইস্যু করা হয়েছে। ফেরতের তারিখ: ' . $due_date;
+            throw new RuntimeException('এই শিক্ষার্থীর সর্বোচ্চ বই ধারণের সীমা (' . (int) $settings['max_books_per_student'] . 'টি) পূর্ণ হয়ে গেছে। আগে একটি বই ফেরত দিতে হবে।');
         }
+
+        $ins = $pdo->prepare("INSERT INTO library_issues (book_id, student_id, issue_date, due_date, remarks, issued_by) VALUES (?,?,?,?,?,?)");
+        $ins->execute([$book_id, $student_pk, $issue_date, $due_date, $remarks, $_SESSION['admin_user'] ?? '']);
+        $pdo->prepare("UPDATE library_books SET available_copies = available_copies - 1 WHERE id = ?")->execute([$book_id]);
+        $pdo->commit();
+        sec_log_activity($pdo, 'Library', 'Create', "বই ইস্যু করা হয়েছে: {$book['title']} ({$book['book_code']}) - {$student['name_en']}, ফেরতের তারিখ: {$due_date}");
+        $_SESSION['li_msg'] = lv($book['title']) . ' বইটি ' . lv($student['name_en']) . ' কে ইস্যু করা হয়েছে। ফেরতের তারিখ: ' . $due_date;
+    } catch (RuntimeException $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        $_SESSION['li_err'] = $e->getMessage();
     }
 
     header('Location: index.php?page=library_issue&student_pk=' . $student_pk);
@@ -141,6 +149,7 @@ if ($student_pk > 0) {
                             WHERE students.id = ?");
     $stmt->execute([$student_pk]);
     $selected_student = $stmt->fetch();
+    if ($selected_student && !lib_student_scoped($pdo, $student_pk)) { $selected_student = null; }
 
     $istmt = $pdo->prepare("SELECT li.*, lb.title, lb.book_code FROM library_issues li
                              JOIN library_books lb ON lb.id = li.book_id

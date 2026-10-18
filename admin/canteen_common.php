@@ -202,6 +202,33 @@ canteen_ensure_column($pdo, 'canteen_subcategories', 'branch_id', 'INT NULL');
 canteen_ensure_column($pdo, 'canteen_units',         'branch_id', 'INT NULL');
 canteen_ensure_column($pdo, 'canteen_suppliers',     'branch_id', 'INT NULL');
 canteen_ensure_column($pdo, 'canteen_sale_payments',     'note', 'VARCHAR(30) NULL');
+canteen_ensure_column($pdo, 'canteen_sales', 'returned_amount', 'DECIMAL(10,2) NOT NULL DEFAULT 0'); // Sale Return/Cancel-এ মোট ফেরত মূল্য
+$pdo->exec("CREATE TABLE IF NOT EXISTS canteen_sale_returns (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    return_no VARCHAR(40) NOT NULL,
+    sale_id INT NOT NULL,
+    total_return DECIMAL(10,2) NOT NULL DEFAULT 0,
+    due_reduced DECIMAL(10,2) NOT NULL DEFAULT 0,
+    refund_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+    restored_stock TINYINT(1) NOT NULL DEFAULT 1,
+    reason VARCHAR(255) NULL,
+    created_by VARCHAR(100) NULL,
+    branch_id INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_return_no (return_no),
+    INDEX idx_sale (sale_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+$pdo->exec("CREATE TABLE IF NOT EXISTS canteen_sale_return_items (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    return_id INT NOT NULL,
+    sale_id INT NOT NULL,
+    sale_item_id INT NOT NULL,
+    menu_item_id INT NOT NULL,
+    qty INT NOT NULL,
+    line_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+    amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+    INDEX idx_return (return_id), INDEX idx_sale_item (sale_item_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 canteen_ensure_column($pdo, 'canteen_supplier_payments', 'note', 'VARCHAR(30) NULL');
 canteen_ensure_column($pdo, 'canteen_raw_materials', 'status', "VARCHAR(20) NOT NULL DEFAULT 'Active'");
 

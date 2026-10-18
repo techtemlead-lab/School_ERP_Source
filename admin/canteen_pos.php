@@ -148,6 +148,99 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $err = 'Sale ব্যর্থ হয়েছে, আবার চেষ্টা করুন।';
             }
         }
+    } elseif (isset($_POST['sale_return'])) {
+        // ---------- Sale Return / Cancel (শুধু Super Admin/Admin) ----------
+        if (!canteen_can_manage()) {
+            $err = 'Sale Return/Cancel করার অনুমতি নেই (শুধু Admin)।';
+        } else {
+            try {
+                $pdo->beginTransaction();
+                $rsale_id = (int) ($_POST['sale_id'] ?? 0);
+                $sale = canteen_lock_row($pdo, 'canteen_sales', $rsale_id); // sale row লক: একই sale-এ দুটো return একসাথে চলবে না
+                if (!$sale) { throw new RuntimeException('Sale খুঁজে পাওয়া যায়নি (অথবা অন্য branch-এর)।'); }
+
+                $itst = $pdo->prepare("SELECT id, menu_item_id, qty, amount FROM canteen_sale_items WHERE sale_id = ? ORDER BY id");
+                $itst->execute([$rsale_id]);
+                $sale_items = $itst->fetchAll();
+                $rtst = $pdo->prepare("SELECT sale_item_id, SUM(qty) q FROM canteen_sale_return_items WHERE sale_id = ? GROUP BY sale_item_id");
+                $rtst->execute([$rsale_id]);
+                $already = [];
+                foreach ($rtst->fetchAll() as $r) { $already[(int) $r['sale_item_id']] = (int) $r['q']; }
+
+                $cancel_all = !empty($_POST['cancel_all']);
+                $req = $_POST['ret_qty'] ?? [];
+                $gross = (float) $sale['total_amount'] + (float) $sale['discount_amount'];
+                $factor = $gross > 0 ? ((float) $sale['total_amount'] / $gross) : 1.0; // overall discount-এর আনুপাতিক অংশ
+                $rlines = []; $R = 0.0; $all_back = true;
+                foreach ($sale_items as $si) {
+                    $sid = (int) $si['id'];
+                    $left = (int) $si['qty'] - ($already[$sid] ?? 0);
+                    $q = $cancel_all ? $left : max(0, (int) ($req[$sid] ?? 0));
+                    if ($q > $left) { throw new RuntimeException('ফেরতের পরিমাণ বিক্রিত পরিমাণের চেয়ে বেশি হতে পারবে না।'); }
+                    if ($q < $left) { $all_back = false; }
+                    if ($q <= 0) { continue; }
+                    $unit_net = (float) $si['amount'] / max(1, (int) $si['qty']);
+                    $line_amount = round($unit_net * $q, 2);
+                    $amt = round($line_amount * $factor, 2);
+                    $rlines[] = ['sale_item_id' => $sid, 'menu_item_id' => (int) $si['menu_item_id'], 'qty' => $q, 'line_amount' => $line_amount, 'amount' => $amt];
+                    $R += $amt;
+                }
+                if (!$rlines) { throw new RuntimeException('কমপক্ষে একটা আইটেমের ফেরত পরিমাণ দিন।'); }
+                $remaining_value = round((float) $sale['total_amount'] - (float) $sale['returned_amount'], 2);
+                if ($all_back) { $R = $remaining_value; } // পুরো বাকিটা ফেরত হলে rounding ফাঁক রাখা হবে না
+                $R = round(min($R, $remaining_value), 2);
+
+                $due_reduce = round(min((float) $sale['due_amount'], $R), 2);
+                $refund = round($R - $due_reduce, 2);
+                $restore = !empty($_POST['restore_stock']) ? 1 : 0;
+                $reason = mb_substr(trim($_POST['reason'] ?? ''), 0, 250);
+
+                $return_no = canteen_unique_no($pdo, 'CRT', 'canteen_sale_returns', 'return_no');
+                $pdo->prepare("INSERT INTO canteen_sale_returns (return_no, sale_id, total_return, due_reduced, refund_amount, restored_stock, reason, created_by, branch_id) VALUES (?,?,?,?,?,?,?,?,?)")
+                    ->execute([$return_no, $rsale_id, $R, $due_reduce, $refund, $restore, $reason ?: null, $_SESSION['admin_user'] ?? '', $sale['branch_id'] ?? branch_id_for_insert()]);
+                $return_id = (int) $pdo->lastInsertId();
+                $insR = $pdo->prepare("INSERT INTO canteen_sale_return_items (return_id, sale_id, sale_item_id, menu_item_id, qty, line_amount, amount) VALUES (?,?,?,?,?,?,?)");
+                foreach ($rlines as $l) { $insR->execute([$return_id, $rsale_id, $l['sale_item_id'], $l['menu_item_id'], $l['qty'], $l['line_amount'], $l['amount']]); }
+
+                $pdo->prepare("UPDATE canteen_sales SET returned_amount = returned_amount + ?, due_amount = due_amount - ?, paid_amount = paid_amount - ? WHERE id = ?")
+                    ->execute([$R, $due_reduce, $refund, $rsale_id]);
+                if ($refund > 0) {
+                    $pdo->prepare("INSERT INTO canteen_sale_payments (sale_id, amount, note) VALUES (?, ?, 'Refund')")->execute([$rsale_id, -$refund]);
+                }
+
+                // কাঁচামাল স্টক ফেরত (Recipe অনুযায়ী) — নষ্ট/বানানো হয়ে গেছে হলে টিক খুলে রাখুন
+                if ($restore) {
+                    $rec = $pdo->prepare("SELECT raw_material_id, qty_required FROM canteen_recipe_items WHERE menu_item_id = ?");
+                    $back = [];
+                    foreach ($rlines as $l) {
+                        $rec->execute([$l['menu_item_id']]);
+                        foreach ($rec->fetchAll() as $rr) {
+                            $back[(int) $rr['raw_material_id']] = ($back[(int) $rr['raw_material_id']] ?? 0) + (float) $rr['qty_required'] * $l['qty'];
+                        }
+                    }
+                    ksort($back);
+                    foreach ($back as $mid => $qty_back) {
+                        $m = canteen_lock_row($pdo, 'canteen_raw_materials', $mid, 'id');
+                        if (!$m) { continue; }
+                        $pdo->prepare("UPDATE canteen_raw_materials SET current_stock = current_stock + ? WHERE id = ?")->execute([$qty_back, $mid]);
+                        $pdo->prepare("INSERT INTO canteen_stock_adjustments (raw_material_id, adj_type, qty, reason, branch_id) VALUES (?, 'add', ?, ?, ?)")
+                            ->execute([$mid, $qty_back, 'Sale Return ' . $sale['invoice_no'] . ' (' . $return_no . ')', $sale['branch_id'] ?? branch_id_for_insert()]);
+                    }
+                }
+                $pdo->commit();
+                sec_log_activity($pdo, 'Canteen', 'Update', "Canteen Sale Return: {$return_no} ← {$sale['invoice_no']}, মূল্য ৳{$R}, Due কমেছে ৳{$due_reduce}, Refund ৳{$refund}");
+                $_SESSION['canteen_msg'] = "✅ Return সম্পন্ন ({$return_no}): ৳" . number_format($R, 2) . ($due_reduce > 0 ? " | Due কমেছে ৳" . number_format($due_reduce, 2) : '') . ($refund > 0 ? " | ক্যাশ ফেরত ৳" . number_format($refund, 2) : '');
+                header('Location: index.php?page=canteen_pos&pg=' . max(1, (int) ($_GET['pg'] ?? 1)));
+                exit();
+            } catch (RuntimeException $e) {
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
+                $err = $e->getMessage();
+            } catch (Exception $e) {
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
+                error_log('Canteen sale return failed: ' . $e->getMessage());
+                $err = 'Return ব্যর্থ হয়েছে, আবার চেষ্টা করুন।';
+            }
+        }
     }
 }
 
@@ -170,6 +263,20 @@ $sales_total = (int) $cnt->fetchColumn();
 $cpos_stmt = $pdo->prepare("SELECT * FROM canteen_sales$cpos_where_sql ORDER BY id DESC LIMIT $hp_per OFFSET $hp_off");
 $cpos_stmt->execute($cpos_params);
 $sales = $cpos_stmt->fetchAll();
+
+// Payment history + Return history + আইটেম (প্রতিটি sale-এর ডিটেইল সারির জন্য)
+$pay_by_sale = $ret_by_sale = $items_by_sale = [];
+if ($sales) {
+    $sids = array_map('intval', array_column($sales, 'id'));
+    $in = implode(',', $sids);
+    foreach ($pdo->query("SELECT sale_id, amount, note, paid_at FROM canteen_sale_payments WHERE sale_id IN ($in) ORDER BY id")->fetchAll() as $r) { $pay_by_sale[(int) $r['sale_id']][] = $r; }
+    foreach ($pdo->query("SELECT sale_id, return_no, total_return, due_reduced, refund_amount, restored_stock, reason, created_at FROM canteen_sale_returns WHERE sale_id IN ($in) ORDER BY id")->fetchAll() as $r) { $ret_by_sale[(int) $r['sale_id']][] = $r; }
+    foreach ($pdo->query("SELECT si.id, si.sale_id, si.qty, si.rate, mi.name,
+                                 COALESCE((SELECT SUM(ri.qty) FROM canteen_sale_return_items ri WHERE ri.sale_item_id = si.id),0) AS ret_qty
+                          FROM canteen_sale_items si LEFT JOIN canteen_menu_items mi ON mi.id = si.menu_item_id
+                          WHERE si.sale_id IN ($in) ORDER BY si.id")->fetchAll() as $r) { $items_by_sale[(int) $r['sale_id']][] = $r; }
+}
+$can_return = canteen_can_manage();
 ?>
 
 <div class="card-custom">
@@ -242,7 +349,7 @@ $sales = $cpos_stmt->fetchAll();
         <div id="paneSalesHistory" class="inv-tab-pane card p-3 mb-4 d-none">
             <div class="table-responsive">
             <table class="table table-bordered text-center align-middle">
-                <thead class="table-dark"><tr><th>Invoice No</th><th>Buyer</th><th>Type</th><th>Total</th><th>Paid</th><th>Due</th><th>Date</th><th>Print</th></tr></thead>
+                <thead class="table-dark"><tr><th>Invoice No</th><th>Buyer</th><th>Type</th><th>Total</th><th>Paid</th><th>Due</th><th>Date</th><th>Print</th><th>Details</th></tr></thead>
                 <tbody>
                     <?php if ($sales): foreach ($sales as $sl):
                         $badge = ['student' => 'bg-info', 'employee' => 'bg-primary', 'walkin' => 'bg-secondary'][$sl['buyer_type']] ?? 'bg-secondary';
@@ -252,14 +359,79 @@ $sales = $cpos_stmt->fetchAll();
                             <td><strong><?php echo cv($sl['invoice_no']); ?></strong></td>
                             <td><?php echo cv($sl['customer_name']); ?></td>
                             <td><span class="badge <?php echo $badge; ?>"><?php echo $label; ?></span></td>
-                            <td>৳<?php echo number_format($sl['total_amount'], 2); ?></td>
+                            <td>৳<?php echo number_format($sl['total_amount'], 2); ?>
+                                <?php if ((float) $sl['returned_amount'] > 0): ?>
+                                    <div class="small <?php echo (float) $sl['returned_amount'] >= (float) $sl['total_amount'] - 0.005 ? 'text-danger' : 'text-warning'; ?>">
+                                        <?php echo (float) $sl['returned_amount'] >= (float) $sl['total_amount'] - 0.005 ? 'বাতিল (Cancelled)' : 'Return ৳' . number_format($sl['returned_amount'], 2); ?>
+                                    </div>
+                                <?php endif; ?>
+                            </td>
                             <td class="text-success">৳<?php echo number_format($sl['paid_amount'], 2); ?></td>
                             <td class="text-danger">৳<?php echo number_format($sl['due_amount'], 2); ?></td>
                             <td class="small text-muted"><?php echo cv($sl['created_at']); ?></td>
                             <td><a href="canteen_invoice_print.php?id=<?php echo (int) $sl['id']; ?>" target="_blank" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-print"></i></a></td>
+                            <td><button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('sd<?php echo (int) $sl['id']; ?>').classList.toggle('d-none')"><i class="fa-solid fa-list"></i> Payments<?php echo $can_return ? ' / Return' : ''; ?></button></td>
+                        </tr>
+                        <tr id="sd<?php echo (int) $sl['id']; ?>" class="d-none">
+                            <td colspan="9" class="text-start bg-light">
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <div class="fw-bold mb-1">Payment History</div>
+                                        <table class="table table-sm table-bordered mb-2 bg-white">
+                                            <thead><tr><th>তারিখ</th><th>ধরন</th><th class="text-end">Amount</th></tr></thead>
+                                            <tbody>
+                                            <?php foreach (($pay_by_sale[(int) $sl['id']] ?? []) as $pp): $isRef = ((float) $pp['amount'] < 0); ?>
+                                                <tr>
+                                                    <td class="small"><?php echo cv($pp['paid_at']); ?></td>
+                                                    <td><?php echo cv(['Initial' => 'প্রথম জমা', 'Installment' => 'Due আদায়', 'Refund' => 'ফেরত (Refund)'][$pp['note'] ?? ''] ?? ($pp['note'] ?: 'জমা')); ?></td>
+                                                    <td class="text-end <?php echo $isRef ? 'text-danger' : 'text-success'; ?>"><?php echo $isRef ? '-' : ''; ?>৳<?php echo number_format(abs((float) $pp['amount']), 2); ?></td>
+                                                </tr>
+                                            <?php endforeach; if (empty($pay_by_sale[(int) $sl['id']])): ?>
+                                                <tr><td colspan="3" class="text-muted text-center">কোনো পেমেন্ট নেই</td></tr>
+                                            <?php endif; ?>
+                                            </tbody>
+                                        </table>
+                                        <?php foreach (($ret_by_sale[(int) $sl['id']] ?? []) as $rr): ?>
+                                            <div class="small text-danger">↩ <?php echo cv($rr['return_no']); ?> — ৳<?php echo number_format($rr['total_return'], 2); ?>
+                                                (Due কমেছে ৳<?php echo number_format($rr['due_reduced'], 2); ?>, Refund ৳<?php echo number_format($rr['refund_amount'], 2); ?>, স্টক <?php echo $rr['restored_stock'] ? 'ফেরত' : 'ফেরত নয়'; ?>)
+                                                <?php echo $rr['reason'] ? '— ' . cv($rr['reason']) : ''; ?> <span class="text-muted"><?php echo cv($rr['created_at']); ?></span></div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                    <?php
+                                    $sale_open = (float) $sl['total_amount'] - (float) $sl['returned_amount'] > 0.004;
+                                    if ($can_return && $sale_open): ?>
+                                    <div class="col-md-6">
+                                        <div class="fw-bold mb-1">Sale Return / Cancel</div>
+                                        <form method="POST" onsubmit="return confirm('এই Return নিশ্চিত করবেন?');">
+                                            <?php echo csrf_field(); ?>
+                                            <input type="hidden" name="sale_id" value="<?php echo (int) $sl['id']; ?>">
+                                            <table class="table table-sm table-bordered bg-white mb-2">
+                                                <thead><tr><th>Item</th><th>বিক্রি</th><th>আগে ফেরত</th><th style="width:90px">এবার ফেরত</th></tr></thead>
+                                                <tbody>
+                                                <?php foreach (($items_by_sale[(int) $sl['id']] ?? []) as $it): $left = (int) $it['qty'] - (int) $it['ret_qty']; ?>
+                                                    <tr>
+                                                        <td><?php echo cv($it['name'] ?: '(মুছে ফেলা)'); ?></td>
+                                                        <td><?php echo (int) $it['qty']; ?></td>
+                                                        <td><?php echo (int) $it['ret_qty']; ?></td>
+                                                        <td><input type="number" min="0" max="<?php echo $left; ?>" name="ret_qty[<?php echo (int) $it['id']; ?>]" value="0" class="form-control form-control-sm" <?php echo $left <= 0 ? 'disabled' : ''; ?>></td>
+                                                    </tr>
+                                                <?php endforeach; ?>
+                                                </tbody>
+                                            </table>
+                                            <input type="text" name="reason" class="form-control form-control-sm mb-2" placeholder="কারণ (ঐচ্ছিক)">
+                                            <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="restore_stock" value="1" checked id="rs<?php echo (int) $sl['id']; ?>"><label class="form-check-label small" for="rs<?php echo (int) $sl['id']; ?>">কাঁচামাল স্টকে ফেরত যাবে (খাবার বানিয়ে ফেলা/নষ্ট হলে টিক তুলে দিন)</label></div>
+                                            <input type="hidden" name="sale_return" value="1">
+                                            <button type="submit" class="btn btn-sm btn-warning">নির্বাচিত আইটেম Return</button>
+                                            <button type="submit" name="cancel_all" value="1" class="btn btn-sm btn-danger">পুরো Sale বাতিল</button>
+                                        </form>
+                                        <div class="small text-muted mt-1">Due থাকলে আগে Due থেকে কাটা হবে, বাকিটা ক্যাশ Refund হিসেবে রেকর্ড হবে।</div>
+                                    </div>
+                                    <?php endif; ?>
+                                </div>
+                            </td>
                         </tr>
                     <?php endforeach; else: ?>
-                        <tr><td colspan="8" class="text-muted">কোনো Sale নেই</td></tr>
+                        <tr><td colspan="9" class="text-muted">কোনো Sale নেই</td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>

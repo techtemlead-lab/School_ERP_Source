@@ -98,8 +98,16 @@ $today = date('Y-m-d');
 
 <?php elseif ($tab === 'fine'): ?>
     <?php
-    $total_collected = (float) $pdo->query("SELECT COALESCE(SUM(fine_amount),0) t FROM library_issues WHERE fine_paid = 1")->fetch()['t'];
-    $total_due        = (float) $pdo->query("SELECT COALESCE(SUM(fine_amount),0) t FROM library_issues WHERE fine_amount > 0 AND fine_paid = 0")->fetch()['t'];
+    $lt_where = ['li.fine_amount > 0']; $lt_params = [];
+    branch_apply_filter($lt_where, $lt_params, 'students.branch_id');
+    $lt = $pdo->prepare("SELECT COALESCE(SUM(CASE WHEN li.fine_paid = 1 THEN li.fine_amount END),0) AS collected,
+                                COALESCE(SUM(CASE WHEN li.fine_paid = 0 THEN li.fine_amount END),0) AS due
+                         FROM library_issues li JOIN students ON students.id = li.student_id
+                         WHERE " . implode(' AND ', $lt_where));
+    $lt->execute($lt_params);
+    $lt_row = $lt->fetch();
+    $total_collected = (float) $lt_row['collected'];
+    $total_due       = (float) $lt_row['due'];
     ?>
     <div class="row mb-4">
         <div class="col-md-6">
@@ -145,9 +153,14 @@ $today = date('Y-m-d');
 
 <?php elseif ($tab === 'popular'): ?>
     <?php
-    $stmt = $pdo->query("SELECT lb.title, lb.book_code, lb.author, COUNT(li.id) AS issue_count
+    $lp_where = ['1=1']; $lp_params = [];
+    branch_apply_filter($lp_where, $lp_params, 'students.branch_id');
+    $stmt = $pdo->prepare("SELECT lb.title, lb.book_code, lb.author, COUNT(li.id) AS issue_count
                           FROM library_issues li JOIN library_books lb ON lb.id = li.book_id
+                          JOIN students ON students.id = li.student_id
+                          WHERE " . implode(' AND ', $lp_where) . "
                           GROUP BY li.book_id ORDER BY issue_count DESC LIMIT 20");
+    $stmt->execute($lp_params);
     $rows = $stmt->fetchAll();
     ?>
     <h5 class="fw-normal mb-3">সবচেয়ে বেশি পঠিত বই (Top 20)</h5>
