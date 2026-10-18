@@ -213,6 +213,36 @@ $pdo->exec(
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
 );
 
+// Staff (Teacher/Employee) transport fee — Student ইনভয়েসের মতোই আলাদা টেবিল
+$pdo->exec(
+    "CREATE TABLE IF NOT EXISTS transport_staff_fee_invoices (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        employee_id INT NOT NULL,
+        route_id INT NOT NULL,
+        month_year VARCHAR(7) NOT NULL,
+        amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+        paid_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+        status ENUM('Unpaid','Partial','Paid') NOT NULL DEFAULT 'Unpaid',
+        payment_date DATE NULL,
+        payment_method VARCHAR(50) NULL,
+        trx_id VARCHAR(100) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_emp_month (employee_id, month_year)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+);
+$pdo->exec(
+    "CREATE TABLE IF NOT EXISTS transport_staff_fee_payments (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        invoice_id INT NOT NULL,
+        amount DECIMAL(10,2) NOT NULL,
+        payment_method VARCHAR(50) NULL,
+        trx_id VARCHAR(100) NULL,
+        collected_by VARCHAR(100) NULL,
+        paid_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_invoice (invoice_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+);
+
 // -----------------------------------------------------------
 // Helpers: validation + branch scope (শুধু পেজ থেকে কল হয়; cron এ লাগে না)
 // -----------------------------------------------------------
