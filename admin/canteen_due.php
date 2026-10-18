@@ -2,9 +2,7 @@
 // admin/canteen_due.php - Canteen > Due Collection
 require_once __DIR__ . '/canteen_common.php';
 
-$is_super_admin = $_SESSION['is_super_admin'] ?? true;
-$user_role      = $_SESSION['user_role'] ?? '';
-if (!$is_super_admin && !in_array($user_role, ['Admin', 'Canteen Staff'], true)) {
+if (!canteen_can_sell()) {
     $_SESSION['canteen_err'] = 'ক্যানটিন Due Collection ব্যবহারের অনুমতি নেই।';
     header('Location: index.php?page=dashboard');
     exit();
@@ -20,21 +18,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $sale_id = (int) ($_POST['sale_id'] ?? 0);
         $amount  = (float) ($_POST['collect_amount'] ?? 0);
 
-        $row = $pdo->prepare("SELECT due_amount FROM canteen_sales WHERE id = ?");
-        $row->execute([$sale_id]);
-        $due_now = (float) ($row->fetchColumn() ?: 0);
-
-        if ($sale_id > 0 && $amount > 0 && $amount <= $due_now) {
+        if ($sale_id > 0 && $amount > 0) {
             $pdo->beginTransaction();
             try {
-                $pdo->prepare("INSERT INTO canteen_sale_payments (sale_id, amount) VALUES (?, ?)")->execute([$sale_id, $amount]);
-                $pdo->prepare("UPDATE canteen_sales SET paid_amount = paid_amount + ?, due_amount = due_amount - ? WHERE id = ?")
-                    ->execute([$amount, $amount, $sale_id]);
-                $pdo->commit();
-                sec_log_activity($pdo, 'Canteen', 'Update', "Canteen Due Payment জমা হয়েছে: Sale #{$sale_id}, ৳{$amount}");
-                $msg = 'Due Payment জমা হয়েছে।';
+                // রো লক + branch চেক — ডাবল সাবমিটে overpay ঠেকাতে due এখানেই পড়া হয়
+                $sale_row = canteen_lock_row($pdo, 'canteen_sales', $sale_id, 'due_amount, invoice_no');
+                if (!$sale_row || $amount > (float) $sale_row['due_amount'] + 0.001) {
+                    $pdo->rollBack();
+                    $err = 'সঠিক Amount দিন (Due এর বেশি না)।';
+                } else {
+                    $pdo->prepare("INSERT INTO canteen_sale_payments (sale_id, amount, note) VALUES (?, ?, 'Installment')")->execute([$sale_id, $amount]);
+                    $pdo->prepare("UPDATE canteen_sales SET paid_amount = paid_amount + ?, due_amount = GREATEST(0, due_amount - ?) WHERE id = ?")
+                        ->execute([$amount, $amount, $sale_id]);
+                    $pdo->commit();
+                    sec_log_activity($pdo, 'Canteen', 'Update', "Canteen Due Payment জমা হয়েছে: {$sale_row['invoice_no']}, ৳{$amount}");
+                    $msg = 'Due Payment জমা হয়েছে।';
+                }
             } catch (Exception $e) {
-                $pdo->rollBack();
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
                 error_log('Canteen collect due failed: ' . $e->getMessage());
                 $err = 'Payment ব্যর্থ হয়েছে।';
             }

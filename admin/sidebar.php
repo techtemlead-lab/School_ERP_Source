@@ -657,10 +657,11 @@ function sb_mod_ok(PDO $pdo, array $tree, string $modkey): bool
             <ul class="collapse submenu" id="canteenModuleSubmenu">
                 <li><a href="index.php?page=canteen_pos">Sales (POS)</a></li>
                 <li><a href="index.php?page=canteen_due">Due Collection</a></li>
-                <?php if (($_SESSION['is_super_admin'] ?? true) || ($_SESSION['user_role'] ?? '') === 'Admin'): ?>
+                <?php if (!empty($_SESSION['is_super_admin']) || ($_SESSION['user_role'] ?? '') === 'Admin'): ?>
                     <li><a href="index.php?page=canteen_menu">Items</a></li>
                     <li><a href="index.php?page=canteen_raw_materials">Raw Materials</a></li>
                     <li><a href="index.php?page=canteen_purchase">Purchase</a></li>
+                    <li><a href="index.php?page=canteen_supplier">Supplier Payment</a></li>
                     <li><a href="index.php?page=canteen_stock_adjustment">Stock Adjustment</a></li>
                     <li><a href="index.php?page=canteen_reports">Reports</a></li>
                     <li><a href="index.php?page=canteen_settings">Settings</a></li>

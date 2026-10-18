@@ -721,9 +721,9 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                             'inventory_reports' => 'Reports', 'inventory_settings' => 'Settings',
                         ];
                         echo 'Inventory & Sales > ' . ($inv_labels[$page] ?? 'Management');
-                    } elseif (in_array($page, ['canteen_raw_materials', 'canteen_purchase', 'canteen_menu', 'canteen_pos', 'canteen_due', 'canteen_stock_adjustment', 'canteen_reports', 'canteen_settings'], true)) {
+                    } elseif (in_array($page, ['canteen_raw_materials', 'canteen_purchase', 'canteen_supplier', 'canteen_menu', 'canteen_pos', 'canteen_due', 'canteen_stock_adjustment', 'canteen_reports', 'canteen_settings'], true)) {
                         $canteen_labels = [
-                            'canteen_raw_materials' => 'Raw Materials', 'canteen_purchase' => 'Purchase', 'canteen_menu' => 'Items',
+                            'canteen_raw_materials' => 'Raw Materials', 'canteen_purchase' => 'Purchase', 'canteen_supplier' => 'Supplier Payment', 'canteen_menu' => 'Items',
                             'canteen_pos' => 'Sales (POS)', 'canteen_due' => 'Due Collection',
                             'canteen_stock_adjustment' => 'Stock Adjustment', 'canteen_reports' => 'Reports', 'canteen_settings' => 'Settings',
                         ];
@@ -1111,6 +1111,7 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                 'inventory_settings' => 'inventory_settings.php',
                 'canteen_raw_materials'    => 'canteen_raw_materials.php',
                 'canteen_purchase'         => 'canteen_purchase.php',
+                'canteen_supplier'         => 'canteen_supplier.php',
                 'canteen_menu'             => 'canteen_menu.php',
                 'canteen_pos'              => 'canteen_pos.php',
                 'canteen_due'              => 'canteen_due.php',

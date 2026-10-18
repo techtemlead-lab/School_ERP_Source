@@ -28,38 +28,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($name === '') {
             $_SESSION['canteen_err'] = 'নাম আবশ্যক।';
         } else {
+            $unit_id = canteen_master_id_in_scope($pdo, 'canteen_units', $unit_id);
+            $reorder_level = max(0, $reorder_level); $unit_cost = max(0, $unit_cost);
             if ($id > 0) {
-                $pdo->prepare("UPDATE canteen_raw_materials SET name=?, unit_id=?, reorder_level=?, unit_cost=?, status=? WHERE id=?")
-                    ->execute([$name, $unit_id, $reorder_level, $unit_cost, $status, $id]);
-                sec_log_activity($pdo, 'Canteen', 'Update', "কাঁচামালের তথ্য আপডেট হয়েছে: {$name}");
-                $_SESSION['canteen_msg'] = 'কাঁচামালের তথ্য আপডেট হয়েছে।';
+                if (!canteen_scoped_row($pdo, 'canteen_raw_materials', $id, 'id')) {
+                    $_SESSION['canteen_err'] = 'কাঁচামাল পাওয়া যায়নি (অথবা অন্য branch-এর)।';
+                } else {
+                    $pdo->prepare("UPDATE canteen_raw_materials SET name=?, unit_id=?, reorder_level=?, unit_cost=?, status=? WHERE id=?")
+                        ->execute([$name, $unit_id, $reorder_level, $unit_cost, $status, $id]);
+                    sec_log_activity($pdo, 'Canteen', 'Update', "কাঁচামালের তথ্য আপডেট হয়েছে: {$name}");
+                    $_SESSION['canteen_msg'] = 'কাঁচামালের তথ্য আপডেট হয়েছে।';
+                }
             } else {
                 $opening_stock = max(0, (float) ($_POST['opening_stock'] ?? 0));
                 $pdo->prepare("INSERT INTO canteen_raw_materials (name, unit_id, current_stock, reorder_level, unit_cost, status, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
                     ->execute([$name, $unit_id, $opening_stock, $reorder_level, $unit_cost, $status, branch_id_for_insert()]);
                 sec_log_activity($pdo, 'Canteen', 'Create', "নতুন কাঁচামাল যোগ করা হয়েছে: {$name}");
+                $new_mat_id = (int) $pdo->lastInsertId();
+                if ($opening_stock > 0) {
+                    $pdo->prepare("INSERT INTO canteen_stock_adjustments (raw_material_id, adj_type, qty, reason, branch_id) VALUES (?, 'opening', ?, 'Opening Stock', ?)")
+                        ->execute([$new_mat_id, $opening_stock, branch_id_for_insert()]);
+                }
                 $_SESSION['canteen_msg'] = 'নতুন কাঁচামাল যোগ করা হয়েছে।';
             }
         }
     } elseif (isset($_POST['delete_material'])) {
         $id = (int) ($_POST['id'] ?? 0);
-        // Recipe-তে ব্যবহৃত থাকলে ডিলিট আটকানো হচ্ছে, নাহলে পুরনো Menu Item-এর recipe ভেঙে যাবে
-        $inUse = $pdo->prepare("SELECT COUNT(*) FROM canteen_recipe_items WHERE raw_material_id = ?");
-        $inUse->execute([$id]);
-        if ((int) $inUse->fetchColumn() > 0) {
-            $_SESSION['canteen_err'] = 'এই কাঁচামাল কোনো Menu Item-এর Recipe-তে ব্যবহৃত হচ্ছে, তাই ডিলিট করা যাবে না — আগে Recipe থেকে সরান।';
+        $mat = canteen_scoped_row($pdo, 'canteen_raw_materials', $id, 'id, name');
+        if (!$mat) {
+            $_SESSION['canteen_err'] = 'কাঁচামাল পাওয়া যায়নি (অথবা অন্য branch-এর)।';
         } else {
-            $del_mat_stmt = $pdo->prepare("SELECT name FROM canteen_raw_materials WHERE id = ?");
-            $del_mat_stmt->execute([$id]);
-            $del_mat_name = $del_mat_stmt->fetchColumn();
-            $pdo->prepare("DELETE FROM canteen_raw_materials WHERE id = ?")->execute([$id]);
-            sec_log_activity($pdo, 'Canteen', 'Delete', "কাঁচামাল মুছে ফেলা হয়েছে: " . ($del_mat_name ?: "#$id"));
-            $_SESSION['canteen_msg'] = 'কাঁচামাল মুছে ফেলা হয়েছে।';
+            $inRecipe = $pdo->prepare("SELECT COUNT(*) FROM canteen_recipe_items WHERE raw_material_id = ?");
+            $inRecipe->execute([$id]);
+            if ((int) $inRecipe->fetchColumn() > 0) {
+                // Recipe-তে ব্যবহৃত — ডিলিট আটকানো, নাহলে Menu Item-এর recipe ভেঙে যাবে
+                $_SESSION['canteen_err'] = 'এই কাঁচামাল কোনো Menu Item-এর Recipe-তে ব্যবহৃত হচ্ছে, তাই ডিলিট করা যাবে না — আগে Recipe থেকে সরান।';
+            } else {
+                $hist = 0;
+                foreach (['canteen_purchase_items', 'canteen_stock_adjustments'] as $t) {
+                    $c = $pdo->prepare("SELECT COUNT(*) FROM `$t` WHERE raw_material_id = ?");
+                    $c->execute([$id]);
+                    $hist += (int) $c->fetchColumn();
+                }
+                if ($hist > 0) {
+                    // Purchase/Adjustment হিস্ট্রি আছে — হিসাব ঠিক রাখতে ডিলিট না করে Inactive
+                    $pdo->prepare("UPDATE canteen_raw_materials SET status='Inactive' WHERE id=?")->execute([$id]);
+                    sec_log_activity($pdo, 'Canteen', 'Update', "কাঁচামালের হিস্ট্রি আছে, তাই Inactive করা হয়েছে: {$mat['name']}");
+                    $_SESSION['canteen_msg'] = 'এই কাঁচামালের লেনদেনের হিস্ট্রি আছে, তাই মুছে না ফেলে Inactive করা হয়েছে।';
+                } else {
+                    $pdo->prepare("DELETE FROM canteen_raw_materials WHERE id = ?")->execute([$id]);
+                    sec_log_activity($pdo, 'Canteen', 'Delete', "কাঁচামাল মুছে ফেলা হয়েছে: {$mat['name']}");
+                    $_SESSION['canteen_msg'] = 'কাঁচামাল মুছে ফেলা হয়েছে।';
+                }
+            }
         }
     } elseif (isset($_POST['save_unit'])) {
         $uname = trim($_POST['unit_name'] ?? '');
         if ($uname !== '') {
-            $pdo->prepare("INSERT INTO canteen_units (name) VALUES (?)")->execute([$uname]);
+            $pdo->prepare("INSERT INTO canteen_units (name, branch_id) VALUES (?, ?)")->execute([$uname, branch_id_for_insert()]);
             sec_log_activity($pdo, 'Canteen', 'Create', "নতুন Canteen Unit যোগ করা হয়েছে: {$uname}");
             $_SESSION['canteen_msg'] = 'নতুন Unit যোগ করা হয়েছে।';
         }
@@ -69,7 +95,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit();
 }
 
-$units     = $pdo->query("SELECT * FROM canteen_units ORDER BY name ASC")->fetchAll();
+$un_w = []; $un_p = []; canteen_branch_or_shared($un_w, $un_p);
+$un_st = $pdo->prepare("SELECT * FROM canteen_units" . ($un_w ? ' WHERE ' . implode(' AND ', $un_w) : '') . " ORDER BY name ASC");
+$un_st->execute($un_p);
+$units     = $un_st->fetchAll();
 $crm_where = []; $crm_params = [];
 branch_apply_filter($crm_where, $crm_params, 'm.branch_id');
 $crm_where_sql = $crm_where ? (' WHERE ' . implode(' AND ', $crm_where)) : '';
@@ -81,9 +110,7 @@ $materials = $crm_stmt->fetchAll();
 
 $edit_material = null;
 if ($edit_id > 0) {
-    $stmt = $pdo->prepare("SELECT * FROM canteen_raw_materials WHERE id = ?");
-    $stmt->execute([$edit_id]);
-    $edit_material = $stmt->fetch();
+    $edit_material = canteen_scoped_row($pdo, 'canteen_raw_materials', $edit_id) ?: null;
 }
 $form = $edit_material ?: ['id' => 0, 'name' => '', 'unit_id' => '', 'current_stock' => 0, 'reorder_level' => 0, 'unit_cost' => 0, 'status' => 'Active'];
 $show_form = $edit_material || $add_mode;

@@ -8,12 +8,24 @@ if (!isset($_SESSION['admin_logged'])) {
     die('আপনি লগইন করা নেই। প্রথমে লগইন করুন।');
 }
 
+require_once __DIR__ . '/../config/permissions.php';
+require_once __DIR__ . '/../config/branch_scope.php';
+// শুধু Super Admin / Admin / Canteen Staff, এবং Canteen পেজের অনুমতি থাকলে
+$can_print = !empty($_SESSION['is_super_admin']) || in_array($_SESSION['user_role'] ?? '', ['Admin', 'Canteen Staff'], true);
+if (!$can_print || (!perm_page_allowed($pdo, 'canteen_pos') && !perm_page_allowed($pdo, 'canteen_due'))) {
+    http_response_code(403);
+    die('এই Invoice দেখার অনুমতি আপনার নেই।');
+}
+
 function ipv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 
 $sale_id = (int) ($_GET['id'] ?? 0);
 
-$stmt = $pdo->prepare("SELECT * FROM canteen_sales WHERE id = ?");
-$stmt->execute([$sale_id]);
+// নিজের branch-এর Invoice-ই শুধু (All Branch মোডে ফিল্টার নেই)
+$pr_where = ['id = ?']; $pr_params = [$sale_id];
+branch_apply_filter($pr_where, $pr_params);
+$stmt = $pdo->prepare("SELECT * FROM canteen_sales WHERE " . implode(' AND ', $pr_where));
+$stmt->execute($pr_params);
 $sale = $stmt->fetch();
 
 if (!$sale) {

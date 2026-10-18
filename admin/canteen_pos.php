@@ -3,9 +3,7 @@
 // অ্যাক্সেস: Super Admin/Admin + 'Canteen Staff' role — সবাই এই পেজে বিক্রি করতে পারবে
 require_once __DIR__ . '/canteen_common.php';
 
-$is_super_admin = $_SESSION['is_super_admin'] ?? true;
-$user_role      = $_SESSION['user_role'] ?? '';
-if (!$is_super_admin && !in_array($user_role, ['Admin', 'Canteen Staff'], true)) {
+if (!canteen_can_sell()) {
     $_SESSION['canteen_err'] = 'ক্যানটিন POS ব্যবহারের অনুমতি নেই।';
     header('Location: index.php?page=dashboard');
     exit();
@@ -22,69 +20,91 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $settings = canteen_get_settings($pdo);
 
         // ব্যক্তি সিলেক্ট করা থাকলেই buyer_type student/employee হবে, নাহলে walkin
+        // নাম/কোড সবসময় DB থেকে নেওয়া হয় (ফর্মের hidden ফিল্ড বিশ্বাস করা হয় না) এবং শুধু নিজের branch-এর ব্যক্তি গ্রহণযোগ্য
         $student_pk    = (int) ($_POST['student_pk'] ?? 0) ?: null;
-        $student_code  = trim($_POST['student_code'] ?? '') ?: null;
         $employee_pk   = (int) ($_POST['employee_pk'] ?? 0) ?: null;
-        $employee_code = trim($_POST['employee_code'] ?? '') ?: null;
-        $buyer_display_name = trim($_POST['buyer_display_name'] ?? '');
-        $walkin_name_input   = trim($_POST['walkin_name'] ?? '');
+        $walkin_name_input = trim($_POST['walkin_name'] ?? '');
+        $student_code = $employee_code = null;
+        $person_err = '';
 
         if ($student_pk) {
-            $buyer_type = 'student';
-            $customer_name = $buyer_display_name ?: 'Student';
+            $p = canteen_scoped_row($pdo, 'students', $student_pk, 'id, name_en, student_id');
+            if (!$p) { $person_err = 'Student পাওয়া যায়নি (অথবা অন্য branch-এর)।'; }
+            else { $buyer_type = 'student'; $customer_name = $p['name_en']; $student_code = $p['student_id']; $employee_pk = null; }
         } elseif ($employee_pk) {
-            $buyer_type = 'employee';
-            $customer_name = $buyer_display_name ?: 'Employee';
+            $p = canteen_scoped_row($pdo, 'employees', $employee_pk, 'id, name, employee_id');
+            if (!$p) { $person_err = 'Teacher/Staff পাওয়া যায়নি (অথবা অন্য branch-এর)।'; }
+            else { $buyer_type = 'employee'; $customer_name = $p['name']; $employee_code = $p['employee_id']; }
         } else {
             $buyer_type = 'walkin';
-            $student_pk = $student_code = $employee_pk = $employee_code = null;
             $customer_name = $walkin_name_input !== '' ? $walkin_name_input : 'Walk-in Customer';
         }
 
         $overall_discount = max(0, (float) ($_POST['discount_amount'] ?? 0));
         $paid_amount = (float) ($_POST['paid_amount'] ?? 0);
 
-        $item_ids   = $_POST['s_item_id'] ?? [];
-        $qtys       = $_POST['s_qty'] ?? [];
-        $discounts  = $_POST['s_discount'] ?? [];
+        $want = canteen_merge_lines($_POST['s_item_id'] ?? [], $_POST['s_qty'] ?? [], $_POST['s_discount'] ?? []);
 
-        $lines = [];
-        $subtotal = 0.0;
-        foreach ($item_ids as $i => $iid) {
-            $iid = (int) $iid;
-            $qty = (int) ($qtys[$i] ?? 0);
-            if ($iid <= 0 || $qty <= 0) { continue; }
-
-            $itemStmt = $pdo->prepare("SELECT name, price FROM canteen_menu_items WHERE id = ?");
-            $itemStmt->execute([$iid]);
-            $itemRow = $itemStmt->fetch();
-            if (!$itemRow) { continue; }
-
-            $rate = (float) $itemRow['price'];
-            $line_subtotal = $rate * $qty;
-            $line_discount = min(max(0, (float) ($discounts[$i] ?? 0)), $line_subtotal);
-            $amount = $line_subtotal - $line_discount;
-
-            $lines[] = ['item_id' => $iid, 'name' => $itemRow['name'], 'qty' => $qty, 'rate' => $rate, 'amount' => $amount];
-            $subtotal += $line_subtotal;
-        }
-
-        $total = array_sum(array_column($lines, 'amount'));
-        $overall_discount = min($overall_discount, $total);
-        $grand_total = $total - $overall_discount;
-        $due = max(0, $grand_total - $paid_amount);
-
-        if (!$lines) {
+        if ($person_err !== '') {
+            $err = $person_err;
+        } elseif (!$want) {
             $err = 'কমপক্ষে একটা আইটেম যোগ করুন!';
-        } elseif ($buyer_type === 'walkin' && $due > 0) {
-            $err = 'বাকি (Due) রেখে বিক্রি করতে হলে Student বা Teacher নির্বাচন করা আবশ্যক — Walk-in Customer-এর জন্য সম্পূর্ণ টাকা নিতে হবে।';
-        } elseif (!$settings['allow_due_sale'] && $paid_amount < $grand_total) {
-            $err = 'Due Sale বন্ধ আছে — সম্পূর্ণ টাকা পরিশোধ করেই বিক্রি সম্পন্ন করতে হবে।';
+        } elseif ($paid_amount < 0) {
+            $err = 'জমার পরিমাণ ঋণাত্মক হতে পারে না।';
         } else {
-            $invoice_no = 'CNT-' . date('Ymd') . '-' . mt_rand(1000, 9999);
-
+            $invoice_no = null;
             $pdo->beginTransaction();
             try {
+                // ১) মেনু আইটেম (নিজের branch + Active) — দাম DB থেকে
+                $lines = [];
+                foreach ($want as $iid => $w) {
+                    $itemRow = canteen_scoped_row($pdo, 'canteen_menu_items', $iid, 'name, price, status');
+                    if (!$itemRow) { throw new RuntimeException('আইটেম পাওয়া যায়নি (অথবা অন্য branch-এর)।'); }
+                    if (($itemRow['status'] ?? 'Active') !== 'Active') { throw new RuntimeException($itemRow['name'] . ' Inactive — বিক্রি করা যাবে না।'); }
+                    $rate = (float) $itemRow['price'];
+                    $line_subtotal = $rate * $w['qty'];
+                    $line_discount = min($w['disc'], $line_subtotal);
+                    $lines[] = ['item_id' => $iid, 'name' => $itemRow['name'], 'qty' => $w['qty'], 'rate' => $rate, 'amount' => $line_subtotal - $line_discount];
+                }
+
+                $total = array_sum(array_column($lines, 'amount'));
+                $overall_discount = min($overall_discount, $total);
+                $grand_total = $total - $overall_discount;
+                if ($paid_amount > $grand_total + 0.001) {
+                    throw new RuntimeException('জমার পরিমাণ মোট বিলের চেয়ে বেশি হতে পারবে না (মোট: ৳' . number_format($grand_total, 2) . ')।');
+                }
+                $due = max(0, $grand_total - $paid_amount);
+                if ($buyer_type === 'walkin' && $due > 0) {
+                    throw new RuntimeException('বাকি (Due) রেখে বিক্রি করতে হলে Student বা Teacher নির্বাচন করা আবশ্যক — Walk-in Customer-এর জন্য সম্পূর্ণ টাকা নিতে হবে।');
+                }
+                if (!$settings['allow_due_sale'] && $paid_amount < $grand_total) {
+                    throw new RuntimeException('Due Sale বন্ধ আছে — সম্পূর্ণ টাকা পরিশোধ করেই বিক্রি সম্পন্ন করতে হবে।');
+                }
+
+                // ২) Recipe থেকে মোট কাঁচামাল চাহিদা (একাধিক আইটেম একই কাঁচামাল নিলে যোগ হবে), তারপর লক
+                $recipeStmt = $pdo->prepare("SELECT raw_material_id, qty_required FROM canteen_recipe_items WHERE menu_item_id = ?");
+                $need = [];
+                foreach ($lines as $ln) {
+                    $recipeStmt->execute([$ln['item_id']]);
+                    foreach ($recipeStmt->fetchAll() as $rec) {
+                        $need[(int) $rec['raw_material_id']] = ($need[(int) $rec['raw_material_id']] ?? 0) + (float) $rec['qty_required'] * $ln['qty'];
+                    }
+                }
+                ksort($need); // সবসময় একই ক্রমে লক — deadlock এড়াতে
+                $lockMat = $pdo->prepare("SELECT id, name, current_stock, reorder_level FROM canteen_raw_materials WHERE id = ? FOR UPDATE");
+                $mats = [];
+                foreach ($need as $mid => $qty_need) {
+                    $lockMat->execute([$mid]);
+                    $m = $lockMat->fetch();
+                    if (!$m) { continue; }
+                    if (!empty($settings['block_on_low_stock']) && (float) $m['current_stock'] < $qty_need - 0.0001) {
+                        throw new RuntimeException($m['name'] . ' এর স্টক যথেষ্ট নেই (আছে: ' . rtrim(rtrim(number_format((float) $m['current_stock'], 3, '.', ''), '0'), '.') . ', লাগবে: ' . rtrim(rtrim(number_format($qty_need, 3, '.', ''), '0'), '.') . ')।');
+                    }
+                    $mats[$mid] = $m;
+                }
+
+                // ৩) সেভ
+                $invoice_no = canteen_unique_no($pdo, 'CNT', 'canteen_sales', 'invoice_no');
                 $pdo->prepare(
                     "INSERT INTO canteen_sales (invoice_no, buyer_type, student_pk, student_code, employee_pk, employee_code, customer_name, total_amount, discount_amount, paid_amount, due_amount, branch_id)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -92,26 +112,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $sale_id = (int) $pdo->lastInsertId();
 
                 $insItem = $pdo->prepare("INSERT INTO canteen_sale_items (sale_id, menu_item_id, qty, rate, amount) VALUES (?, ?, ?, ?, ?)");
-                $recipeStmt = $pdo->prepare("SELECT raw_material_id, qty_required FROM canteen_recipe_items WHERE menu_item_id = ?");
-                $deductStmt = $pdo->prepare("UPDATE canteen_raw_materials SET current_stock = current_stock - ? WHERE id = ?");
-
-                $low_stock_warnings = [];
                 foreach ($lines as $ln) {
                     $insItem->execute([$sale_id, $ln['item_id'], $ln['qty'], $ln['rate'], $ln['amount']]);
-
-                    // Recipe অনুযায়ী কাঁচামাল স্টক থেকে বিয়োগ (হার্ড ব্লক না — সতর্ক করা হবে মাত্র)
-                    $recipeStmt->execute([$ln['item_id']]);
-                    foreach ($recipeStmt->fetchAll() as $rec) {
-                        $need = (float) $rec['qty_required'] * $ln['qty'];
-                        $deductStmt->execute([$need, $rec['raw_material_id']]);
-
-                        $chk = $pdo->prepare("SELECT name, current_stock, reorder_level FROM canteen_raw_materials WHERE id = ?");
-                        $chk->execute([$rec['raw_material_id']]);
-                        $matRow = $chk->fetch();
-                        if ($matRow && (float) $matRow['current_stock'] <= (float) $matRow['reorder_level']) {
-                            $low_stock_warnings[] = $matRow['name'];
-                        }
+                }
+                $deductStmt = $pdo->prepare("UPDATE canteen_raw_materials SET current_stock = current_stock - ? WHERE id = ?");
+                $low_stock_warnings = [];
+                foreach ($mats as $mid => $m) {
+                    $deductStmt->execute([$need[$mid], $mid]);
+                    $left = (float) $m['current_stock'] - $need[$mid];
+                    if ($left <= (float) $m['reorder_level']) {
+                        $low_stock_warnings[] = $m['name'] . ($left < 0 ? ' (মাইনাস!)' : '');
                     }
+                }
+                if ($paid_amount > 0) {
+                    $pdo->prepare("INSERT INTO canteen_sale_payments (sale_id, amount, note) VALUES (?, ?, 'Initial')")->execute([$sale_id, $paid_amount]);
                 }
 
                 $pdo->commit();
@@ -125,8 +139,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['canteen_msg'] = $ok_msg;
                 header("Location: index.php?page=canteen_pos&last_invoice=$sale_id");
                 exit();
+            } catch (RuntimeException $e) {
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
+                $err = $e->getMessage();
             } catch (Exception $e) {
-                $pdo->rollBack();
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
                 error_log('Canteen sale failed: ' . $e->getMessage());
                 $err = 'Sale ব্যর্থ হয়েছে, আবার চেষ্টা করুন।';
             }
@@ -139,16 +156,18 @@ unset($_SESSION['canteen_msg']);
 
 $last_invoice = null;
 if (!empty($_GET['last_invoice'])) {
-    $li = $pdo->prepare("SELECT * FROM canteen_sales WHERE id = ?");
-    $li->execute([(int) $_GET['last_invoice']]);
-    $last_invoice = $li->fetch() ?: null;
+    $last_invoice = canteen_scoped_row($pdo, 'canteen_sales', (int) $_GET['last_invoice']) ?: null;
 }
 
 $settings = canteen_get_settings($pdo);
 $cpos_where = []; $cpos_params = [];
 branch_apply_filter($cpos_where, $cpos_params);
 $cpos_where_sql = $cpos_where ? (' WHERE ' . implode(' AND ', $cpos_where)) : '';
-$cpos_stmt = $pdo->prepare("SELECT * FROM canteen_sales$cpos_where_sql ORDER BY id DESC LIMIT 100");
+[$hp_page, $hp_per, $hp_off] = canteen_page_params(50);
+$cnt = $pdo->prepare("SELECT COUNT(*) FROM canteen_sales$cpos_where_sql");
+$cnt->execute($cpos_params);
+$sales_total = (int) $cnt->fetchColumn();
+$cpos_stmt = $pdo->prepare("SELECT * FROM canteen_sales$cpos_where_sql ORDER BY id DESC LIMIT $hp_per OFFSET $hp_off");
 $cpos_stmt->execute($cpos_params);
 $sales = $cpos_stmt->fetchAll();
 ?>
@@ -245,9 +264,19 @@ $sales = $cpos_stmt->fetchAll();
                 </tbody>
             </table>
             </div>
+            <?php echo canteen_pager_html($sales_total, $hp_page, $hp_per); ?>
         </div>
     </div>
 </div>
+<script>
+// পেজিনেশন লিংকে (?pg=) এলে History ট্যাব নিজে খুলে যাবে
+document.addEventListener('DOMContentLoaded', function () {
+    if (new URLSearchParams(location.search).has('pg')) {
+        const btn = document.querySelector('#posTabGroup .inv-tab-box:nth-child(2)');
+        if (btn) { btn.click(); }
+    }
+});
+</script>
 
 <style>
 .inv-tab-boxes { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }

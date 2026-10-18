@@ -22,10 +22,10 @@ $daily_rows = $daily->fetchAll();
 // আইটেম-ভিত্তিক বিক্রি
 $cr_bf_sql_s = $cr_bf_val !== null ? ' AND (s.branch_id = ?)' : '';
 $item_wise = $pdo->prepare(
-    "SELECT mi.name, SUM(si.qty) AS total_qty, SUM(si.amount) AS total_amount
+    "SELECT COALESCE(mi.name, '(মুছে ফেলা আইটেম)') AS name, SUM(si.qty) AS total_qty, SUM(si.amount) AS total_amount
      FROM canteen_sale_items si
      JOIN canteen_sales s ON s.id = si.sale_id
-     JOIN canteen_menu_items mi ON mi.id = si.menu_item_id
+     LEFT JOIN canteen_menu_items mi ON mi.id = si.menu_item_id
      WHERE DATE(s.created_at) BETWEEN ? AND ?$cr_bf_sql_s
      GROUP BY si.menu_item_id ORDER BY total_amount DESC"
 );
@@ -45,6 +45,25 @@ $low_stock = $low_stock_stmt->fetchAll();
 $due_stmt = $pdo->prepare("SELECT COUNT(*) AS cnt, SUM(due_amount) AS total FROM canteen_sales WHERE due_amount > 0$cr_bf_sql");
 $due_stmt->execute($cr_bf_val !== null ? [$cr_bf_val] : []);
 $due_summary = $due_stmt->fetch();
+
+// অনুমানিক কাঁচামাল খরচ = বিক্রিত qty × Recipe qty × কাঁচামালের unit_cost (Recipe না থাকলে ০ ধরা হয়)
+$cost_stmt = $pdo->prepare(
+    "SELECT COALESCE(SUM(si.qty * ri.qty_required * rm.unit_cost), 0)
+     FROM canteen_sale_items si
+     JOIN canteen_sales s ON s.id = si.sale_id
+     JOIN canteen_recipe_items ri ON ri.menu_item_id = si.menu_item_id
+     JOIN canteen_raw_materials rm ON rm.id = ri.raw_material_id
+     WHERE DATE(s.created_at) BETWEEN ? AND ?$cr_bf_sql_s"
+);
+$cost_stmt->execute($cr_bf_val !== null ? [$f_date_from, $f_date_to, $cr_bf_val] : [$f_date_from, $f_date_to]);
+$period_material_cost = (float) $cost_stmt->fetchColumn();
+
+$pur_stmt = $pdo->prepare("SELECT COALESCE(SUM(total_amount),0) AS total, COALESCE(SUM(due_amount),0) AS due FROM canteen_purchases WHERE DATE(created_at) BETWEEN ? AND ?$cr_bf_sql");
+$pur_stmt->execute($cr_bf_val !== null ? [$f_date_from, $f_date_to, $cr_bf_val] : [$f_date_from, $f_date_to]);
+$pur_summary = $pur_stmt->fetch();
+$sd_stmt = $pdo->prepare("SELECT COALESCE(SUM(due_amount),0) FROM canteen_purchases" . ($cr_bf_val !== null ? ' WHERE (branch_id = ?)' : ''));
+$sd_stmt->execute($cr_bf_val !== null ? [$cr_bf_val] : []);
+$supplier_due_all = (float) $sd_stmt->fetchColumn();
 
 $period_total = array_sum(array_column($daily_rows, 'total_amount'));
 $period_paid  = array_sum(array_column($daily_rows, 'total_paid'));
@@ -66,6 +85,13 @@ $period_due   = array_sum(array_column($daily_rows, 'total_due'));
         <div class="col-md-3"><div class="card p-3 text-center"><div class="small text-muted">মোট আদায়</div><div class="fs-4 fw-bold text-success">৳<?php echo number_format($period_paid, 2); ?></div></div></div>
         <div class="col-md-3"><div class="card p-3 text-center"><div class="small text-muted">এই সময়ের বাকি</div><div class="fs-4 fw-bold text-danger">৳<?php echo number_format($period_due, 2); ?></div></div></div>
         <div class="col-md-3"><div class="card p-3 text-center"><div class="small text-muted">সর্বমোট বকেয়া (সব সময়)</div><div class="fs-4 fw-bold text-danger">৳<?php echo number_format((float) ($due_summary['total'] ?? 0), 2); ?> (<?php echo (int) ($due_summary['cnt'] ?? 0); ?>টা)</div></div></div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-3"><div class="card p-3 text-center"><div class="small text-muted">কাঁচামাল ক্রয় (এই সময়ে)</div><div class="fs-4 fw-bold">৳<?php echo number_format((float) $pur_summary['total'], 2); ?></div></div></div>
+        <div class="col-md-3"><div class="card p-3 text-center"><div class="small text-muted">Supplier-এর কাছে বাকি (সব সময়)</div><div class="fs-4 fw-bold text-danger">৳<?php echo number_format($supplier_due_all, 2); ?></div></div></div>
+        <div class="col-md-3"><div class="card p-3 text-center"><div class="small text-muted">অনুমানিক কাঁচামাল খরচ</div><div class="fs-4 fw-bold">৳<?php echo number_format($period_material_cost, 2); ?></div></div></div>
+        <div class="col-md-3"><div class="card p-3 text-center"><div class="small text-muted">অনুমানিক লাভ (বিক্রি − খরচ)</div><div class="fs-4 fw-bold text-success">৳<?php echo number_format($period_total - $period_material_cost, 2); ?></div></div></div>
     </div>
 
     <h6 class="fw-bold mb-2">দৈনিক বিক্রি</h6>

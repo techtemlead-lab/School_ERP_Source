@@ -171,7 +171,8 @@ function canteen_get_settings(PDO $pdo): array
  */
 function canteen_can_manage(): bool
 {
-    $is_super_admin = $_SESSION['is_super_admin'] ?? true;
+    // fail-closed: session-এ key না থাকলে Super Admin ধরা হবে না (লগইনে দুই পথেই key সেট হয়)
+    $is_super_admin = !empty($_SESSION['is_super_admin']);
     $user_role      = $_SESSION['user_role'] ?? '';
     return $is_super_admin || $user_role === 'Admin';
 }
@@ -185,4 +186,106 @@ function canteen_require_manage(): void
     }
 }
 
+/** POS / Due / Print / AJAX — Super Admin, Admin ও Canteen Staff */
+function canteen_can_sell(): bool
+{
+    return !empty($_SESSION['is_super_admin']) || in_array($_SESSION['user_role'] ?? '', ['Admin', 'Canteen Staff'], true);
+}
+
 function cv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
+
+
+// ---------- নতুন কলাম / টেবিল ----------
+canteen_ensure_column($pdo, 'canteen_settings', 'block_on_low_stock', "TINYINT(1) NOT NULL DEFAULT 0"); // ১ হলে কাঁচামাল কম থাকলে sale আটকাবে
+canteen_ensure_column($pdo, 'canteen_categories',    'branch_id', 'INT NULL');
+canteen_ensure_column($pdo, 'canteen_subcategories', 'branch_id', 'INT NULL');
+canteen_ensure_column($pdo, 'canteen_units',         'branch_id', 'INT NULL');
+canteen_ensure_column($pdo, 'canteen_suppliers',     'branch_id', 'INT NULL');
+canteen_ensure_column($pdo, 'canteen_sale_payments',     'note', 'VARCHAR(30) NULL');
+canteen_ensure_column($pdo, 'canteen_supplier_payments', 'note', 'VARCHAR(30) NULL');
+canteen_ensure_column($pdo, 'canteen_raw_materials', 'status', "VARCHAR(20) NOT NULL DEFAULT 'Active'");
+
+/** Branch scope মেনে রো লক করে (transaction এর ভেতরে) — অন্য branch-এর হলে false */
+function canteen_lock_row(PDO $pdo, string $table, int $id, string $cols = '*')
+{
+    $where = ['id = ?']; $params = [$id];
+    branch_apply_filter($where, $params);
+    $st = $pdo->prepare("SELECT $cols FROM `$table` WHERE " . implode(' AND ', $where) . " FOR UPDATE");
+    $st->execute($params);
+    return $st->fetch();
+}
+
+/** Branch scope মেনে রো আনে (লক ছাড়া) */
+function canteen_scoped_row(PDO $pdo, string $table, int $id, string $cols = '*')
+{
+    $where = ['id = ?']; $params = [$id];
+    branch_apply_filter($where, $params);
+    $st = $pdo->prepare("SELECT $cols FROM `$table` WHERE " . implode(' AND ', $where));
+    $st->execute($params);
+    return $st->fetch();
+}
+
+/** ইউনিক ডকুমেন্ট নম্বর */
+function canteen_unique_no(PDO $pdo, string $prefix, string $table, string $column): string
+{
+    $chk = $pdo->prepare("SELECT 1 FROM `$table` WHERE `$column` = ? LIMIT 1");
+    for ($try = 0; $try < 30; $try++) {
+        $no = $prefix . '-' . date('Ymd') . '-' . random_int(100000, 999999);
+        $chk->execute([$no]);
+        if (!$chk->fetchColumn()) { return $no; }
+    }
+    return $prefix . '-' . date('Ymd') . '-' . bin2hex(random_bytes(4));
+}
+
+/** master তালিকা (category/unit/supplier): বর্তমান branch অথবা NULL (শেয়ার্ড/পুরনো) */
+function canteen_branch_or_shared(array &$where, array &$params, string $column = 'branch_id'): void
+{
+    $bid = branch_current_id();
+    if ($bid === null) { return; }
+    $where[] = "($column = ? OR $column IS NULL)";
+    $params[] = $bid;
+}
+
+function canteen_master_id_in_scope(PDO $pdo, string $table, ?int $id): ?int
+{
+    if (!$id) { return null; }
+    $where = ['id = ?']; $params = [$id];
+    canteen_branch_or_shared($where, $params);
+    $st = $pdo->prepare("SELECT id FROM `$table` WHERE " . implode(' AND ', $where));
+    $st->execute($params);
+    return $st->fetchColumn() ? $id : null;
+}
+
+function canteen_page_params(int $per = 50): array
+{
+    $page = max(1, (int) ($_GET['pg'] ?? 1));
+    return [$page, $per, ($page - 1) * $per];
+}
+
+function canteen_pager_html(int $total, int $page, int $per): string
+{
+    $pages = (int) ceil($total / max(1, $per));
+    if ($pages <= 1) { return ''; }
+    $q = $_GET; unset($q['pg']);
+    $html = '<nav class="mt-2"><ul class="pagination pagination-sm mb-0 flex-wrap">';
+    for ($p = max(1, $page - 3); $p <= min($pages, $page + 3); $p++) {
+        $url = '?' . http_build_query($q + ['pg' => $p]);
+        $html .= '<li class="page-item' . ($p === $page ? ' active' : '') . '"><a class="page-link" href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '">' . $p . '</a></li>';
+    }
+    return $html . '</ul></nav><div class="small text-muted mt-1">মোট ' . $total . ' টি, পেজ ' . $page . '/' . $pages . '</div>';
+}
+
+/** একই Item একাধিক লাইনে থাকলে qty মিলিয়ে: [id => ['qty'=>..,'disc'=>..]] */
+function canteen_merge_lines(array $ids, array $qtys, array $discs = []): array
+{
+    $out = [];
+    foreach ($ids as $i => $iid) {
+        $iid = (int) $iid; $q = (int) ($qtys[$i] ?? 0);
+        if ($iid > 0 && $q > 0) {
+            if (!isset($out[$iid])) { $out[$iid] = ['qty' => 0, 'disc' => 0.0]; }
+            $out[$iid]['qty']  += $q;
+            $out[$iid]['disc'] += max(0, (float) ($discs[$i] ?? 0));
+        }
+    }
+    return $out;
+}
