@@ -21,21 +21,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $fee_override = trim($_POST['fee_override'] ?? '') !== '' ? (float) $_POST['fee_override'] : null;
         $remarks      = trim($_POST['remarks'] ?? '');
 
-        $check = $pdo->prepare("SELECT id FROM transport_staff_assign WHERE employee_id = ? AND status = 'Active'");
-        $check->execute([$employee_pk]);
-        $existing = $check->fetch();
+        try {
+            if ($fee_override !== null && $fee_override < 0) { throw new RuntimeException('Fee Override ঋণাত্মক হতে পারবে না।'); }
+            if (!$route_id || !$stop_id) { throw new RuntimeException('Route ও Stop নির্বাচন করুন।'); }
+            $pdo->beginTransaction();
+            $emp = tr_employee_scoped($pdo, $employee_pk, true);
+            if (!$emp) { throw new RuntimeException('স্টাফ খুঁজে পাওয়া যায়নি।'); }
+            if (($emp['status'] ?? 'Active') !== 'Active') { throw new RuntimeException('এই স্টাফ Active নন।'); }
+            $route_row = tr_scoped($pdo, 'transport_routes', $route_id);
+            if (!$route_row || $route_row['status'] !== 'Active') { throw new RuntimeException('রুটটি পাওয়া যায়নি অথবা Inactive।'); }
+            if (!in_array($route_row['route_category'], ['Staff', 'Mixed'], true)) { throw new RuntimeException('এটি শিক্ষার্থীদের রুট, স্টাফ যুক্ত করা যাবে না।'); }
+            $stop_chk = $pdo->prepare("SELECT id FROM transport_stops WHERE id = ? AND route_id = ?");
+            $stop_chk->execute([$stop_id, $route_id]);
+            if (!$stop_chk->fetch()) { throw new RuntimeException('নির্বাচিত স্টপেজ এই রুটের নয়।'); }
+            $check = $pdo->prepare("SELECT id FROM transport_staff_assign WHERE employee_id = ? AND status = 'Active'");
+            $check->execute([$employee_pk]);
+            if ($check->fetch()) { throw new RuntimeException('এই স্টাফ ইতিমধ্যে একটি রুটে সক্রিয় আছেন। আগে সেটি Unassign করুন।'); }
 
-        if (!$route_id || !$stop_id) {
-            $_SESSION['tsf_err'] = 'Route ও Stop নির্বাচন করুন।';
-        } elseif ($existing) {
-            $_SESSION['tsf_err'] = 'এই স্টাফ ইতিমধ্যে একটি রুটে সক্রিয় আছেন। আগে সেটি Unassign করুন।';
-        } else {
             $stmt = $pdo->prepare("INSERT INTO transport_staff_assign (employee_id, route_id, stop_id, fee_override, assigned_date, remarks) VALUES (?,?,?,?,CURDATE(),?)");
             $stmt->execute([$employee_pk, $route_id, $stop_id, $fee_override, $remarks]);
+            $pdo->commit();
             $_SESSION['tsf_msg'] = 'স্টাফকে ট্রান্সপোর্ট রুটে যুক্ত করা হয়েছে।';
-            $tsf_emp_name = $pdo->prepare("SELECT name FROM employees WHERE id = ?");
-            $tsf_emp_name->execute([$employee_pk]);
-            sec_log_activity($pdo, 'Transport', 'Create', "স্টাফকে ট্রান্সপোর্ট রুটে যুক্ত করা হয়েছে: " . ($tsf_emp_name->fetchColumn() ?: "#$employee_pk"));
+            sec_log_activity($pdo, 'Transport', 'Create', "স্টাফকে ট্রান্সপোর্ট রুটে যুক্ত করা হয়েছে: " . ($emp['name'] ?: "#$employee_pk"));
+        } catch (RuntimeException $e) {
+            if ($pdo->inTransaction()) { $pdo->rollBack(); }
+            $_SESSION['tsf_err'] = $e->getMessage();
         }
 
         header('Location: index.php?page=transport_assign_staff&employee_pk=' . $employee_pk);
@@ -43,9 +53,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (isset($_POST['unassign_staff'])) {
         $id = (int) ($_POST['id'] ?? 0);
         $employee_pk = (int) ($_POST['employee_pk'] ?? 0);
-        $pdo->prepare("UPDATE transport_staff_assign SET status='Inactive' WHERE id = ?")->execute([$id]);
-        $_SESSION['tsf_msg'] = 'স্টাফকে রুট থেকে সরিয়ে নেওয়া হয়েছে।';
-        sec_log_activity($pdo, 'Transport', 'Update', "স্টাফকে ট্রান্সপোর্ট রুট থেকে সরিয়ে নেওয়া হয়েছে (Assign #{$id})।");
+        $uw = ['tfa.id = ?', "tfa.status = 'Active'"]; $up = [$id];
+        branch_apply_filter($uw, $up, 'employees.branch_id');
+        $ust = $pdo->prepare("SELECT tfa.id, tfa.employee_id FROM transport_staff_assign tfa JOIN employees ON employees.id = tfa.employee_id WHERE " . implode(' AND ', $uw));
+        $ust->execute($up);
+        $urow = $ust->fetch();
+        if (!$urow) {
+            $_SESSION['tsf_err'] = 'অ্যাসাইনমেন্ট খুঁজে পাওয়া যায়নি।';
+        } else {
+            $employee_pk = (int) $urow['employee_id'];
+            $pdo->prepare("UPDATE transport_staff_assign SET status='Inactive' WHERE id = ?")->execute([$id]);
+            $_SESSION['tsf_msg'] = 'স্টাফকে রুট থেকে সরিয়ে নেওয়া হয়েছে।';
+            sec_log_activity($pdo, 'Transport', 'Update', "স্টাফকে ট্রান্সপোর্ট রুট থেকে সরিয়ে নেওয়া হয়েছে (Assign #{$id})।");
+        }
         header('Location: index.php?page=transport_assign_staff&employee_pk=' . $employee_pk);
         exit();
     }
@@ -67,6 +87,7 @@ if ($q !== '' || $f_type !== '') {
         $params[] = "%$q%"; $params[] = "%$q%"; $params[] = "%$q%";
     }
     if ($f_type !== '') { $where[] = 'e.type = ?'; $params[] = $f_type; }
+    branch_apply_filter($where, $params, 'e.branch_id');
 
     $sql = "SELECT e.id, e.employee_id, e.name, e.type, e.mobile, d.title AS designation_title,
                    (SELECT COUNT(*) FROM transport_staff_assign tfa WHERE tfa.employee_id = e.id AND tfa.status='Active') AS has_transport
@@ -88,6 +109,7 @@ if ($employee_pk > 0) {
     $stmt = $pdo->prepare("SELECT e.*, d.title AS designation_title FROM employees e LEFT JOIN designations d ON d.id = e.designation_id WHERE e.id = ?");
     $stmt->execute([$employee_pk]);
     $selected_employee = $stmt->fetch();
+    if ($selected_employee && !tr_employee_scoped($pdo, $employee_pk)) { $selected_employee = null; }
 
     $astmt = $pdo->prepare("SELECT tfa.*, tr.route_no, tr.route_name, tr.monthly_fee, ts.stop_name
                              FROM transport_staff_assign tfa
@@ -99,7 +121,11 @@ if ($employee_pk > 0) {
 }
 
 // Staff Route/Mixed — উভয় ধরনের রুটে স্টাফ এসাইন করা যাবে
-$routes = $pdo->query("SELECT id, route_no, route_name, monthly_fee, route_category FROM transport_routes WHERE status='Active' AND route_category IN ('Staff','Mixed') ORDER BY route_name ASC")->fetchAll();
+$__rw = ["status='Active'", "route_category IN ('Staff','Mixed')"]; $__rp = [];
+tr_branch_or_shared($__rw, $__rp);
+$__rs = $pdo->prepare("SELECT id, route_no, route_name, monthly_fee, route_category FROM transport_routes WHERE " . implode(' AND ', $__rw) . " ORDER BY route_name ASC");
+$__rs->execute($__rp);
+$routes = $__rs->fetchAll();
 ?>
 
 <div class="card-custom mb-3">
@@ -224,7 +250,11 @@ $routes = $pdo->query("SELECT id, route_no, route_name, monthly_fee, route_categ
 
 <script>
 const staffRouteStopsData = <?php
-    $stops_all = $pdo->query("SELECT id, route_id, stop_name FROM transport_stops ORDER BY stop_order ASC")->fetchAll();
+    $__sw = []; $__sp = [];
+    tr_branch_or_shared($__sw, $__sp, 'r.branch_id');
+    $__ss = $pdo->prepare("SELECT s.id, s.route_id, s.stop_name FROM transport_stops s JOIN transport_routes r ON r.id = s.route_id" . ($__sw ? ' WHERE ' . implode(' AND ', $__sw) : '') . " ORDER BY s.stop_order ASC");
+    $__ss->execute($__sp);
+    $stops_all = $__ss->fetchAll();
     $by_route = [];
     foreach ($stops_all as $st) { $by_route[$st['route_id']][] = ['id' => $st['id'], 'name' => $st['stop_name']]; }
     echo json_encode($by_route, JSON_UNESCAPED_UNICODE);

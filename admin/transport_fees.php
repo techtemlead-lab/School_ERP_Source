@@ -22,11 +22,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (isset($_POST['generate_invoices'])) {
         $month_year = trim($_POST['month_year'] ?? date('Y-m'));
+        if (!tr_valid_month($month_year)) {
+            $_SESSION['tf_err'] = 'মাসের ফরম্যাট সঠিক নয় (YYYY-MM)।';
+            header('Location: index.php?page=transport_fees&tab=generate');
+            exit();
+        }
 
-        $students = $pdo->query("SELECT tsa.student_id, tsa.route_id, tsa.fee_override, tr.monthly_fee
-                                  FROM transport_student_assign tsa
-                                  JOIN transport_routes tr ON tr.id = tsa.route_id
-                                  WHERE tsa.status = 'Active'")->fetchAll();
+        // শুধু বর্তমান branch-এর Active শিক্ষার্থী
+        $gw = ["tsa.status = 'Active'", "s.status = 'Active'"]; $gp = [];
+        branch_apply_filter($gw, $gp, 's.branch_id');
+        $gst = $pdo->prepare("SELECT tsa.student_id, tsa.route_id, tsa.fee_override, tr.monthly_fee
+                              FROM transport_student_assign tsa
+                              JOIN students s ON s.id = tsa.student_id
+                              JOIN transport_routes tr ON tr.id = tsa.route_id
+                              WHERE " . implode(' AND ', $gw));
+        $gst->execute($gp);
+        $students = $gst->fetchAll();
 
         $created = 0; $skipped = 0;
         $ins = $pdo->prepare("INSERT IGNORE INTO transport_fee_invoices (student_id, route_id, month_year, amount) VALUES (?,?,?,?)");
@@ -41,42 +52,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit();
     } elseif (isset($_POST['collect_payment'])) {
         $invoice_id     = (int) ($_POST['invoice_id'] ?? 0);
-        $pay_amount     = (float) ($_POST['pay_amount'] ?? 0);
+        $pay_amount     = round((float) ($_POST['pay_amount'] ?? 0), 2);
         $payment_method = trim($_POST['payment_method'] ?? 'Cash');
-        $trx_id         = trim($_POST['trx_id'] ?? '');
+        if (!in_array($payment_method, ['Cash', 'bKash', 'Nagad', 'Bank'], true)) { $payment_method = 'Cash'; }
+        $trx_id         = mb_substr(trim($_POST['trx_id'] ?? ''), 0, 100);
+        $ref_month      = tr_valid_month($_POST['month_year_ref'] ?? '') ? $_POST['month_year_ref'] : date('Y-m');
+        $sms_to = null; $sms_msg = '';
 
-        $inv_stmt = $pdo->prepare("SELECT tfi.*, s.name_en, s.name_bn, s.guardian_phone FROM transport_fee_invoices tfi JOIN students s ON s.id = tfi.student_id WHERE tfi.id = ?");
-        $inv_stmt->execute([$invoice_id]);
-        $inv = $inv_stmt->fetch();
+        try {
+            $pdo->beginTransaction();
+            // ইনভয়েস row লক (branch scope সহ) — একসাথে দুজন collect করলে টাকা হারাবে না
+            $cw = ['tfi.id = ?']; $cp = [$invoice_id];
+            branch_apply_filter($cw, $cp, 's.branch_id');
+            $inv_stmt = $pdo->prepare("SELECT tfi.*, s.name_en, s.guardian_phone FROM transport_fee_invoices tfi JOIN students s ON s.id = tfi.student_id WHERE " . implode(' AND ', $cw) . " FOR UPDATE");
+            $inv_stmt->execute($cp);
+            $inv = $inv_stmt->fetch();
 
-        if (!$inv) {
-            $_SESSION['tf_err'] = 'ইনভয়েস খুঁজে পাওয়া যায়নি।';
-        } elseif ($pay_amount <= 0) {
-            $_SESSION['tf_err'] = 'সঠিক পরিমাণ দিন।';
-        } else {
-            $new_paid = (float) $inv['paid_amount'] + $pay_amount;
-            $new_paid = min($new_paid, (float) $inv['amount']); // amount এর বেশি overpay ঠেকানো
-            $new_status = $new_paid >= (float) $inv['amount'] ? 'Paid' : 'Partial';
+            if (!$inv) { throw new RuntimeException('ইনভয়েস খুঁজে পাওয়া যায়নি।'); }
+            if ($pay_amount <= 0) { throw new RuntimeException('সঠিক পরিমাণ দিন।'); }
+            $due_now = round((float) $inv['amount'] - (float) $inv['paid_amount'], 2);
+            if ($due_now <= 0) { throw new RuntimeException('এই ইনভয়েস ইতিমধ্যে পরিশোধিত।'); }
+            if ($pay_amount > $due_now + 0.001) { throw new RuntimeException('জমার পরিমাণ বাকির (৳' . number_format($due_now, 2) . ') চেয়ে বেশি হতে পারবে না।'); }
 
+            $new_paid = round((float) $inv['paid_amount'] + $pay_amount, 2);
+            $new_status = $new_paid >= (float) $inv['amount'] - 0.001 ? 'Paid' : 'Partial';
             $pdo->prepare("UPDATE transport_fee_invoices SET paid_amount=?, status=?, payment_date=CURDATE(), payment_method=?, trx_id=? WHERE id=?")
                 ->execute([$new_paid, $new_status, $payment_method, $trx_id, $invoice_id]);
+            $pdo->prepare("INSERT INTO transport_fee_payments (invoice_id, amount, payment_method, trx_id, collected_by) VALUES (?,?,?,?,?)")
+                ->execute([$invoice_id, $pay_amount, $payment_method, $trx_id ?: null, $_SESSION['admin_user'] ?? '']);
+            $pdo->commit();
 
             $_SESSION['tf_msg'] = '৳' . number_format($pay_amount, 2) . ' পেমেন্ট রেকর্ড করা হয়েছে (' . lv($inv['name_en']) . ')।';
             sec_log_activity($pdo, 'Transport', 'Update', "ট্রান্সপোর্ট ফি পেমেন্ট রেকর্ড করা হয়েছে: {$inv['name_en']} - ৳" . number_format($pay_amount, 2) . " ({$payment_method})");
-
-            // পেমেন্ট রিসিট SMS (config/sms.php এর send_sms() reuse — SMS Settings এ Enable করা থাকলেই পাঠাবে)
             if (!empty($inv['guardian_phone'])) {
-                $msg = "প্রিয় অভিভাবক, {$inv['name_en']} এর ট্রান্সপোর্ট ফি ৳" . number_format($pay_amount, 2) . " গৃহীত হয়েছে। ধন্যবাদ - {$school_name}";
-                send_sms($pdo, $inv['guardian_phone'], $msg);
+                $sms_to = $inv['guardian_phone'];
+                $sms_msg = "প্রিয় অভিভাবক, {$inv['name_en']} এর ট্রান্সপোর্ট ফি ৳" . number_format($pay_amount, 2) . " গৃহীত হয়েছে। ধন্যবাদ - {$school_name}";
             }
+        } catch (RuntimeException $e) {
+            if ($pdo->inTransaction()) { $pdo->rollBack(); }
+            $_SESSION['tf_err'] = $e->getMessage();
         }
-        header('Location: index.php?page=transport_fees&tab=collect&month_year=' . urlencode($_POST['month_year_ref'] ?? date('Y-m')));
+        // SMS লেনদেন কমিটের পরে (SMS ব্যর্থ হলেও পেমেন্ট নিরাপদ)
+        if ($sms_to) {
+            try { send_sms($pdo, $sms_to, $sms_msg); } catch (Throwable $e) { error_log('Transport fee SMS failed: ' . $e->getMessage()); }
+        }
+        header('Location: index.php?page=transport_fees&tab=collect&month_year=' . urlencode($ref_month));
         exit();
     }
 }
 
 $tab = $_GET['tab'] ?? 'generate';
-$month_year = $_GET['month_year'] ?? date('Y-m');
+$month_year = tr_valid_month($_GET['month_year'] ?? '') ? $_GET['month_year'] : date('Y-m');
 ?>
 
 <ul class="nav nav-tabs mb-3">
@@ -104,7 +130,11 @@ $month_year = $_GET['month_year'] ?? date('Y-m');
     </form>
 
     <?php
-    $active_count = (int) $pdo->query("SELECT COUNT(*) c FROM transport_student_assign WHERE status='Active'")->fetch()['c'];
+    $acw = ["tsa.status='Active'"]; $acp = [];
+    branch_apply_filter($acw, $acp, 's.branch_id');
+    $acs = $pdo->prepare("SELECT COUNT(*) FROM transport_student_assign tsa JOIN students s ON s.id = tsa.student_id WHERE " . implode(' AND ', $acw));
+    $acs->execute($acp);
+    $active_count = (int) $acs->fetchColumn();
     ?>
     <div class="alert alert-info mt-3 py-2">এই মুহূর্তে <strong><?php echo $active_count; ?></strong> জন শিক্ষার্থী কোনো না কোনো ট্রান্সপোর্ট রুটে সক্রিয় আছে।</div>
 
@@ -129,6 +159,11 @@ $month_year = $_GET['month_year'] ?? date('Y-m');
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $rows = $stmt->fetchAll();
+    $pay_hist = [];
+    if ($rows) {
+        $in = implode(',', array_map('intval', array_column($rows, 'id')));
+        foreach ($pdo->query("SELECT invoice_id, amount, payment_method, trx_id, paid_at FROM transport_fee_payments WHERE invoice_id IN ($in) ORDER BY id")->fetchAll() as $ph) { $pay_hist[(int) $ph['invoice_id']][] = $ph; }
+    }
     ?>
     <div class="table-responsive">
         <table class="table table-bordered align-middle">
@@ -136,7 +171,11 @@ $month_year = $_GET['month_year'] ?? date('Y-m');
             <tbody>
                 <?php if ($rows): foreach ($rows as $row): $csrf = htmlspecialchars(csrf_token()); $due = (float) $row['amount'] - (float) $row['paid_amount']; ?>
                     <tr>
-                        <td><?php echo lv($row['name_en']); ?> <span class="text-muted small">(<?php echo lv($row['stu_code']); ?>)</span></td>
+                        <td><?php echo lv($row['name_en']); ?> <span class="text-muted small">(<?php echo lv($row['stu_code']); ?>)</span>
+                            <?php foreach (($pay_hist[(int) $row['id']] ?? []) as $ph): ?>
+                                <div class="small text-success">✔ ৳<?php echo number_format((float) $ph['amount'], 2); ?> — <?php echo lv($ph['payment_method']); ?><?php echo $ph['trx_id'] ? ' (' . lv($ph['trx_id']) . ')' : ''; ?> <span class="text-muted"><?php echo lv($ph['paid_at']); ?></span></div>
+                            <?php endforeach; ?>
+                        </td>
                         <td><?php echo lv($row['route_name']); ?></td>
                         <td>৳<?php echo number_format((float) $row['amount'], 2); ?></td>
                         <td>৳<?php echo number_format((float) $row['paid_amount'], 2); ?></td>
@@ -173,12 +212,15 @@ $month_year = $_GET['month_year'] ?? date('Y-m');
 
 <?php elseif ($tab === 'dues'): ?>
     <?php
-    $stmt = $pdo->query("SELECT tfi.month_year, s.name_en, s.student_id AS stu_code, tr.route_name,
+    $dw = ["tfi.status != 'Paid'"]; $dp = [];
+    branch_apply_filter($dw, $dp, 's.branch_id');
+    $stmt = $pdo->prepare("SELECT tfi.month_year, s.name_en, s.student_id AS stu_code, tr.route_name,
                                  tfi.amount, tfi.paid_amount, (tfi.amount - tfi.paid_amount) AS due_amt
                           FROM transport_fee_invoices tfi
                           JOIN students s ON s.id = tfi.student_id
                           JOIN transport_routes tr ON tr.id = tfi.route_id
-                          WHERE tfi.status != 'Paid' ORDER BY tfi.month_year DESC, s.name_en ASC");
+                          WHERE " . implode(' AND ', $dw) . " ORDER BY tfi.month_year DESC, s.name_en ASC");
+    $stmt->execute($dp);
     $rows = $stmt->fetchAll();
     $total_due = array_sum(array_column($rows, 'due_amt'));
     ?>

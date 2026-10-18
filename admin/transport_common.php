@@ -192,6 +192,86 @@ $pdo->exec(
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
 );
 
+
+// -----------------------------------------------------------
+// Branch scope কলাম (গাড়ি/রুট: NULL = শেয়ার্ড/পুরনো রেকর্ড) + Fee Payment history
+// -----------------------------------------------------------
+foreach (['transport_vehicles', 'transport_routes'] as $__t) {
+    $__c = $pdo->query("SHOW COLUMNS FROM `$__t`")->fetchAll(PDO::FETCH_COLUMN, 0);
+    if (!in_array('branch_id', $__c, true)) { $pdo->exec("ALTER TABLE `$__t` ADD COLUMN branch_id INT NULL"); }
+}
+$pdo->exec(
+    "CREATE TABLE IF NOT EXISTS transport_fee_payments (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        invoice_id INT NOT NULL,
+        amount DECIMAL(10,2) NOT NULL,
+        payment_method VARCHAR(50) NULL,
+        trx_id VARCHAR(100) NULL,
+        collected_by VARCHAR(100) NULL,
+        paid_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_invoice (invoice_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+);
+
+// -----------------------------------------------------------
+// Helpers: validation + branch scope (শুধু পেজ থেকে কল হয়; cron এ লাগে না)
+// -----------------------------------------------------------
+if (!function_exists('tr_valid_date')) {
+    function tr_valid_date($d): bool
+    {
+        $d = (string) $d;
+        $dt = DateTime::createFromFormat('Y-m-d', $d);
+        return $dt && $dt->format('Y-m-d') === $d;
+    }
+}
+if (!function_exists('tr_valid_month')) {
+    function tr_valid_month($m): bool
+    {
+        return (bool) preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', (string) $m);
+    }
+}
+if (!function_exists('tr_branch_or_shared')) {
+    /** গাড়ি/রুট: বর্তমান branch অথবা NULL (শেয়ার্ড) */
+    function tr_branch_or_shared(array &$where, array &$params, string $col = 'branch_id'): void
+    {
+        $bid = branch_current_id();
+        if ($bid === null) { return; }
+        $where[] = "($col = ? OR $col IS NULL)";
+        $params[] = $bid;
+    }
+}
+if (!function_exists('tr_scoped')) {
+    /** গাড়ি/রুট row (branch scope মেনে); $lock হলে FOR UPDATE */
+    function tr_scoped(PDO $pdo, string $table, int $id, bool $lock = false)
+    {
+        $where = ['id = ?']; $params = [$id];
+        tr_branch_or_shared($where, $params);
+        $st = $pdo->prepare("SELECT * FROM `$table` WHERE " . implode(' AND ', $where) . ($lock ? ' FOR UPDATE' : ''));
+        $st->execute($params);
+        return $st->fetch();
+    }
+}
+if (!function_exists('tr_student_scoped')) {
+    function tr_student_scoped(PDO $pdo, int $id, bool $lock = false)
+    {
+        $where = ['id = ?']; $params = [$id];
+        branch_apply_filter($where, $params, 'branch_id');
+        $st = $pdo->prepare("SELECT * FROM students WHERE " . implode(' AND ', $where) . ($lock ? ' FOR UPDATE' : ''));
+        $st->execute($params);
+        return $st->fetch();
+    }
+}
+if (!function_exists('tr_employee_scoped')) {
+    function tr_employee_scoped(PDO $pdo, int $id, bool $lock = false)
+    {
+        $where = ['id = ?']; $params = [$id];
+        branch_apply_filter($where, $params, 'branch_id');
+        $st = $pdo->prepare("SELECT * FROM employees WHERE " . implode(' AND ', $where) . ($lock ? ' FOR UPDATE' : ''));
+        $st->execute($params);
+        return $st->fetch();
+    }
+}
+
 // -----------------------------------------------------------
 // Helper: দূরত্ব হিসাব (Haversine, মিটারে) — Geofence চেক করার জন্য
 // -----------------------------------------------------------

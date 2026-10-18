@@ -7,9 +7,7 @@ unset($_SESSION['tst_err'], $_SESSION['tst_msg']);
 require_once __DIR__ . '/transport_common.php';
 
 $route_id = (int) ($_GET['route_id'] ?? 0);
-$route_stmt = $pdo->prepare("SELECT * FROM transport_routes WHERE id = ?");
-$route_stmt->execute([$route_id]);
-$route = $route_stmt->fetch();
+$route = tr_scoped($pdo, 'transport_routes', $route_id);
 
 if (!$route) {
     echo '<div class="alert alert-danger">রুট খুঁজে পাওয়া যায়নি। <a href="index.php?page=transport_routes">রুট লিস্টে ফিরে যান</a></div>';
@@ -34,8 +32,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pickup_time  = trim($_POST['pickup_time'] ?? '') ?: null;
         $drop_time    = trim($_POST['drop_time'] ?? '') ?: null;
 
-        if ($stop_name === '') {
-            $_SESSION['tst_err'] = 'Stop Name খালি রাখা যাবে না।';
+        $serr = '';
+        if ($stop_name === '') { $serr = 'Stop Name খালি রাখা যাবে না।'; }
+        elseif (($lat === null) !== ($lng === null)) { $serr = 'Latitude ও Longitude দুটোই দিতে হবে (অথবা দুটোই খালি রাখুন)।'; }
+        elseif ($lat !== null && (!is_numeric($lat) || !is_numeric($lng) || (float) $lat < -90 || (float) $lat > 90 || (float) $lng < -180 || (float) $lng > 180)) { $serr = 'Latitude (-90 থেকে 90) বা Longitude (-180 থেকে 180) সঠিক নয়।'; }
+        elseif ($radius_m < 10 || $radius_m > 5000) { $serr = 'Radius ১০ থেকে ৫০০০ মিটারের মধ্যে হতে হবে।'; }
+        elseif ($stop_order < 0) { $serr = 'Stop Order ঋণাত্মক হতে পারবে না।'; }
+        elseif (($pickup_time !== null && !preg_match('/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/', $pickup_time)) || ($drop_time !== null && !preg_match('/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/', $drop_time))) { $serr = 'Pickup/Drop সময় সঠিক নয়।'; }
+        if ($serr !== '') {
+            $_SESSION['tst_err'] = $serr;
         } else {
             if ($id > 0) {
                 $stmt = $pdo->prepare("UPDATE transport_stops SET stop_name=?, stop_order=?, lat=?, lng=?, radius_m=?, pickup_time=?, drop_time=? WHERE id=? AND route_id=?");
@@ -56,10 +61,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif (isset($_POST['delete_stop'])) {
         $id = (int) ($_POST['id'] ?? 0);
-        $check = $pdo->prepare("SELECT COUNT(*) c FROM transport_student_assign WHERE stop_id = ? AND status='Active'");
-        $check->execute([$id]);
+        $check = $pdo->prepare("SELECT (SELECT COUNT(*) FROM transport_student_assign WHERE stop_id = ? AND status='Active') + (SELECT COUNT(*) FROM transport_staff_assign WHERE stop_id = ? AND status='Active') AS c");
+        $check->execute([$id, $id]);
         if ((int) $check->fetch()['c'] > 0) {
-            $_SESSION['tst_err'] = 'এই স্টপেজে সক্রিয় শিক্ষার্থী যুক্ত আছে, মুছে ফেলা যাবে না।';
+            $_SESSION['tst_err'] = 'এই স্টপেজে সক্রিয় শিক্ষার্থী/স্টাফ যুক্ত আছে, মুছে ফেলা যাবে না।';
         } else {
             $del_stop_row = $pdo->prepare("SELECT stop_name FROM transport_stops WHERE id = ?");
             $del_stop_row->execute([$id]);
