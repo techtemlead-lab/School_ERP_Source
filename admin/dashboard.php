@@ -180,7 +180,7 @@ function dash_att_esc($val): string { return htmlspecialchars((string) ($val ?? 
             </div>
             <div class="table-responsive">
                 <table class="table table-bordered text-center align-middle m-0" style="font-size: 13.5px;">
-                    <thead class="table-light"><tr><th>ID</th><th>Roll</th><th>Class</th><th>Name</th><th style="color: #10b981;">IN</th><th style="color: #ef4444;">OUT</th><th>Punch IN Zone</th></tr></thead>
+                    <thead class="table-light"><tr><th>ID</th><th>Roll</th><th>Class</th><th>Name</th><th style="color: #10b981;">IN</th><th style="color: #ef4444;">OUT</th></tr></thead>
                     <tbody>
                         <?php if ($dash_stu_att): foreach ($dash_stu_att as $r): ?>
                             <tr>
@@ -196,10 +196,9 @@ function dash_att_esc($val): string { return htmlspecialchars((string) ($val ?? 
                                     <?php endif; ?>
                                 </td>
                                 <td class="fw-bold text-danger"><?php echo $r['time_out'] ? dash_att_esc(date('h:i A', strtotime($r['time_out']))) : '-'; ?></td>
-                                <td><?php echo $r['punch_zone'] ? dash_att_esc($r['punch_zone']) : ($r['marked_by'] && $r['marked_by'] !== 'Device' ? '<span class="text-muted small">Manual (' . dash_att_esc($r['marked_by']) . ')</span>' : '<span class="text-muted">-</span>'); ?></td>
                             </tr>
                         <?php endforeach; else: ?>
-                            <tr><td colspan="7" class="text-muted py-3">No data found</td></tr>
+                            <tr><td colspan="6" class="text-muted py-3">No data found</td></tr>
                         <?php endif; ?>
                     </tbody>
                 </table>
@@ -213,7 +212,7 @@ function dash_att_esc($val): string { return htmlspecialchars((string) ($val ?? 
             </div>
             <div class="table-responsive">
                 <table class="table table-bordered text-center align-middle m-0" style="font-size: 13.5px;">
-                    <thead class="table-light"><tr><th>ID</th><th>Designation</th><th>Name</th><th style="color: #10b981;">IN</th><th style="color: #ef4444;">OUT</th><th>Punch IN Zone</th></tr></thead>
+                    <thead class="table-light"><tr><th>ID</th><th>Designation</th><th>Name</th><th style="color: #10b981;">IN</th><th style="color: #ef4444;">OUT</th></tr></thead>
                     <tbody>
                         <?php if ($dash_staff_att): foreach ($dash_staff_att as $r): ?>
                             <tr>
@@ -228,10 +227,9 @@ function dash_att_esc($val): string { return htmlspecialchars((string) ($val ?? 
                                     <?php endif; ?>
                                 </td>
                                 <td class="fw-bold text-danger"><?php echo $r['time_out'] ? dash_att_esc(date('h:i A', strtotime($r['time_out']))) : '-'; ?></td>
-                                <td><?php echo $r['punch_zone'] ? dash_att_esc($r['punch_zone']) : ($r['marked_by'] && $r['marked_by'] !== 'Device' ? '<span class="text-muted small">Manual (' . dash_att_esc($r['marked_by']) . ')</span>' : '<span class="text-muted">-</span>'); ?></td>
                             </tr>
                         <?php endforeach; else: ?>
-                            <tr><td colspan="6" class="text-muted py-3">No data found</td></tr>
+                            <tr><td colspan="5" class="text-muted py-3">No data found</td></tr>
                         <?php endif; ?>
                     </tbody>
                 </table>
