@@ -23,26 +23,13 @@ $rows = [];
 $attendance_table_missing = false;
 
 try {
-    $sql = "SELECT e.id, e.employee_id, e.name, e.type, e.photo_path,
-                   dg.title AS designation_title,
-                   att.time_in, att.time_out, zdev.device_name AS punch_zone
-            FROM (
-                SELECT person_uid,
-                       MIN(CASE WHEN punch_type = 'in'  THEN punch_time END) AS time_in,
-                       MAX(CASE WHEN punch_type = 'out' THEN punch_time END) AS time_out
-                FROM device_attendance_logs
-                WHERE person_type = 'employee' AND DATE(punch_time) = ?
-                GROUP BY person_uid
-            ) att
-            JOIN employees e ON (e.rfid_card_no = att.person_uid OR e.employee_id = att.person_uid OR e.tracking_id = att.person_uid OR e.device_serial = att.person_uid)
+    // সেভ করা punch_type ('in'/'out') ধরা হচ্ছে না — ডিভাইস/এজেন্ট থেকে ক্রম উল্টে এলে IN হারিয়ে যেত।
+    // এখন দিনের সব পাঞ্চ সময় ধরে: প্রথম = IN, শেষ = OUT (২টার বেশি হলে), মাঝেরগুলো = Middle Punch।
+    $sql = "SELECT e.id, e.employee_id, e.name, e.type, dg.title AS designation_title, l.punch_time
+            FROM device_attendance_logs l
+            JOIN employees e ON (e.rfid_card_no = l.person_uid OR e.employee_id = l.person_uid OR e.tracking_id = l.person_uid OR e.device_serial = l.person_uid)
             LEFT JOIN designations dg ON dg.id = e.designation_id
-            LEFT JOIN device_attendance_logs first_log
-                   ON first_log.person_uid  = att.person_uid
-                  AND first_log.person_type = 'employee'
-                  AND first_log.punch_type  = 'in'
-                  AND first_log.punch_time  = att.time_in
-            LEFT JOIN attendance_devices zdev ON zdev.id = first_log.device_id
-            WHERE 1 = 1";
+            WHERE l.person_type = 'employee' AND DATE(l.punch_time) = ?";
     $params = [$f_date];
 
     if ($f_type !== 'All') {
@@ -54,13 +41,24 @@ try {
         $like = '%' . $f_q . '%';
         $params[] = $like; $params[] = $like;
     }
-
-    $sql .= " GROUP BY e.id, att.time_in, att.time_out, zdev.device_name
-              ORDER BY att.time_in ASC, e.name ASC";
+    $sql .= " ORDER BY l.punch_time ASC";
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
-    $rows = $stmt->fetchAll();
+    $by_emp = [];
+    foreach ($stmt->fetchAll() as $r) {
+        $k = $r['id'];
+        if (!isset($by_emp[$k])) { $by_emp[$k] = $r + ['times' => []]; }
+        $by_emp[$k]['times'][$r['punch_time']] = true; // একই সময় দুবার এলে একটাই
+    }
+    foreach ($by_emp as $e) {
+        $t = array_keys($e['times']); sort($t);
+        $e['time_in']  = $t[0];
+        $e['time_out'] = count($t) > 1 ? end($t) : null;
+        $e['middle']   = count($t) > 2 ? array_slice($t, 1, -1) : [];
+        $rows[] = $e;
+    }
+    usort($rows, function ($x, $y) { return strcmp($x['time_in'], $y['time_in']) ?: strcmp($x['name'], $y['name']); });
 } catch (PDOException $e) {
     $attendance_table_missing = true;
     error_log('employee_attendance_today.php query failed: ' . $e->getMessage());
@@ -119,7 +117,7 @@ $display_date  = date('F j, Y', strtotime($f_date));
                     <th>Type</th>
                     <th style="color:#10b981;">IN</th>
                     <th style="color:#ef4444;">OUT</th>
-                    <th>Punch IN Zone</th>
+                    <th>Middle Punch</th>
                 </tr>
             </thead>
             <tbody>
@@ -135,7 +133,12 @@ $display_date  = date('F j, Y', strtotime($f_date));
                         <td class="fw-bold text-danger">
                             <?php echo $r['time_out'] ? eat_esc(date('h:i A', strtotime($r['time_out']))) : '-'; ?>
                         </td>
-                        <td><?php echo $r['punch_zone'] ? eat_esc($r['punch_zone']) : '<span class="text-muted">-</span>'; ?></td>
+                        <td>
+                            <?php if ($r['middle']): ?>
+                                <span class="badge bg-secondary"><?php echo count($r['middle']); ?> বার</span>
+                                <div class="small text-muted"><?php echo eat_esc(implode(', ', array_map(function ($m) { return date('h:i A', strtotime($m)); }, $r['middle']))); ?></div>
+                            <?php else: ?><span class="text-muted">-</span><?php endif; ?>
+                        </td>
                     </tr>
                 <?php endforeach; else: ?>
                     <tr><td colspan="7" class="text-muted py-3">No data found</td></tr>
