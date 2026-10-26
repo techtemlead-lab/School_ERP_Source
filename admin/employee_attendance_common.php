@@ -82,3 +82,52 @@ if (!function_exists('ea_fetch_punches')) {
 if (!function_exists('ea_fmt_time')) {
     function ea_fmt_time($t): string { return $t ? date('h:i A', strtotime($t)) : ''; }
 }
+
+if (!function_exists('ea_print_header')) {
+    /** প্রিন্টের হেডিং: প্রতিষ্ঠানের নাম, ঠিকানা, ফোন ও রিপোর্টের শিরোনাম। $always=true হলে স্ক্রিনেও দেখায়। */
+    function ea_print_header(PDO $pdo, string $title, bool $always = true): void
+    {
+        $branch = []; $inst = [];
+        try { $branch = $pdo->query("SELECT * FROM branches ORDER BY id ASC LIMIT 1")->fetch() ?: []; } catch (PDOException $e) {}
+        try { $inst = $pdo->query("SELECT * FROM institute_settings WHERE id = 1")->fetch() ?: []; } catch (PDOException $e) {}
+        $name  = ($branch['branch_name'] ?? '') ?: ($inst['institute_name'] ?? '');
+        $addr  = trim(($branch['address'] ?? '') . ', ' . ($branch['city'] ?? ''), ', ');
+        $phone = ($branch['phone'] ?? '') ?: ($inst['phone_number'] ?? '');
+        $e = function ($v) { return htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8'); };
+        echo '<div class="ea-print-header" style="text-align:center;margin-bottom:14px;' . ($always ? '' : 'display:none;') . '">';
+        if ($name !== '')  { echo '<h4 style="color:#1e3a8a;font-weight:800;margin:0 0 4px;">' . $e($name) . '</h4>'; }
+        if ($addr !== '')  { echo '<div style="font-size:12px;color:#555;">' . $e($addr) . '</div>'; }
+        if ($phone !== '') { echo '<div style="font-size:12px;color:#555;">Phone: ' . $e($phone) . '</div>'; }
+        echo '<div style="margin-top:8px;font-weight:700;font-size:14px;color:#334155;">' . $e($title) . '</div></div>';
+        if (!$always) { echo '<style>@media print{.ea-print-header{display:block !important;}}</style>'; }
+    }
+}
+
+if (!function_exists('ea_print_controls')) {
+    /** Portrait/Landscape বেছে নেওয়ার ড্রপডাউন + Print বাটন (স্ক্রিনে দেখায়, প্রিন্টে লুকায়)। */
+    function ea_print_controls(string $default = 'portrait'): void
+    {
+        $default = $default === 'landscape' ? 'landscape' : 'portrait';
+        echo '<div class="d-flex justify-content-end align-items-center gap-2 mb-2 no-print">'
+           . '<label class="small fw-bold mb-0" for="eaOrient">Page:</label>'
+           . '<select id="eaOrient" class="form-select form-select-sm" style="width:auto;">'
+           . '<option value="portrait"' . ($default === 'portrait' ? ' selected' : '') . '>Portrait</option>'
+           . '<option value="landscape"' . ($default === 'landscape' ? ' selected' : '') . '>Landscape</option>'
+           . '</select>'
+           . '<button type="button" class="btn btn-sm btn-primary fw-bold" style="background-color:#1e3a8a;" onclick="eaPrint()"><i class="fa-solid fa-print"></i> Print</button>'
+           . '</div>'
+           . '<script>function eaPrint(){var o=document.getElementById("eaOrient").value;var s=document.getElementById("eaPageStyle");'
+           . 'if(!s){s=document.createElement("style");s.id="eaPageStyle";document.head.appendChild(s);}'
+           . 's.textContent="@page{size:A4 "+o+";margin:8mm;}";window.print();}</script>';
+    }
+}
+
+if (!function_exists('ea_inst_name')) {
+    function ea_inst_name(PDO $pdo, $branch): string
+    {
+        $n = is_array($branch) ? (string) ($branch['branch_name'] ?? '') : '';
+        if ($n !== '') { return $n; }
+        try { return (string) ($pdo->query("SELECT institute_name FROM institute_settings WHERE id = 1")->fetchColumn() ?: ''); }
+        catch (PDOException $e) { return ''; }
+    }
+}

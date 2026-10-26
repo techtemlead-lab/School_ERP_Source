@@ -84,15 +84,17 @@ $display_date  = date('F j, Y', strtotime($f_date));
     }
 </style>
 
+<?php ea_print_controls('landscape'); ?>
 <div class="card-custom">
+    <?php ea_print_header($pdo, 'Employees Attendance (' . $display_date . ')', false); ?>
     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-        <h6 class="fw-bold text-dark m-0">
+        <h6 class="fw-bold text-dark m-0 d-print-none">
             <i class="fa-solid fa-user-check text-primary"></i>
             Employees Attendance <span class="text-danger">(<?php echo eat_esc($display_date); ?>)</span>
         </h6>
         <div class="d-flex align-items-center gap-3">
             <div class="fw-bold text-dark">Total : (<?php echo (int) $total_present; ?>)</div>
-            <button type="button" class="btn btn-sm btn-outline-dark no-print" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
+            
         </div>
     </div>
 

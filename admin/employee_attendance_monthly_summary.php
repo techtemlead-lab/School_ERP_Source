@@ -227,15 +227,11 @@ $display_month_year = ($months[$f_month] ?? '') . ' ' . $f_year;
 </div>
 
 <?php if ($submitted): ?>
-    <div class="d-flex justify-content-end mb-2 no-print">
-        <button type="button" class="btn btn-primary fw-bold" style="background-color:#1e3a8a;" onclick="window.print()">
-            <i class="fa-solid fa-print"></i> Print
-        </button>
-    </div>
+    <?php ea_print_controls('landscape'); ?>
 
     <div class="card-custom">
         <div class="dms-report-header">
-            <h4><?php echo edms_esc($branch['branch_name'] ?? ''); ?></h4>
+            <h4><?php echo edms_esc(ea_inst_name($pdo, $branch)); ?></h4>
             <div class="text-muted small">(<?php echo edms_esc(trim(($branch['address'] ?? '') . ', ' . ($branch['city'] ?? '') . '-' . ($branch['zip_code'] ?? ''), ', ')); ?>)</div>
             <div class="text-muted small">Phone: <?php echo edms_esc($branch['phone'] ?? ''); ?></div>
 

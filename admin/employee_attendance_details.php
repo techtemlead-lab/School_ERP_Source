@@ -238,16 +238,12 @@ $display_month_year = ($months[$f_month] ?? '') . ' ' . $f_year;
 </div>
 
 <?php if ($f_employee > 0 && $report_employee): ?>
-    <div class="d-flex justify-content-end mb-2 no-print">
-        <button type="button" class="btn btn-primary fw-bold" style="background-color:#1e3a8a;" onclick="window.print()">
-            <i class="fa-solid fa-print"></i> Print
-        </button>
-    </div>
+    <?php ea_print_controls('portrait'); ?>
 
     <div class="card-custom">
         <?php $branch = $branch ?? $pdo->query("SELECT * FROM branches ORDER BY id ASC LIMIT 1")->fetch(); ?>
         <div class="ad-report-header">
-            <h4><?php echo ead_esc($branch['branch_name'] ?? ''); ?></h4>
+            <h4><?php echo ead_esc(ea_inst_name($pdo, $branch)); ?></h4>
             <div class="text-muted small">(<?php echo ead_esc(trim(($branch['address'] ?? '') . ', ' . ($branch['city'] ?? '') . '-' . ($branch['zip_code'] ?? ''), ', ')); ?>)</div>
             <div class="text-muted small">Phone: <?php echo ead_esc($branch['phone'] ?? ''); ?></div>
             <?php if (!empty($branch['email'])): ?><div class="small"><?php echo ead_esc($branch['email']); ?></div><?php endif; ?>

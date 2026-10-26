@@ -180,16 +180,12 @@ $display_date = date('F j Y', strtotime($date_str));
 </div>
 
 <?php if ($submitted): ?>
-    <div class="d-flex justify-content-end mb-2 no-print">
-        <button type="button" class="btn btn-primary fw-bold" style="background-color:#1e3a8a;" onclick="window.print()">
-            <i class="fa-solid fa-print"></i> Print
-        </button>
-    </div>
+    <?php ea_print_controls('portrait'); ?>
 
     <div class="card-custom">
         <?php $branch = $pdo->query("SELECT * FROM branches ORDER BY id ASC LIMIT 1")->fetch(); ?>
         <div class="ds-report-header">
-            <h4><?php echo eds_esc($branch['branch_name'] ?? ''); ?></h4>
+            <h4><?php echo eds_esc(ea_inst_name($pdo, $branch)); ?></h4>
             <div class="text-muted small">(<?php echo eds_esc(trim(($branch['address'] ?? '') . ', ' . ($branch['city'] ?? '') . '-' . ($branch['zip_code'] ?? ''), ', ')); ?>)</div>
             <div class="text-muted small">Phone: <?php echo eds_esc($branch['phone'] ?? ''); ?></div>
 
