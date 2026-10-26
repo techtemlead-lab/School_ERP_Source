@@ -4,6 +4,8 @@
 // Attend/Absent + IN/OUT/Middle Punches + Green/Orange/Red লেট-মার্কিং একসাথে দেখায়।
 // প্যাটার্ন: attendance_daily_summary.php (Student) থেকে হুবহু।
 
+require_once __DIR__ . '/employee_attendance_common.php';
+
 function eds_esc($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 
 $employee_daily_table_ready = true;
@@ -50,7 +52,7 @@ $shifts_list       = $pdo->query("SELECT id, name, start_time, green_limit, oran
 // -----------------------------------------------------------
 $report_rows = [];
 if ($submitted) {
-    $sql = "SELECT e.id, e.employee_id, e.name, e.photo_path, e.rfid_card_no,
+    $sql = "SELECT e.id, e.employee_id, e.name, e.photo_path, e.rfid_card_no, e.tracking_id, e.device_serial,
                    dg.title AS designation_title, esh.name AS shift_name, esh.start_time, esh.green_limit, esh.orange_limit, esh.red_limit
             FROM employees e
             LEFT JOIN designations dg ON dg.id = e.designation_id
@@ -70,33 +72,16 @@ if ($submitted) {
     $employees = $stmt->fetchAll();
 
     foreach ($employees as $emp) {
-        $punches = [];
-        try {
-            $pstmt = $pdo->prepare(
-                "SELECT punch_type, punch_time FROM device_attendance_logs
-                 WHERE person_type = 'employee' AND (person_uid = ? OR person_uid = ?) AND DATE(punch_time) = ?
-                 ORDER BY punch_time ASC"
-            );
-            $pstmt->execute([$emp['rfid_card_no'], $emp['employee_id'], $date_str]);
-            $punches = $pstmt->fetchAll();
-        } catch (PDOException $e) { /* device_attendance_logs না থাকলেও রিপোর্ট চলবে */ }
+        $by_day = ea_fetch_punches($pdo, $emp, $date_str, date('Y-m-d', strtotime($date_str . ' +1 day')));
+        $dt = ea_day_times($by_day[$date_str] ?? []);
+        $in_time = $dt['in']; $out_time = $dt['out'];
+        $middle = array_map('ea_fmt_time', $dt['middle']);
 
         $manual_status = null;
         if ($employee_daily_table_ready) {
             $mstmt = $pdo->prepare("SELECT status FROM employee_daily_attendance WHERE employee_id = ? AND attendance_date = ?");
             $mstmt->execute([$emp['id'], $date_str]);
             $manual_status = $mstmt->fetch()['status'] ?? null;
-        }
-
-        $in_time = null; $out_time = null; $middle = [];
-        if ($punches) {
-            $in_time = $punches[0]['punch_time'];
-            $out_time = end($punches)['punch_time'];
-            if (count($punches) > 2) {
-                foreach (array_slice($punches, 1, -1) as $mp) {
-                    $middle[] = date('h:i A', strtotime($mp['punch_time']));
-                }
-            }
         }
 
         $attended = ($in_time !== null) || ($manual_status === 'Present');

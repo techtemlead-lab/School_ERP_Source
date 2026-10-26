@@ -113,25 +113,54 @@ try {
 
 $dash_staff_att = [];
 try {
-    $dea_sql = "SELECT e.id, e.employee_id, e.name, dg.title AS designation_title,
-                       eda.check_in_time AS time_in, eda.check_out_time AS time_out,
-                       eda.marked_by, zdev.device_name AS punch_zone
-                FROM employee_daily_attendance eda
-                JOIN employees e ON e.id = eda.employee_id
-                LEFT JOIN designations dg ON dg.id = e.designation_id
-                LEFT JOIN device_attendance_logs dl
-                       ON dl.person_type = 'employee'
-                      AND (dl.person_uid = e.rfid_card_no OR dl.person_uid = e.employee_id OR dl.person_uid = e.tracking_id OR dl.person_uid = e.device_serial)
-                      AND dl.punch_type = 'in'
-                      AND dl.punch_time = eda.check_in_time
-                LEFT JOIN attendance_devices zdev ON zdev.id = dl.device_id
-                WHERE eda.attendance_date = ? AND eda.status = 'Present'
-                GROUP BY e.id, eda.check_in_time, eda.check_out_time, eda.marked_by, zdev.device_name
-                ORDER BY (eda.check_in_time IS NULL) ASC, eda.check_in_time DESC, eda.updated_at DESC
-                LIMIT 5";
-    $dea_stmt = $pdo->prepare($dea_sql);
-    $dea_stmt->execute([date('Y-m-d')]);
-    $dash_staff_att = $dea_stmt->fetchAll();
+    require_once __DIR__ . '/employee_attendance_common.php';
+    $today_d = date('Y-m-d');
+    $tomorrow_d = date('Y-m-d', strtotime('+1 day'));
+
+    $ew = ['e.is_current = 1']; $ep = [];
+    branch_apply_filter($ew, $ep, 'e.branch_id');
+    $es = $pdo->prepare("SELECT e.id, e.employee_id, e.name, e.rfid_card_no, e.tracking_id, e.device_serial, dg.title AS designation_title
+                         FROM employees e LEFT JOIN designations dg ON dg.id = e.designation_id
+                         WHERE " . implode(' AND ', $ew));
+    $es->execute($ep);
+    $emp_by_id = []; $uid_map = [];
+    foreach ($es->fetchAll() as $e) {
+        $emp_by_id[(int) $e['id']] = $e;
+        foreach (ea_uids($e) as $u) { $uid_map[$u][] = (int) $e['id']; }
+    }
+
+    $times = [];
+    try {
+        $ls = $pdo->prepare("SELECT person_uid, punch_time FROM device_attendance_logs
+                             WHERE person_type = 'employee' AND punch_time >= ? AND punch_time < ?");
+        $ls->execute([$today_d, $tomorrow_d]);
+        foreach ($ls->fetchAll() as $l) {
+            foreach ($uid_map[(string) $l['person_uid']] ?? [] as $eid) { $times[$eid][] = $l['punch_time']; }
+        }
+    } catch (PDOException $e) { /* logs table না থাকলে চলবে */ }
+
+    $manual_present = [];
+    $ds = $pdo->prepare("SELECT employee_id, check_in_time, check_out_time FROM employee_daily_attendance
+                         WHERE attendance_date = ? AND status = 'Present'");
+    $ds->execute([$today_d]);
+    foreach ($ds->fetchAll() as $d) {
+        $eid = (int) $d['employee_id'];
+        if (!isset($emp_by_id[$eid])) { continue; }
+        $manual_present[$eid] = true;
+        if ($d['check_in_time'])  { $times[$eid][] = $d['check_in_time']; }
+        if ($d['check_out_time']) { $times[$eid][] = $d['check_out_time']; }
+    }
+
+    foreach ($emp_by_id as $eid => $e) {
+        if (empty($times[$eid]) && empty($manual_present[$eid])) { continue; }
+        $dt = ea_day_times($times[$eid] ?? []);
+        $dash_staff_att[] = $e + ['time_in' => $dt['in'], 'time_out' => $dt['out'], 'middle' => $dt['middle']];
+    }
+    usort($dash_staff_att, function ($x, $y) {
+        if (($x['time_in'] === null) !== ($y['time_in'] === null)) { return $x['time_in'] === null ? 1 : -1; }
+        return strcmp((string) $y['time_in'], (string) $x['time_in']);
+    });
+    $dash_staff_att = array_slice($dash_staff_att, 0, 5);
 } catch (PDOException $e) {
     // employee_daily_attendance টেবিল এখনো তৈরি না থাকলে খালি লিস্ট দেখানো হবে
 }
@@ -212,7 +241,7 @@ function dash_att_esc($val): string { return htmlspecialchars((string) ($val ?? 
             </div>
             <div class="table-responsive">
                 <table class="table table-bordered text-center align-middle m-0" style="font-size: 13.5px;">
-                    <thead class="table-light"><tr><th>ID</th><th>Designation</th><th>Name</th><th style="color: #10b981;">IN</th><th style="color: #ef4444;">OUT</th></tr></thead>
+                    <thead class="table-light"><tr><th>ID</th><th>Designation</th><th>Name</th><th style="color: #10b981;">IN</th><th style="color: #ef4444;">OUT</th><th>Middle Punch</th></tr></thead>
                     <tbody>
                         <?php if ($dash_staff_att): foreach ($dash_staff_att as $r): ?>
                             <tr>
@@ -227,9 +256,17 @@ function dash_att_esc($val): string { return htmlspecialchars((string) ($val ?? 
                                     <?php endif; ?>
                                 </td>
                                 <td class="fw-bold text-danger"><?php echo $r['time_out'] ? dash_att_esc(date('h:i A', strtotime($r['time_out']))) : '-'; ?></td>
+                                <td>
+                                    <?php if (!empty($r['middle'])): ?>
+                                        <span class="badge bg-secondary"><?php echo count($r['middle']); ?></span>
+                                        <small class="text-muted"><?php echo dash_att_esc(implode(', ', array_map('ea_fmt_time', $r['middle']))); ?></small>
+                                    <?php else: ?>
+                                        <span class="text-muted">-</span>
+                                    <?php endif; ?>
+                                </td>
                             </tr>
                         <?php endforeach; else: ?>
-                            <tr><td colspan="5" class="text-muted py-3">No data found</td></tr>
+                            <tr><td colspan="6" class="text-muted py-3">No data found</td></tr>
                         <?php endif; ?>
                     </tbody>
                 </table>

@@ -4,6 +4,8 @@
 // Weekend/Holidays/Attend/Absent + Green/Orange/Red টোটাল কাউন্ট একসাথে দেখায়।
 // প্যাটার্ন: attendance_monthly_summary.php (Student) থেকে হুবহু।
 
+require_once __DIR__ . '/employee_attendance_common.php';
+
 function edms_esc($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 
 $employee_daily_table_ready = true;
@@ -58,7 +60,7 @@ if ($submitted) {
     $branch = $pdo->query("SELECT * FROM branches ORDER BY id ASC LIMIT 1")->fetch();
     $weekly_holidays = array_map('trim', explode(',', $branch['weekly_holidays'] ?? 'Friday'));
 
-    $sql = "SELECT e.id, e.employee_id, e.name, e.photo_path, e.rfid_card_no,
+    $sql = "SELECT e.id, e.employee_id, e.name, e.photo_path, e.rfid_card_no, e.tracking_id, e.device_serial,
                    dg.title AS designation_title, esh.name AS shift_name, esh.start_time, esh.green_limit, esh.orange_limit, esh.red_limit
             FROM employees e
             LEFT JOIN designations dg ON dg.id = e.designation_id
@@ -86,18 +88,9 @@ if ($submitted) {
     foreach ($employees as $emp) {
         $summary = ['weekend' => 0, 'holidays' => 0, 'attend' => 0, 'absent' => 0, 'green' => 0, 'orange' => 0, 'red' => 0];
 
-        $punch_by_day = [];
-        try {
-            $pstmt = $pdo->prepare(
-                "SELECT DATE(punch_time) AS d, punch_type, punch_time FROM device_attendance_logs
-                 WHERE person_type = 'employee' AND (person_uid = ? OR person_uid = ?)
-                   AND punch_time >= ? AND punch_time < DATE_ADD(?, INTERVAL 1 MONTH)
-                 ORDER BY punch_time ASC"
-            );
-            $month_start = sprintf('%04d-%02d-01', $f_year, $f_month);
-            $pstmt->execute([$emp['rfid_card_no'], $emp['employee_id'], $month_start, $month_start]);
-            foreach ($pstmt->fetchAll() as $p) { $punch_by_day[$p['d']][] = $p; }
-        } catch (PDOException $e) { /* device_attendance_logs না থাকলেও চলবে */ }
+        $month_start = sprintf('%04d-%02d-01', $f_year, $f_month);
+        $punch_by_day = ea_fetch_punches($pdo, $emp, $month_start, date('Y-m-d', strtotime($month_start . ' +1 month')));
+        $in_secs = []; $out_secs = [];
 
         $manual_by_day = [];
         if ($employee_daily_table_ready) {
@@ -115,8 +108,10 @@ if ($submitted) {
             $day_name = date('l', strtotime($date_str));
             $is_weekend = in_array($day_name, $weekly_holidays, true);
 
-            $day_punches = $punch_by_day[$date_str] ?? [];
-            $in_time = $day_punches ? $day_punches[0]['punch_time'] : null;
+            $dt = ea_day_times($punch_by_day[$date_str] ?? []);
+            $in_time = $dt['in'];
+            if ($in_time) { $in_secs[] = strtotime($in_time) - strtotime($date_str); }
+            if ($dt['out']) { $out_secs[] = strtotime($dt['out']) - strtotime($date_str); }
             $manual_status = $manual_by_day[$date_str] ?? null;
             $attended = ($in_time !== null) || ($manual_status === 'Present');
 
@@ -138,6 +133,11 @@ if ($submitted) {
             if ($mark === 'R') { $summary['red']++; }
         }
 
+        $avg = function (array $a) use ($month_start) {
+            return $a ? date('h:i A', strtotime($month_start) + (int) round(array_sum($a) / count($a))) : '';
+        };
+        $summary['avg_in'] = $avg($in_secs);
+        $summary['avg_out'] = $avg($out_secs);
         $report_rows[] = $emp + ['summary' => $summary];
     }
 }
@@ -254,6 +254,8 @@ $display_month_year = ($months[$f_month] ?? '') . ' ' . $f_year;
                         <th style="color:#d97706;">Weekend</th>
                         <th style="color:#ec4899;">Holidays</th>
                         <th style="color:#16a34a;">Attend</th>
+                        <th>Avg IN</th>
+                        <th>Avg OUT</th>
                         <th style="color:#ef4444;">Absent</th>
                         <th style="background:#10b981;color:#fff;">G</th>
                         <th style="background:#f59e0b;color:#fff;">Y</th>
@@ -274,13 +276,15 @@ $display_month_year = ($months[$f_month] ?? '') . ' ' . $f_year;
                             <td style="color:#d97706;font-weight:700;"><?php echo (int) $sm['weekend']; ?></td>
                             <td style="color:#ec4899;font-weight:700;"><?php echo (int) $sm['holidays']; ?></td>
                             <td style="color:#16a34a;font-weight:700;"><?php echo (int) $sm['attend']; ?></td>
+                            <td><?php echo edms_esc($sm['avg_in'] ?: '-'); ?></td>
+                            <td><?php echo edms_esc($sm['avg_out'] ?: '-'); ?></td>
                             <td style="color:#ef4444;font-weight:700;"><?php echo (int) $sm['absent']; ?></td>
                             <td style="color:#10b981;font-weight:700;"><?php echo (int) $sm['green']; ?></td>
                             <td style="color:#f59e0b;font-weight:700;"><?php echo (int) $sm['orange']; ?></td>
                             <td style="color:#ef4444;font-weight:700;"><?php echo (int) $sm['red']; ?></td>
                         </tr>
                     <?php endforeach; else: ?>
-                        <tr><td colspan="12" class="text-muted py-4">এই ফিল্টারে কোনো কর্মী পাওয়া যায়নি।</td></tr>
+                        <tr><td colspan="14" class="text-muted py-4">এই ফিল্টারে কোনো কর্মী পাওয়া যায়নি।</td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>

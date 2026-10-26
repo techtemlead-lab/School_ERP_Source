@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/employee_attendance_common.php';
 // admin/employee_attendance_today.php - Attendance Module > Employee Attendance > Today's Attendance
 // device_attendance_logs টেবিল থেকে (ZKTeco/eSSL ইত্যাদি ADMS পুশ ডেটা) নির্দিষ্ট দিনের
 // IN/OUT পাঞ্চ বের করে employees টেবিলের সাথে ম্যাচ করে (rfid_card_no অথবা employee_id দিয়ে) দেখানো হয়।
@@ -52,10 +53,10 @@ try {
         $by_emp[$k]['times'][$r['punch_time']] = true; // একই সময় দুবার এলে একটাই
     }
     foreach ($by_emp as $e) {
-        $t = array_keys($e['times']); sort($t);
-        $e['time_in']  = $t[0];
-        $e['time_out'] = count($t) > 1 ? end($t) : null;
-        $e['middle']   = count($t) > 2 ? array_slice($t, 1, -1) : [];
+        $dt = ea_day_times(array_keys($e['times']));
+        $e['time_in']  = $dt['in'];
+        $e['time_out'] = $dt['out'];
+        $e['middle']   = $dt['middle'];
         $rows[] = $e;
     }
     usort($rows, function ($x, $y) { return strcmp($x['time_in'], $y['time_in']) ?: strcmp($x['name'], $y['name']); });
@@ -67,6 +68,21 @@ try {
 $total_present = count($rows);
 $display_date  = date('F j, Y', strtotime($f_date));
 ?>
+<style>
+    @media print {
+        @page { size: A4 landscape; margin: 8mm; }
+        html, body { background: #fff !important; }
+        .no-print, .sidebar, .sticky-top-area, .top-navbar, .breadcrumb-bar, footer { display: none !important; }
+        .main-wrapper, .main-wrapper.expanded { margin-left: 0 !important; width: 100% !important; min-height: 0 !important; }
+        .content-body { padding: 0 !important; margin: 0 !important; }
+        .card-custom { box-shadow: none !important; border: none !important; padding: 0 !important; margin: 0 !important; }
+        .table-responsive { overflow: visible !important; }
+        .card-custom table { width: 100% !important; font-size: 10px !important; }
+        .card-custom table th, .card-custom table td { padding: 2px 4px !important; }
+        .card-custom table thead { display: table-header-group; }
+        .card-custom table tr { page-break-inside: avoid; }
+    }
+</style>
 
 <div class="card-custom">
     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -74,11 +90,14 @@ $display_date  = date('F j, Y', strtotime($f_date));
             <i class="fa-solid fa-user-check text-primary"></i>
             Employees Attendance <span class="text-danger">(<?php echo eat_esc($display_date); ?>)</span>
         </h6>
-        <div class="fw-bold text-dark">Total : (<?php echo (int) $total_present; ?>)</div>
+        <div class="d-flex align-items-center gap-3">
+            <div class="fw-bold text-dark">Total : (<?php echo (int) $total_present; ?>)</div>
+            <button type="button" class="btn btn-sm btn-outline-dark no-print" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
+        </div>
     </div>
 
     <!-- Filter Bar -->
-    <form method="GET" class="row g-2 align-items-center mb-3">
+    <form method="GET" class="row g-2 align-items-center mb-3 no-print">
         <input type="hidden" name="page" value="employee_attendance_today">
         <div class="col-6 col-md-3">
             <input type="date" name="date" class="form-control form-control-sm" value="<?php echo eat_esc($f_date); ?>" max="<?php echo date('Y-m-d'); ?>">
