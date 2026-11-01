@@ -4,6 +4,10 @@ $rs_err = $_SESSION['rs_err'] ?? '';
 $rs_msg = $_SESSION['rs_msg'] ?? '';
 unset($_SESSION['rs_err'], $_SESSION['rs_msg']);
 
+// শতকরা (Percentage) ওয়েট মডেল ১-৪-এর হেল্পার ও টেবিল (result_pct_groups / result_pct_items)
+require_once __DIR__ . '/../config/report_card_helpers.php';
+rc_pct_ensure_tables($pdo);
+
 // exam_terms টেবিল এখনো তৈরি না হয়ে থাকতে পারে (Result Module > Exam Settings > Exam Terms
 // পেজ কখনো ভিজিট না করা হলে) — এই পেজ নিচে exam_terms থেকে SELECT করে (Default Term বের
 // করতে), তাই এখানেও নিরাপদে auto-create করা হচ্ছে, না হলে সরাসরি এই পেজে এলে Fatal Error হয়
@@ -109,6 +113,60 @@ $text_fields = [
     'gpa_color', 'remarks_progress_color', 'table_footer_color', 'fail_part_marks_color',
 ];
 $aggregate_types = ['Terms Wise Percentage', 'Terms Wise Average', 'Terms & Subjects Wise Average', 'Terms, Subjects & Part Wise Average'];
+// নতুন শতকরা ওয়েট মডেল (গড়-ভিত্তিক পদ্ধতিগুলো উপরে আগের মতোই আছে)
+$pct_models = rc_pct_models();
+$pct_labels = [
+    'Percentage Model 1' => 'মডেল ১ — টার্ম ওয়েট (১ম টার্ম + ২য় টার্ম + ফাইনাল টার্ম)',
+    'Percentage Model 2' => 'মডেল ২ — মাসিক + টার্ম মিলিয়ে একটা রেজাল্ট, তারপর টার্মের ওয়েট',
+    'Percentage Model 3' => 'মডেল ৩ — প্রতি টার্ম আলাদা রেজাল্ট (মাসিক + টার্ম), অন্য টার্মের সাথে যোগ হয় না',
+    'Percentage Model 4' => 'মডেল ৪ — সাময়িক ও মাসিক পরীক্ষার আলাদা শতকরা মিলিয়ে ফাইনাল ফলাফল',
+];
+// মডেল সিলেক্ট করলে আগে দেখানোর ব্যাখ্যা: [কীভাবে কাজ করে (লাইন...), সূত্র, উদাহরণ]
+$pct_explain = [
+    'Percentage Model 1' => [
+        'how' => [
+            'প্রতিটা পরীক্ষা (Exam Term) নিজের শতকরা (%) বের করে।',
+            'প্রতিটা পরীক্ষার জন্য আপনি একটা ওয়েট দেবেন (যেমন ১ম টার্ম ১০%, ২য় টার্ম ১০%, ফাইনাল ৮০%) — সব ওয়েটের যোগফল ১০০ হতে হবে।',
+            'ওয়েটগুলো আপনার ইচ্ছামতো কাস্টম বসানো যাবে (১০/১০/৮০, ২০/২০/৬০ বা অন্য যেকোনো)।',
+        ],
+        'formula' => 'ফাইনাল % = (১ম টার্ম% × ওয়েট + ২য় টার্ম% × ওয়েট + ফাইনাল% × ওয়েট) ÷ ১০০',
+        'example' => 'ওয়েট ১০/১০/৮০; ১ম টার্ম ৭০%, ২য় টার্ম ৬০%, ফাইনাল ৭৫% হলে → (৭০×১০ + ৬০×১০ + ৭৫×৮০) ÷ ১০০ = ৭ + ৬ + ৬০ = ৭৩%',
+    ],
+    'Percentage Model 2' => [
+        'how' => [
+            'প্রতিটা গ্রুপ (যেমন "১ম টার্ম") = কিছু মাসিক/ক্লাস টেস্ট + টার্ম পরীক্ষা মিলিয়ে একটা মিলিত রেজাল্ট। গ্রুপের ভেতরের ওয়েট (যেমন মাসিক ১০ + টার্ম ৯০) যোগে ১০০ হবে।',
+            'প্রতিটা গ্রুপের মিলিত রেজাল্ট মোট ফলাফলে নিজের ওয়েট পায় (যেমন ১ম গ্রুপ ১০%, ২য় গ্রুপ ১০%, ফাইনাল গ্রুপ ৮০%) — গ্রুপ ওয়েটের যোগফলও ১০০।',
+            'ফাইনাল গ্রুপেও একইভাবে ৩য় মাসিক (১০%) + ফাইনাল টার্ম (৯০%) থাকতে পারে।',
+            'কোন গ্রুপে কোন কোন মাসিক/ক্লাস টেস্ট যুক্ত হবে এবং কত শতাংশে — সেটা নিচে গ্রুপ বানানোর সময়ই দেখে বসানো যাবে। সব ওয়েট কাস্টম।',
+        ],
+        'formula' => 'গ্রুপ % = (মাসিক% × ওয়েট + টার্ম% × ওয়েট) ÷ ১০০ ; ফাইনাল % = Σ (গ্রুপ % × গ্রুপ ওয়েট) ÷ ১০০',
+        'example' => '১ম গ্রুপ: মাসিক ৮০, টার্ম ৭০ (১০/৯০) → ৭১% ; ২য় গ্রুপ: মাসিক ৮০, টার্ম ৬০ → ৬২% ; ফাইনাল গ্রুপ: ৩য় মাসিক ৯০, ফাইনাল ৭৫ → ৭৬.৫% ; গ্রুপ ওয়েট ১০/১০/৮০ হলে → ৭.১ + ৬.২ + ৬১.২ = ৭৪.৫%',
+    ],
+    'Percentage Model 3' => [
+        'how' => [
+            'প্রতিটা গ্রুপ (টার্ম) নিজেই একটা আলাদা চূড়ান্ত রেজাল্ট — যেমন মাসিক ১০% + টার্ম ৯০%।',
+            'এক টার্মের রেজাল্ট অন্য টার্মের সাথে যোগ হয় না; প্রতিটা টার্মেই ফলাফল শেষ।',
+            'গ্রুপের ভেতরের ওয়েটের যোগফল ১০০ হতে হবে; কোন মাসিক/ক্লাস টেস্ট কোন টার্মে যুক্ত হবে ও কত শতাংশে — সবই কাস্টম।',
+            'Final Aggregated Result পেজে কোন টার্মের (গ্রুপের) রেজাল্ট দেখবেন সেটা সিলেক্ট করে নিতে হবে।',
+        ],
+        'formula' => 'টার্মের রেজাল্ট % = (মাসিক% × ওয়েট + টার্ম% × ওয়েট) ÷ ১০০ — অন্য টার্ম যোগ হয় না',
+        'example' => 'মাসিক ৮০%, টার্ম ৭০% (১০/৯০) হলে → (৮০×১০ + ৭০×৯০) ÷ ১০০ = ৮ + ৬৩ = ৭১% — এই টার্মের ফলাফল, সেখানেই শেষ',
+    ],
+    'Percentage Model 4' => [
+        'how' => [
+            'সাময়িক পরীক্ষাগুলোর ওয়েট একটা তালিকায়, মাসিক পরীক্ষাগুলোর ওয়েট আলাদা তালিকায় বসবে।',
+            'দুই তালিকার সব ওয়েট মিলে ঠিক ১০০ হতে হবে (যেমন সাময়িক ১০ + ১০ + ৬৫ = ৮৫, মাসিক ৫ + ৫ + ৫ = ১৫)।',
+            'সব ওয়েট কাস্টমাইজ করা যাবে।',
+        ],
+        'formula' => 'ফাইনাল % = Σ (প্রতিটা পরীক্ষার % × তার ওয়েট) ÷ ১০০ (সাময়িক ও মাসিক সব মিলিয়ে)',
+        'example' => 'সাময়িক ৭০/৬০/৭৫% (ওয়েট ১০/১০/৬৫), মাসিক ৮০/৯০/৭০% (ওয়েট ৫/৫/৫) → ৭ + ৬ + ৪৮.৭৫ + ৪ + ৪.৫ + ৩.৫ = ৭৩.৭৫%',
+    ],
+];
+$pct_common_notes = [
+    'কোনো পরীক্ষায় অনুপস্থিত থাকলে বা মার্ক এন্ট্রি না থাকলে সেই পরীক্ষা ০% ধরা হয় (ওয়েট অন্যদের মধ্যে ভাগ হয় না)।',
+    'প্রতিটা পরীক্ষার % আসে ঐ পরীক্ষার প্রাপ্ত নম্বর ÷ পূর্ণমান × ১০০ থেকে।',
+    'পাস/ফেল ও গ্রেড ঠিক হয় ফাইনাল %-এর Grade Point সেটিং অনুযায়ী।',
+];
 $report_templates = ['Govt. / MPO', 'School (Classic)'];
 $font_styles = ['Normal', 'Bold', 'Italic', 'Bold Italic'];
 $font_sizes = [10, 11, 12, 13, 14, 15, 16, 18, 20];
@@ -207,10 +265,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $set_parts[] = "$f = ?";
             $params[] = trim($_POST[$f] ?? '');
         }
-        $aggregate_result_type = in_array($_POST['aggregate_result_type'] ?? '', $aggregate_types, true) ? $_POST['aggregate_result_type'] : $aggregate_types[0];
+        $aggregate_result_type = in_array($_POST['aggregate_result_type'] ?? '', array_merge($aggregate_types, array_keys($pct_models)), true) ? $_POST['aggregate_result_type'] : $aggregate_types[0];
         $report_card_template  = in_array($_POST['report_card_template'] ?? '', $report_templates, true) ? $_POST['report_card_template'] : $report_templates[0];
         $body_font_style       = in_array($_POST['body_font_style'] ?? '', $font_styles, true) ? $_POST['body_font_style'] : 'Normal';
         $body_font_size        = (int) ($_POST['body_font_size'] ?? 12);
+
+        // শতকরা ওয়েট মডেল বেছে নিলে ওয়েট কনফিগ আগে যাচাই — ভুল হলে কিছুই সেভ হবে না
+        $pct_clean = null; $pct_session_id = 0;
+        if (rc_pct_is_model($aggregate_result_type)) {
+            $cs = $pdo->query("SELECT id FROM academic_sessions WHERE is_current_session = 1 LIMIT 1")->fetchColumn();
+            $pct_session_id = (int) $cs;
+            $valid_terms = [];
+            if ($pct_session_id > 0) {
+                $vt = $pdo->prepare("SELECT id FROM exam_terms WHERE session_id = ? AND status = 'Active'");
+                $vt->execute([$pct_session_id]);
+                $valid_terms = array_map('intval', $vt->fetchAll(PDO::FETCH_COLUMN));
+            }
+            $raw_cfg = json_decode((string) ($_POST['pct_config'] ?? ''), true);
+            if ($pct_session_id <= 0) {
+                $pct_err = 'Current Session সেট করা নেই।';
+            } else {
+                [$pct_err, $pct_clean] = rc_pct_validate_config($aggregate_result_type, is_array($raw_cfg) ? $raw_cfg : [], $valid_terms);
+            }
+            if ($pct_err !== '') {
+                $_SESSION['rs_err'] = 'ওয়েট সেভ হয়নি: ' . $pct_err;
+                header('Location: index.php?page=result_settings');
+                exit();
+            }
+        }
 
         $set_parts[] = "aggregate_result_type = ?"; $params[] = $aggregate_result_type;
         $set_parts[] = "report_card_template = ?";  $params[] = $report_card_template;
@@ -220,6 +302,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $sql = "UPDATE exam_result_settings SET " . implode(', ', $set_parts) . " WHERE id = 1";
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
+        if ($pct_clean !== null) {
+            rc_pct_save_config($pdo, $pct_session_id, $aggregate_result_type, $pct_clean);
+            sec_log_activity($pdo, 'Result', 'Update', "শতকরা ওয়েট মডেল সেভ করা হয়েছে: {$aggregate_result_type}");
+        }
         sec_log_activity($pdo, 'Result', 'Update', 'Result Master Setting আপডেট করা হয়েছে');
         $_SESSION['rs_msg'] = 'Master Setting সফলভাবে সেভ হয়েছে!';
     } elseif (isset($_POST['copy_grade_points'])) {
@@ -262,6 +348,23 @@ $current_session_id = $current_session ? (int) $current_session['id'] : 0;
 $other_sessions = $pdo->prepare("SELECT id, session_name FROM academic_sessions WHERE id != ? ORDER BY session_name DESC");
 $other_sessions->execute([$current_session_id]);
 $other_sessions = $other_sessions->fetchAll();
+
+// শতকরা ওয়েট মডেলের এডিটরের ডেটা: বর্তমান সেশনের সক্রিয় Exam Term-গুলো + প্রতিটা মডেলের সেভ করা কনফিগ
+$pct_terms = [];
+$pct_init = [];
+if ($current_session_id > 0) {
+    $pt = $pdo->prepare("SELECT id, term_name FROM exam_terms WHERE session_id = ? AND status = 'Active' ORDER BY rank ASC, id ASC");
+    $pt->execute([$current_session_id]);
+    foreach ($pt->fetchAll() as $t) { $pct_terms[] = ['id' => (int) $t['id'], 'name' => $t['term_name']]; }
+    foreach (array_keys($pct_models) as $mk) {
+        $pct_init[$mk] = array_map(
+            fn($g) => ['name' => $g['name'], 'weight' => $g['weight'], 'items' => $g['items']],
+            rc_pct_load_config($pdo, $current_session_id, $mk)
+        );
+    }
+}
+$pct_meta = [];
+foreach ($pct_models as $mk => $m) { $pct_meta[$mk] = ['type' => $m['type'], 'fixed' => $m['fixed_groups']]; }
 
 // Merit Tie-Breaker প্যানেলের ডেটা (Session/Class/Subject ড্রপডাউন)
 $tb_sessions = $pdo->query("SELECT id, session_name FROM academic_sessions ORDER BY id DESC")->fetchAll();
@@ -453,6 +556,14 @@ function render_color(string $name, string $label, string $val): void
         <div class="row mb-3 align-items-start">
             <label class="col-sm-3 col-form-label text-end">Aggregate Result Type</label>
             <div class="col-sm-8">
+                <div class="fw-bold small mb-2" style="color:#1e3a8a;">শতকরা (Percentage) ওয়েট মডেল</div>
+                <?php foreach ($pct_labels as $t => $lbl): ?>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="radio" name="aggregate_result_type" id="agg_<?php echo md5($t); ?>" value="<?php echo rsv($t); ?>" data-pct="1" <?php echo $settings['aggregate_result_type'] === $t ? 'checked' : ''; ?>>
+                        <label class="form-check-label" for="agg_<?php echo md5($t); ?>"><?php echo rsv($lbl); ?></label>
+                    </div>
+                <?php endforeach; ?>
+                <div class="fw-bold small mt-3 mb-2" style="color:#1e3a8a;">গড় (Average) ভিত্তিক পদ্ধতি</div>
                 <?php foreach ($aggregate_types as $t): ?>
                     <div class="form-check mb-2">
                         <input class="form-check-input" type="radio" name="aggregate_result_type" id="agg_<?php echo md5($t); ?>" value="<?php echo rsv($t); ?>" <?php echo $settings['aggregate_result_type'] === $t ? 'checked' : ''; ?>>
@@ -460,6 +571,33 @@ function render_color(string $name, string $label, string $val): void
                     </div>
                 <?php endforeach; ?>
             </div>
+        </div>
+
+        <!-- ============ শতকরা মডেলের বিস্তারিত + ওয়েট এডিটর (মডেল সিলেক্ট করলে দেখায়; Save বাটন সবার শেষে) ============ -->
+        <div id="pctPanel" class="border rounded p-3 mb-4 bg-light d-none">
+            <?php foreach ($pct_explain as $mk => $ex): ?>
+                <div class="pct-explain d-none" data-model="<?php echo rsv($mk); ?>">
+                    <h6 class="fw-bold" style="color:#1e3a8a;"><i class="fa-solid fa-circle-info"></i> <?php echo rsv($pct_labels[$mk]); ?> — কীভাবে কাজ করে</h6>
+                    <ul class="small mb-2">
+                        <?php foreach ($ex['how'] as $line): ?><li><?php echo rsv($line); ?></li><?php endforeach; ?>
+                        <?php foreach ($pct_common_notes as $line): ?><li><?php echo rsv($line); ?></li><?php endforeach; ?>
+                    </ul>
+                    <div class="small mb-1"><span class="badge bg-primary">সূত্র</span> <?php echo rsv($ex['formula']); ?></div>
+                    <div class="small mb-0"><span class="badge bg-success">উদাহরণ</span> <?php echo rsv($ex['example']); ?></div>
+                </div>
+            <?php endforeach; ?>
+            <hr>
+            <h6 class="fw-bold mb-2"><i class="fa-solid fa-sliders"></i> ওয়েট সেট করুন <span class="text-muted small fw-normal">(সেশন: <?php echo rsv($current_session['session_name'] ?? '—'); ?>)</span></h6>
+            <?php if (!$pct_terms): ?>
+                <div class="alert alert-warning py-2 small mb-0">
+                    বর্তমান সেশনে কোনো সক্রিয় Exam Term নেই। আগে <a href="index.php?page=result_exam_terms">Exam Terms</a> পেজে টার্ম/মাসিক/ক্লাস টেস্ট তৈরি করুন, তারপর এখানে ওয়েট বসান।
+                </div>
+            <?php else: ?>
+                <div id="pctEditor"></div>
+                <div id="pctStatus" class="small my-2"></div>
+                <input type="hidden" name="pct_config" id="pctConfig" value="">
+                <button type="submit" name="save_result_settings" id="pctSaveBtn" class="btn btn-primary px-4 fw-bold" style="background-color:#1e3a8a;border-color:#1e3a8a;"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+            <?php endif; ?>
         </div>
         <div class="row mb-4 align-items-start">
             <label class="col-sm-3 col-form-label text-end">Report Card Templates</label>
@@ -541,6 +679,14 @@ function render_color(string $name, string $label, string $val): void
 </div>
 
 <script>
+// নিচের Update বার: "Copy Grade Points" ট্যাবে লুকানো; শতকরা মডেল সিলেক্ট থাকলে Templates ট্যাবে ওই প্যানেলের নিজস্ব Save বাটনই কাজ করে, তাই তখনও লুকানো
+function rsRefreshBar() {
+    var name = window.rsCurrentTab || 'copy';
+    var pctSel = document.querySelector('input[name="aggregate_result_type"][data-pct="1"]:checked');
+    var hide = name === 'copy' || (name === 'templates' && pctSel);
+    document.getElementById('rsSaveBar').classList.toggle('d-none', !!hide);
+}
+
 // Master Settings — navbar/tab টগল (সব ফিল্ড একই ফর্মে থাকে, তাই যেকোনো ট্যাব থেকে Update দিলে সব সেভ হয়)
 (function () {
     var tabs = document.querySelectorAll('[data-rs-tab]');
@@ -549,7 +695,8 @@ function render_color(string $name, string $label, string $val): void
         if (!document.querySelector('[data-rs-pane="' + name + '"]')) name = 'copy';
         tabs.forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-rs-tab') === name); });
         panes.forEach(function (p) { p.classList.toggle('d-none', p.getAttribute('data-rs-pane') !== name); });
-        document.getElementById('rsSaveBar').classList.toggle('d-none', name === 'copy');
+        window.rsCurrentTab = name;
+        rsRefreshBar();
         try { history.replaceState(null, '', '#' + name); } catch (e) {}
     }
     tabs.forEach(function (t) {
@@ -577,6 +724,173 @@ function ynToggle(btn) {
         document.getElementById('tbPanel').style.display = isYes ? 'none' : '';
     }
 }
+
+// ---------------- শতকরা (Percentage) ওয়েট মডেল ১-৪: ব্যাখ্যা প্যানেল + ওয়েট এডিটর ----------------
+// মডেল সিলেক্ট করলে আগে ব্যাখ্যা/সূত্র/উদাহরণ দেখায়, তারপর ওয়েট এডিটর ও Save বাটন।
+// ওয়েটের যোগফল ঠিক না হলে Save বাটন বন্ধ থাকে (সার্ভারেও একই যাচাই হয়)।
+(function () {
+    var P = {
+        terms: <?php echo json_encode($pct_terms, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>,
+        init: <?php echo json_encode($pct_init ?: new stdClass(), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>,
+        meta: <?php echo json_encode($pct_meta, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP); ?>
+    };
+    var panel = document.getElementById('pctPanel');
+    if (!panel) { return; }
+    var editor = document.getElementById('pctEditor');
+    var statusEl = document.getElementById('pctStatus');
+    var saveBtn = document.getElementById('pctSaveBtn');
+    var cfgEl = document.getElementById('pctConfig');
+    var state = {}, current = null, EPS = 0.011;
+
+    function esc(t) { return tbEsc(t); }
+    function num(v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; }
+    function fmt(n) { return (Math.round(n * 100) / 100).toString(); }
+    function blankItem() { return { term_id: 0, weight: '' }; }
+
+    function normalize(k) {
+        var m = P.meta[k], g = state[k] || [];
+        if (m.fixed) {
+            var out = [];
+            m.fixed.forEach(function (nm, i) { var src = g[i] || { weight: 0, items: [] }; out.push({ name: nm, weight: src.weight || 0, items: (src.items || []).slice() }); });
+            g = out;
+        } else if (!g.length) {
+            g = [{ name: '', weight: '', items: [] }];
+        }
+        g.forEach(function (grp) { if (!grp.items || !grp.items.length) { grp.items = [blankItem()]; } });
+        state[k] = g;
+    }
+    Object.keys(P.meta).forEach(function (k) { state[k] = JSON.parse(JSON.stringify(P.init[k] || [])); normalize(k); });
+
+    function termOptions(sel) {
+        var h = '<option value="0">— পরীক্ষা সিলেক্ট করুন —</option>';
+        P.terms.forEach(function (t) { h += '<option value="' + t.id + '"' + (+sel === t.id ? ' selected' : '') + '>' + esc(t.name) + '</option>'; });
+        return h;
+    }
+
+    function render() {
+        var k = current, m = P.meta[k], g = state[k], h = '';
+        g.forEach(function (grp, gi) {
+            h += '<div class="border rounded bg-white p-2 mb-3"><div class="row g-2 align-items-center mb-2">';
+            if (m.fixed) {
+                h += '<div class="col-md-5 fw-bold">' + esc(grp.name) + '</div>';
+            } else {
+                h += '<div class="col-md-5"><input type="text" class="form-control form-control-sm" placeholder="গ্রুপের নাম (যেমন: ১ম টার্ম)" value="' + esc(grp.name) + '" data-g="' + gi + '" data-f="name"></div>';
+            }
+            if (m.type === 'nested') {
+                h += '<div class="col-md-4"><div class="input-group input-group-sm"><span class="input-group-text">মোটে ওয়েট</span><input type="number" step="0.01" min="0" max="100" class="form-control" value="' + esc(grp.weight || '') + '" data-g="' + gi + '" data-f="weight"><span class="input-group-text">%</span></div></div>';
+            }
+            h += '<div class="col text-end"><span class="badge bg-secondary me-2" id="pctGSum' + gi + '"></span>';
+            if (!m.fixed) { h += '<button type="button" class="btn btn-sm btn-outline-danger" data-rmg="' + gi + '" title="গ্রুপ মুছুন"><i class="fa-solid fa-trash"></i></button>'; }
+            h += '</div></div>';
+            grp.items.forEach(function (it, ii) {
+                h += '<div class="row g-2 align-items-center mb-1">' +
+                     '<div class="col-md-6"><select class="form-select form-select-sm" data-g="' + gi + '" data-i="' + ii + '" data-f="term_id">' + termOptions(it.term_id) + '</select></div>' +
+                     '<div class="col-md-3"><div class="input-group input-group-sm"><input type="number" step="0.01" min="0" max="100" class="form-control" placeholder="ওয়েট" value="' + esc(it.weight === 0 ? '' : it.weight) + '" data-g="' + gi + '" data-i="' + ii + '" data-f="weight"><span class="input-group-text">%</span></div></div>' +
+                     '<div class="col-md-3"><button type="button" class="btn btn-sm btn-outline-danger" data-rmi="' + gi + ',' + ii + '" title="সারি মুছুন"><i class="fa-solid fa-xmark"></i></button></div></div>';
+            });
+            h += '<button type="button" class="btn btn-sm btn-outline-primary mt-1" data-addi="' + gi + '"><i class="fa-solid fa-plus"></i> পরীক্ষা যোগ করুন</button></div>';
+        });
+        if (!m.fixed) { h += '<button type="button" class="btn btn-sm btn-outline-primary mb-2" data-addg="1"><i class="fa-solid fa-plus"></i> নতুন গ্রুপ যোগ করুন</button>'; }
+        editor.innerHTML = h;
+        refresh();
+    }
+
+    // একই যাচাই সার্ভারেও হয় (rc_pct_validate_config)। ফেরত: {ok, msg, clean}
+    function check() {
+        var k = current, m = P.meta[k], g = state[k], used = {}, clean = [], allItems = 0, allSum = 0, gwSum = 0;
+        for (var gi = 0; gi < g.length; gi++) {
+            var grp = g[gi], items = [], gs = 0;
+            for (var ii = 0; ii < grp.items.length; ii++) {
+                var it = grp.items[ii], tid = +it.term_id || 0, w = Math.round(num(it.weight) * 100) / 100;
+                if (!tid && w <= 0) { continue; }
+                if (!tid) { return { ok: false, msg: 'প্রতিটা সারিতে একটা পরীক্ষা সিলেক্ট করুন।' }; }
+                if (used[tid]) { return { ok: false, msg: 'একই পরীক্ষা একাধিকবার ব্যবহার করা যাবে না।' }; }
+                if (w <= 0 || w > 100) { return { ok: false, msg: 'ওয়েট ০-এর বেশি এবং ১০০-এর মধ্যে হতে হবে।' }; }
+                used[tid] = 1; items.push({ term_id: tid, weight: w }); gs += w; allItems++; allSum += w;
+            }
+            var name = m.fixed ? grp.name : (grp.name || '').trim();
+            var gw = Math.round(num(grp.weight) * 100) / 100;
+            if (!m.fixed && !items.length && name === '' && gw <= 0) { continue; }
+            clean.push({ name: name, weight: gw, items: items, sum: gs });
+        }
+        if (!allItems) { return { ok: false, msg: 'কমপক্ষে একটা পরীক্ষা যোগ করুন এবং ওয়েট দিন।' }; }
+        if (m.type === 'flat') {
+            if (Math.abs(allSum - 100) > EPS) { return { ok: false, msg: 'সব ওয়েটের যোগফল এখন ' + fmt(allSum) + '% — ঠিক ১০০% হতে হবে।', clean: clean }; }
+            return { ok: true, msg: 'সব ওয়েটের যোগফল ' + fmt(allSum) + '% ✔', clean: clean };
+        }
+        for (var i = 0; i < clean.length; i++) {
+            var c = clean[i];
+            if (c.name === '') { return { ok: false, msg: 'প্রতিটা গ্রুপের একটা নাম দিন।', clean: clean }; }
+            if (!c.items.length) { return { ok: false, msg: '"' + c.name + '" গ্রুপে কোনো পরীক্ষা নেই — পরীক্ষা যোগ করুন বা গ্রুপটা মুছুন।', clean: clean }; }
+            if (Math.abs(c.sum - 100) > EPS) { return { ok: false, msg: '"' + c.name + '" গ্রুপের ভেতরের ওয়েটের যোগফল এখন ' + fmt(c.sum) + '% — ঠিক ১০০% হতে হবে।', clean: clean }; }
+            if (m.type === 'nested') {
+                if (c.weight <= 0 || c.weight > 100) { return { ok: false, msg: '"' + c.name + '" গ্রুপের মোটে ওয়েট ০-এর বেশি এবং ১০০-এর মধ্যে হতে হবে।', clean: clean }; }
+                gwSum += c.weight;
+            }
+        }
+        if (m.type === 'nested' && Math.abs(gwSum - 100) > EPS) { return { ok: false, msg: 'গ্রুপগুলোর মোটে ওয়েটের যোগফল এখন ' + fmt(gwSum) + '% — ঠিক ১০০% হতে হবে।', clean: clean }; }
+        return { ok: true, msg: m.type === 'nested' ? ('গ্রুপ ওয়েটের যোগফল ' + fmt(gwSum) + '% ✔ — সব ঠিক আছে।') : 'সব গ্রুপের ভেতরের ওয়েট ১০০% ✔', clean: clean };
+    }
+
+    function refresh() {
+        var k = current, m = P.meta[k], g = state[k];
+        // গ্রুপ ব্যাজ (লাইভ যোগফল)
+        g.forEach(function (grp, gi) {
+            var s = 0; grp.items.forEach(function (it) { if (+it.term_id) { s += num(it.weight); } });
+            var b = document.getElementById('pctGSum' + gi);
+            if (!b) { return; }
+            b.textContent = (m.type === 'flat' ? 'এই তালিকার মোট: ' : 'ভেতরের যোগফল: ') + fmt(s) + '%' + (m.type === 'flat' ? '' : ' / 100%');
+            b.className = 'badge me-2 ' + (m.type === 'flat' ? 'bg-secondary' : (Math.abs(s - 100) <= EPS ? 'bg-success' : 'bg-danger'));
+        });
+        var r = check();
+        statusEl.textContent = r.msg;
+        statusEl.className = 'small my-2 fw-bold ' + (r.ok ? 'text-success' : 'text-danger');
+        saveBtn.disabled = !r.ok;
+    }
+
+    editor.addEventListener('input', function (e) { applyField(e.target); });
+    editor.addEventListener('change', function (e) { applyField(e.target); });
+    function applyField(el) {
+        if (!el.hasAttribute || !el.hasAttribute('data-f')) { return; }
+        var gi = +el.getAttribute('data-g'), f = el.getAttribute('data-f'), grp = state[current][gi];
+        if (el.hasAttribute('data-i')) { grp.items[+el.getAttribute('data-i')][f] = el.value; } else { grp[f] = el.value; }
+        refresh();
+    }
+    editor.addEventListener('click', function (e) {
+        var b = e.target.closest('button'); if (!b) { return; }
+        var g = state[current];
+        if (b.hasAttribute('data-addi')) { g[+b.getAttribute('data-addi')].items.push(blankItem()); }
+        else if (b.hasAttribute('data-rmi')) {
+            var p = b.getAttribute('data-rmi').split(','), arr = g[+p[0]].items; arr.splice(+p[1], 1); if (!arr.length) { arr.push(blankItem()); }
+        }
+        else if (b.hasAttribute('data-addg')) { g.push({ name: '', weight: '', items: [blankItem()] }); }
+        else if (b.hasAttribute('data-rmg')) { g.splice(+b.getAttribute('data-rmg'), 1); if (!g.length) { g.push({ name: '', weight: '', items: [blankItem()] }); } }
+        else { return; }
+        render();
+    });
+
+    function onSelect() {
+        var sel = document.querySelector('input[name="aggregate_result_type"][data-pct="1"]:checked');
+        current = sel ? sel.value : null;
+        panel.classList.toggle('d-none', !current);
+        document.querySelectorAll('.pct-explain').forEach(function (d) { d.classList.toggle('d-none', d.getAttribute('data-model') !== current); });
+        if (current && editor) { render(); }
+        rsRefreshBar();
+    }
+    document.querySelectorAll('input[name="aggregate_result_type"]').forEach(function (r) { r.addEventListener('change', onSelect); });
+
+    // সেভের আগে JSON বানিয়ে লুকানো ফিল্ডে বসাই; ভুল থাকলে ফর্ম পাঠানো বন্ধ
+    var form = panel.closest('form');
+    if (form) {
+        form.addEventListener('submit', function (e) {
+            if (!current || !editor) { return; }
+            var r = check();
+            if (!r.ok) { e.preventDefault(); statusEl.textContent = r.msg; statusEl.className = 'small my-2 fw-bold text-danger'; return; }
+            cfgEl.value = JSON.stringify(r.clean.map(function (c) { return { name: c.name, weight: c.weight, items: c.items }; }));
+        });
+    }
+    onSelect();
+})();
 
 // ---------------- Merit Tie-Breaker ক্রাইটেরিয়া (AJAX) ----------------
 var TB = {
