@@ -32,6 +32,9 @@ function far_num($n): string { $n = (float) $n; return floor($n) == $n ? number_
 
 $settings = $pdo->query("SELECT aggregate_result_type FROM exam_result_settings WHERE id = 1")->fetch();
 $aggregate_type = $settings['aggregate_result_type'] ?? 'Terms Wise Percentage';
+// শতকরা ওয়েট মডেল (মডেল ১-৪) সিলেক্ট থাকলে Term-গুলো মডেলের কনফিগ থেকে আসে, চেকবক্স থেকে নয়
+$is_pct = rc_pct_is_model($aggregate_type);
+$agg_display = $is_pct ? ('শতকরা ' . str_replace('Percentage Model ', 'মডেল ', $aggregate_type)) : $aggregate_type;
 
 $current_session = $pdo->query("SELECT * FROM academic_sessions WHERE is_current_session = 1 LIMIT 1")->fetch();
 $current_session_id = $current_session ? (int) $current_session['id'] : 0;
@@ -78,6 +81,22 @@ if (!$searched) {
     $f_term_ids = array_map('intval', array_column(array_filter($terms, fn($t) => (int) $t['is_aggregated_result'] === 1), 'id'));
 }
 
+// শতকরা মডেল: ওয়েট কনফিগ থেকে Term নেওয়া হয়। মডেল ৩-এ (প্রতি টার্ম আলাদা রেজাল্ট) যে গ্রুপ সিলেক্ট করা, শুধু তার Term-গুলো
+$pct_groups = []; $pct_pick_group_id = 0; $pct_pick_name = '';
+$pct_is_standalone = $is_pct && (rc_pct_models()[$aggregate_type]['type'] ?? '') === 'standalone';
+if ($is_pct) {
+    $pct_groups = rc_pct_load_config($pdo, $f_session_id, $aggregate_type);
+    $f_term_ids = rc_pct_config_term_ids($pct_groups);
+    if ($pct_is_standalone && $pct_groups) {
+        $want = (int) ($_GET['pct_group_id'] ?? 0);
+        $picked = null;
+        foreach ($pct_groups as $pg) { $picked = $pg; if ($pg['id'] === $want) { break; } }
+        $pct_pick_group_id = (int) $picked['id'];
+        $pct_pick_name = $picked['name'];
+        $f_term_ids = rc_pct_config_term_ids([$picked]);
+    }
+}
+
 $class_name = $shift_name = $section_name = $group_name = $sheet_session_name = '';
 $rows = [];
 $subject_columns = []; // subject_id => name (ইউনিয়ন, ডিসপ্লের জন্য)
@@ -119,7 +138,7 @@ if ($searched && $f_class_id) {
             // students খালি — নিচে "কোনো শিক্ষার্থী পাওয়া যায়নি" দেখাবে
         } else {
             foreach ($students as $stu) {
-                $agg = rc_aggregate_terms_result($pdo, (int) $stu['id'], $f_term_ids, $f_class_id, $aggregate_type, $grade_bands);
+                $agg = rc_aggregate_terms_result($pdo, (int) $stu['id'], $f_term_ids, $f_class_id, $aggregate_type, $grade_bands, $pct_pick_group_id);
 
                 foreach ($agg['subject_breakdown'] as $sid => $sb) {
                     if (!isset($subject_columns[$sid])) { $subject_columns[$sid] = $sb['name']; }
@@ -180,7 +199,7 @@ $fail_pct = $total_students > 0 ? round(($total_fail / $total_students) * 100) :
     <form method="GET" action="index.php" id="farFilterForm">
         <input type="hidden" name="page" value="result_final_aggregated_result">
         <div class="alert alert-info py-2 small mb-3">
-            বর্তমানে সক্রিয় হিসাব-পদ্ধতি: <strong><?php echo farv($aggregate_type); ?></strong>
+            বর্তমানে সক্রিয় হিসাব-পদ্ধতি: <strong><?php echo farv($agg_display); ?></strong>
             — বদলাতে <a href="index.php?page=result_settings">Master Settings</a> পেজে "Aggregate Result Type" দেখুন।
         </div>
         <div class="row g-3">
@@ -228,6 +247,25 @@ $fail_pct = $total_students > 0 ? round(($total_fail / $total_students) * 100) :
                     <?php endforeach; ?>
                 </select>
             </div>
+            <?php if ($is_pct): ?>
+            <div class="col-md-9">
+                <label class="form-label fw-bold">পরীক্ষা ও ওয়েট</label>
+                <div class="small text-muted mt-1">
+                    এই মডেলে কোন কোন পরীক্ষা কত শতাংশে যুক্ত হবে তা Master Settings-এ সেট করা কনফিগ থেকে আসে।
+                    <?php if (!$pct_groups): ?><span class="text-danger fw-bold">এই সেশনের জন্য এখনো ওয়েট সেট করা হয়নি।</span><?php endif; ?>
+                </div>
+                <?php if ($pct_is_standalone && $pct_groups): ?>
+                    <div class="mt-2" style="max-width:320px;">
+                        <label class="form-label fw-bold small mb-1">কোন টার্মের (গ্রুপের) রেজাল্ট দেখবেন</label>
+                        <select name="pct_group_id" class="form-select form-select-sm">
+                            <?php foreach ($pct_groups as $pg): ?>
+                                <option value="<?php echo (int) $pg['id']; ?>" <?php echo $pct_pick_group_id === (int) $pg['id'] ? 'selected' : ''; ?>><?php echo farv($pg['name']); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                <?php endif; ?>
+            </div>
+            <?php else: ?>
             <div class="col-md-9">
                 <label class="form-label fw-bold">যে Exam Term-গুলো মিলিয়ে Final Result বের হবে <span class="text-danger">*</span></label>
                 <div class="d-flex flex-wrap gap-3 mt-1">
@@ -239,6 +277,7 @@ $fail_pct = $total_students > 0 ? round(($total_fail / $total_students) * 100) :
                     <?php endforeach; ?>
                 </div>
             </div>
+            <?php endif; ?>
             <div class="col-md-3 d-flex align-items-end">
                 <div class="form-check">
                     <input type="checkbox" class="form-check-input" id="farShowMerit" name="show_merit" value="1" <?php echo $show_merit ? 'checked' : ''; ?>>
@@ -256,7 +295,9 @@ $fail_pct = $total_students > 0 ? round(($total_fail / $total_students) * 100) :
 
 <?php if ($searched): ?>
     <?php if ($no_terms_selected): ?>
-        <div class="alert alert-warning mt-3 no-print">অন্তত একটা Exam Term সিলেক্ট করুন।</div>
+        <div class="alert alert-warning mt-3 no-print"><?php echo $is_pct
+            ? 'এই সেশনের জন্য এই শতকরা মডেলের ওয়েট সেট করা নেই। আগে <a href="index.php?page=result_settings#templates">Master Settings</a> থেকে মডেল সিলেক্ট করে ওয়েট সেভ করুন।'
+            : 'অন্তত একটা Exam Term সিলেক্ট করুন।'; ?></div>
     <?php elseif (empty($grade_bands)): ?>
         <div class="alert alert-warning mt-3 no-print">
             এই সেশনের জন্য কোনো <strong>Grade Point</strong> সেট করা নেই। আগে
@@ -279,7 +320,7 @@ $fail_pct = $total_students > 0 ? round(($total_fail / $total_students) * 100) :
                    <span style="color:#16a34a;">Pass : <?php echo (int) $total_pass; ?> (<?php echo $pass_pct; ?>%)</span>,
                    <span style="color:#dc2626;">Fail : <?php echo (int) $total_fail; ?> (<?php echo $fail_pct; ?>%)</span>
                 </p>
-                <div class="far-badge">Final Aggregated Result : <?php echo farv($sheet_session_name); ?> (<?php echo farv($aggregate_type); ?>)</div>
+                <div class="far-badge">Final Aggregated Result : <?php echo farv($sheet_session_name); ?> (<?php echo farv($agg_display); ?><?php echo $pct_pick_name !== '' ? ' — ' . farv($pct_pick_name) : ''; ?>)</div>
             </div>
 
             <div class="table-responsive">
@@ -290,7 +331,7 @@ $fail_pct = $total_students > 0 ? round(($total_fail / $total_students) * 100) :
                             <th>Roll</th>
                             <th class="far-left">Name</th>
                             <?php foreach ($subject_columns as $sid => $sname): ?>
-                                <th><?php echo farv($sname); ?> <span class="text-muted small d-block" style="font-weight:400;">(গড়)</span></th>
+                                <th><?php echo farv($sname); ?> <span class="text-muted small d-block" style="font-weight:400;"><?php echo $is_pct ? '(ওয়েটেড)' : '(গড়)'; ?></span></th>
                             <?php endforeach; ?>
                             <th>Total</th>
                             <th>%</th>
