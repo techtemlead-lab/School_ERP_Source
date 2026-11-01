@@ -156,8 +156,9 @@ $view = $_GET['view'] ?? 'config';
     $sess_s->execute([$g['session_id']]);
     $sheet_session_name = $sess_s->fetchColumn() ?: date('Y');
     ?>
+    <?php require_once __DIR__ . '/employee_attendance_common.php'; ea_print_css('portrait'); ?>
     <style>
-        @media print { .no-print { display: none !important; } body { background: #fff; } }
+        
         .mbb-header { text-align: center; margin-bottom: 10px; }
         .mbb-header h4 { font-weight: bold; color: #1e3a8a; margin-bottom: 4px; }
         .mbb-header .addr { color: #444; font-size: 13px; margin-bottom: 2px; }
@@ -174,7 +175,7 @@ $view = $_GET['view'] ?? 'config';
 
     <div class="no-print d-flex justify-content-between align-items-center mb-3">
         <a href="index.php?page=result_marks_entry_blank_sheet" class="btn btn-secondary"><i class="fa-solid fa-arrow-left"></i> Back</a>
-        <button type="button" class="btn btn-primary fw-bold" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
+        <?php ea_print_controls('portrait', false); ?>
     </div>
 
     <div class="card-custom">
