@@ -410,8 +410,12 @@ function rc_build_merit_map(PDO $pdo, array $students, int $session_id, int $cla
 // =========================================================================
 
 if (!function_exists('rc_aggregate_terms_result')) {
-function rc_aggregate_terms_result(PDO $pdo, int $student_id, array $term_ids, int $class_id, string $aggregate_type, array $grade_bands): array
+function rc_aggregate_terms_result(PDO $pdo, int $student_id, array $term_ids, int $class_id, string $aggregate_type, array $grade_bands, int $pick_group_id = 0): array
 {
+    // শতকরা (Percentage) ওয়েট মডেল ১-৪ — নিচে আলাদা ফাংশনে হিসাব হয় (আগের ৪টা গড়-ভিত্তিক পদ্ধতি অপরিবর্তিত)
+    if (rc_pct_is_model($aggregate_type)) {
+        return rc_aggregate_pct_model($pdo, $student_id, $term_ids, $class_id, $aggregate_type, $grade_bands, $pick_group_id);
+    }
     $per_term = [];
     // subject_id => ['name'=>, 'entries'=>[ ['obtained'=>,'full'=>,'parts'=>[part_id=>['obtained'=>,'full'=>,'name'=>]]] , ... ] ]
     $subject_union = [];
@@ -543,6 +547,336 @@ function rc_aggregate_terms_result(PDO $pdo, int $student_id, array $term_ids, i
         'final_gl' => $final_gl,
         'final_gpa' => $final_gpa,
         'final_fail' => $final_fail,
+    ];
+}
+}
+
+// =========================================================================
+// শতকরা (Percentage) ওয়েট মডেল ১-৪ — Master Settings > Result Templates >
+// "Aggregate Result Type"-এ নতুন যোগ হওয়া অপশন। প্রতিটা পরীক্ষা (Exam Term — টার্ম,
+// মাসিক বা ক্লাস টেস্ট যেটাই Exam Terms পেজে বানানো) নিজের % পেয়ে অ্যাডমিনের সেট করা
+// ওয়েট অনুযায়ী ফাইনাল % গঠন করে। ওয়েট Session অনুযায়ী result_pct_groups/result_pct_items-এ থাকে।
+//   মডেল ১ (flat)       : ফাইনাল% = Σ (ওয়েট × পরীক্ষার%) ÷ ১০০ ; ওয়েটের যোগফল ১০০
+//   মডেল ২ (nested)     : গ্রুপ% = Σ (আইটেম ওয়েট × পরীক্ষার%) ÷ ১০০ (যোগফল ১০০) ;
+//                          ফাইনাল% = Σ (গ্রুপ ওয়েট × গ্রুপ%) ÷ ১০০ (গ্রুপ ওয়েটের যোগফল ১০০)
+//   মডেল ৩ (standalone) : প্রতিটা গ্রুপ আলাদা রেজাল্ট (মাসিক ১০% + টার্ম ৯০%), অন্য গ্রুপের সাথে যোগ হয় না
+//   মডেল ৪ (flat)       : সাময়িক ও মাসিক — আলাদা দুই তালিকা, সব ওয়েট মিলে ১০০
+// অনুপস্থিত / মার্ক এন্ট্রি নেই / সাবজেক্ট অ্যাসাইন নেই = সেই পরীক্ষা ০% ধরা হয় (ওয়েট পুনর্বণ্টন হয় না)।
+// =========================================================================
+
+if (!function_exists('rc_pct_models')) {
+function rc_pct_models(): array
+{
+    return [
+        'Percentage Model 1' => ['type' => 'flat',       'fixed_groups' => ['টার্ম']],
+        'Percentage Model 2' => ['type' => 'nested',     'fixed_groups' => null],
+        'Percentage Model 3' => ['type' => 'standalone', 'fixed_groups' => null],
+        'Percentage Model 4' => ['type' => 'flat',       'fixed_groups' => ['সাময়িক পরীক্ষা', 'মাসিক পরীক্ষা']],
+    ];
+}
+}
+
+if (!function_exists('rc_pct_is_model')) {
+function rc_pct_is_model(string $t): bool
+{
+    return isset(rc_pct_models()[$t]);
+}
+}
+
+if (!function_exists('rc_pct_ensure_tables')) {
+function rc_pct_ensure_tables(PDO $pdo): void
+{
+    static $done = false;
+    if ($done) { return; }
+    $done = true;
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS result_pct_groups (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            session_id INT NOT NULL,
+            model_key VARCHAR(50) NOT NULL,
+            group_name VARCHAR(100) NOT NULL DEFAULT '',
+            group_weight DECIMAL(6,2) NOT NULL DEFAULT 0.00,
+            sort_order INT NOT NULL DEFAULT 0,
+            KEY idx_model (session_id, model_key)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS result_pct_items (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            group_id INT NOT NULL,
+            term_id INT NOT NULL,
+            weight DECIMAL(6,2) NOT NULL DEFAULT 0.00,
+            sort_order INT NOT NULL DEFAULT 0,
+            KEY idx_group (group_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+}
+}
+
+// সংরক্ষিত কনফিগ: [ ['id'=>, 'name'=>, 'weight'=>, 'items'=>[ ['term_id'=>, 'weight'=>], ... ]], ... ]
+if (!function_exists('rc_pct_load_config')) {
+function rc_pct_load_config(PDO $pdo, int $session_id, string $model_key): array
+{
+    rc_pct_ensure_tables($pdo);
+    $g = $pdo->prepare("SELECT id, group_name, group_weight FROM result_pct_groups WHERE session_id = ? AND model_key = ? ORDER BY sort_order ASC, id ASC");
+    $g->execute([$session_id, $model_key]);
+    $groups = [];
+    $it = $pdo->prepare("SELECT term_id, weight FROM result_pct_items WHERE group_id = ? ORDER BY sort_order ASC, id ASC");
+    foreach ($g->fetchAll() as $row) {
+        $it->execute([(int) $row['id']]);
+        $items = [];
+        foreach ($it->fetchAll() as $i) { $items[] = ['term_id' => (int) $i['term_id'], 'weight' => (float) $i['weight']]; }
+        $groups[] = ['id' => (int) $row['id'], 'name' => (string) $row['group_name'], 'weight' => (float) $row['group_weight'], 'items' => $items];
+    }
+    return $groups;
+}
+}
+
+if (!function_exists('rc_pct_config_term_ids')) {
+function rc_pct_config_term_ids(array $groups): array
+{
+    $ids = [];
+    foreach ($groups as $g) { foreach ($g['items'] as $i) { $ids[(int) $i['term_id']] = true; } }
+    return array_keys($ids);
+}
+}
+
+// ফর্ম থেকে আসা কনফিগ যাচাই + পরিষ্কার করা। ফেরত: [ত্রুটির বার্তা ('' হলে ঠিক আছে), পরিষ্কার গ্রুপ তালিকা]
+if (!function_exists('rc_pct_validate_config')) {
+function rc_pct_validate_config(string $model_key, array $groups_in, array $valid_term_ids): array
+{
+    $m = rc_pct_models()[$model_key] ?? null;
+    if (!$m) { return ['অজানা মডেল।', []]; }
+    $type = $m['type'];
+    $fixed = $m['fixed_groups'];
+    $eps = 0.011;
+
+    $src = [];
+    if ($fixed !== null) { foreach (array_keys($fixed) as $i) { $src[] = $groups_in[$i] ?? []; } }
+    else { $src = array_values($groups_in); }
+
+    $clean = []; $used = [];
+    foreach ($src as $gi => $g) {
+        if (!is_array($g)) { $g = []; }
+        $name = $fixed !== null ? $fixed[$gi] : trim((string) ($g['name'] ?? ''));
+        $gw = round((float) ($g['weight'] ?? 0), 2);
+        $items = [];
+        foreach ((array) ($g['items'] ?? []) as $it) {
+            $tid = (int) ($it['term_id'] ?? 0);
+            $w = round((float) ($it['weight'] ?? 0), 2);
+            if ($tid <= 0 && $w <= 0) { continue; } // ফাঁকা সারি
+            if ($tid <= 0) { return ['প্রতিটা সারিতে একটা পরীক্ষা সিলেক্ট করতে হবে।', []]; }
+            if (!in_array($tid, $valid_term_ids, true)) { return ['সিলেক্ট করা পরীক্ষা এই সেশনের সক্রিয় Exam Term নয়।', []]; }
+            if (isset($used[$tid])) { return ['একই পরীক্ষা একাধিকবার ব্যবহার করা যাবে না।', []]; }
+            if ($w <= 0 || $w > 100) { return ['ওয়েট ০-এর বেশি এবং ১০০-এর মধ্যে হতে হবে।', []]; }
+            $used[$tid] = true;
+            $items[] = ['term_id' => $tid, 'weight' => $w];
+        }
+        if ($fixed === null && !$items && $name === '' && $gw <= 0) { continue; } // সম্পূর্ণ ফাঁকা গ্রুপ বাদ
+        $clean[] = ['name' => $name, 'weight' => $gw, 'items' => $items];
+    }
+
+    $all_items = 0; $all_sum = 0.0;
+    foreach ($clean as $g) { foreach ($g['items'] as $i) { $all_items++; $all_sum += $i['weight']; } }
+    if ($all_items === 0) { return ['কমপক্ষে একটা পরীক্ষা যোগ করুন।', []]; }
+
+    if ($type === 'flat') {
+        if (abs($all_sum - 100) > $eps) { return ['সব পরীক্ষার ওয়েটের যোগফল ঠিক ১০০ হতে হবে (এখন ' . rtrim(rtrim(number_format($all_sum, 2, '.', ''), '0'), '.') . ')।', []]; }
+        foreach ($clean as $k => $g) {
+            $s = 0.0; foreach ($g['items'] as $i) { $s += $i['weight']; }
+            $clean[$k]['weight'] = round($s, 2); // flat-এ গ্রুপের ওয়েট = আইটেমের যোগফল (শুধু প্রদর্শনের জন্য)
+        }
+        return ['', $clean];
+    }
+
+    $gw_sum = 0.0;
+    foreach ($clean as $k => $g) {
+        if ($g['name'] === '') { return ['প্রতিটা গ্রুপের একটা নাম দিন।', []]; }
+        if (!$g['items']) { return ['"' . $g['name'] . '" গ্রুপে কোনো পরীক্ষা নেই — পরীক্ষা যোগ করুন বা গ্রুপটা মুছুন।', []]; }
+        $s = 0.0; foreach ($g['items'] as $i) { $s += $i['weight']; }
+        if (abs($s - 100) > $eps) { return ['"' . $g['name'] . '" গ্রুপের ভেতরের ওয়েটের যোগফল ঠিক ১০০ হতে হবে (এখন ' . rtrim(rtrim(number_format($s, 2, '.', ''), '0'), '.') . ')।', []]; }
+        if ($type === 'nested') {
+            if ($g['weight'] <= 0 || $g['weight'] > 100) { return ['"' . $g['name'] . '" গ্রুপের ওয়েট ০-এর বেশি এবং ১০০-এর মধ্যে হতে হবে।', []]; }
+            $gw_sum += $g['weight'];
+        } else {
+            $clean[$k]['weight'] = 0.0; // standalone-এ গ্রুপ ওয়েট নেই
+        }
+    }
+    if ($type === 'nested' && abs($gw_sum - 100) > $eps) {
+        return ['গ্রুপগুলোর ওয়েটের যোগফল ঠিক ১০০ হতে হবে (এখন ' . rtrim(rtrim(number_format($gw_sum, 2, '.', ''), '0'), '.') . ')।', []];
+    }
+    return ['', $clean];
+}
+}
+
+if (!function_exists('rc_pct_save_config')) {
+function rc_pct_save_config(PDO $pdo, int $session_id, string $model_key, array $clean_groups): void
+{
+    rc_pct_ensure_tables($pdo);
+    $pdo->beginTransaction();
+    try {
+        $old = $pdo->prepare("SELECT id FROM result_pct_groups WHERE session_id = ? AND model_key = ?");
+        $old->execute([$session_id, $model_key]);
+        $del_items = $pdo->prepare("DELETE FROM result_pct_items WHERE group_id = ?");
+        foreach ($old->fetchAll(PDO::FETCH_COLUMN) as $gid) { $del_items->execute([(int) $gid]); }
+        $pdo->prepare("DELETE FROM result_pct_groups WHERE session_id = ? AND model_key = ?")->execute([$session_id, $model_key]);
+
+        $ig = $pdo->prepare("INSERT INTO result_pct_groups (session_id, model_key, group_name, group_weight, sort_order) VALUES (?, ?, ?, ?, ?)");
+        $ii = $pdo->prepare("INSERT INTO result_pct_items (group_id, term_id, weight, sort_order) VALUES (?, ?, ?, ?)");
+        foreach (array_values($clean_groups) as $gi => $g) {
+            $ig->execute([$session_id, $model_key, $g['name'], $g['weight'], $gi]);
+            $gid = (int) $pdo->lastInsertId();
+            foreach (array_values($g['items']) as $ti => $i) { $ii->execute([$gid, $i['term_id'], $i['weight'], $ti]); }
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) { $pdo->rollBack(); }
+        throw $e;
+    }
+}
+}
+
+// শুদ্ধ হিসাব (ডাটাবেস ছাড়া)। $pct_by_term = [term_id => %]। ফেরত: ['total' => ফাইনাল %, 'group_pct' => [group_id => মান]]
+// flat-এ group_pct = ঐ গ্রুপ থেকে মোটে যত পয়েন্ট যোগ হলো; nested/standalone-এ গ্রুপের নিজের %।
+// standalone-এ $pick_group_id যে গ্রুপের (না পেলে শেষ গ্রুপ) রেজাল্টই 'total'।
+if (!function_exists('rc_pct_compute')) {
+function rc_pct_compute(string $model_key, array $groups, array $pct_by_term, int $pick_group_id = 0): array
+{
+    $type = rc_pct_models()[$model_key]['type'] ?? 'flat';
+    $group_pct = []; $total = 0.0;
+    $standalone_val = null; // standalone-এ বেছে নেওয়া গ্রুপের মান (না পেলে শেষ গ্রুপের)
+    foreach ($groups as $gi => $g) {
+        $gid = $g['id'] ?? $gi;
+        $sum = 0.0;
+        foreach ($g['items'] as $it) { $sum += (float) $it['weight'] * (float) ($pct_by_term[$it['term_id']] ?? 0); }
+        $val = $sum / 100.0;
+        $group_pct[$gid] = $val;
+        if ($type === 'flat') { $total += $val; }
+        elseif ($type === 'nested') { $total += ((float) $g['weight']) * $val / 100.0; }
+        else {
+            if ($pick_group_id > 0 && (int) $gid === $pick_group_id) { $standalone_val = $val; $pick_group_id = -1; }
+            elseif ($pick_group_id !== -1) { $standalone_val = $val; } // এখনো মিলেনি — আপাতত শেষ দেখা গ্রুপ
+        }
+    }
+    if ($type === 'standalone') { $total = $standalone_val ?? 0.0; }
+    return ['total' => $total, 'group_pct' => $group_pct];
+}
+}
+
+if (!function_exists('rc_aggregate_pct_model')) {
+function rc_aggregate_pct_model(PDO $pdo, int $student_id, array $term_ids, int $class_id, string $model_key, array $grade_bands, int $pick_group_id = 0): array
+{
+    $empty = [
+        'per_term' => [], 'subject_breakdown' => [], 'final_obtained' => 0, 'final_full' => 0, 'final_percentage' => 0,
+        'final_gl' => 'F', 'final_gpa' => 0.0, 'final_fail' => true, 'group_pct' => [], 'config_missing' => false,
+    ];
+    $term_ids = array_values(array_filter(array_map('intval', $term_ids)));
+    if (!$term_ids) { return $empty; }
+
+    $s = $pdo->prepare("SELECT session_id FROM exam_terms WHERE id = ?");
+    $s->execute([$term_ids[0]]);
+    $session_id = (int) $s->fetchColumn();
+    $groups = $session_id ? rc_pct_load_config($pdo, $session_id, $model_key) : [];
+    if (!$groups) { $empty['config_missing'] = true; return $empty; }
+
+    // মডেল ৩-এ শুধু বেছে নেওয়া গ্রুপের (না পেলে শেষ গ্রুপের) পরীক্ষাগুলো লাগে
+    $type = rc_pct_models()[$model_key]['type'];
+    $active = $groups;
+    if ($type === 'standalone') {
+        $picked = null;
+        foreach ($groups as $g) { $picked = $g; if ($g['id'] === $pick_group_id) { break; } }
+        $active = [$picked];
+        $pick_group_id = (int) $picked['id'];
+    }
+    $need = rc_pct_config_term_ids($active);
+
+    $per_term = [];
+    $subj = []; // subject_id => ['name','optional','pct'=>[term_id=>%],'full_sum','n']
+    foreach ($need as $term_id) {
+        $defs = rc_get_subject_defs($pdo, $class_id, $term_id, 0);
+        if (!$defs) { continue; } // এই পরীক্ষায় Subject Assign নেই → ০% ধরা হবে
+        $subject_ids = array_keys($defs);
+        $in_subj = implode(',', array_fill(0, count($subject_ids), '?'));
+
+        $mk = $pdo->prepare("SELECT subject_id, part_id, marks_obtained FROM exam_marks WHERE term_id = ? AND student_id = ? AND subject_id IN ($in_subj)");
+        $mk->execute(array_merge([$term_id, $student_id], $subject_ids));
+        $marks_map = [];
+        foreach ($mk->fetchAll() as $r) { $marks_map[$r['subject_id']][$r['part_id']] = $r['marks_obtained']; }
+
+        $at = $pdo->prepare("SELECT subject_id, part_id, status FROM exam_attendance_subject WHERE term_id = ? AND student_id = ? AND subject_id IN ($in_subj)");
+        $at->execute(array_merge([$term_id, $student_id], $subject_ids));
+        $att_map = [];
+        foreach ($at->fetchAll() as $r) { $att_map[$r['subject_id']][$r['part_id']] = $r['status']; }
+
+        $res = rc_student_result($defs, $marks_map, $att_map, $grade_bands);
+        $per_term[$term_id] = [
+            'obtained_total' => $res['obtained_total'], 'full_total' => $res['full_total'],
+            'percentage' => $res['percentage'], 'fail' => $res['overall_fail'],
+            'opt_gpa_add' => $res['optional_gpa_add'] ?? 0.0,
+        ];
+
+        $i = 0;
+        foreach ($defs as $sid => $def) {
+            $sr = $res['subject_rows'][$i++];
+            if (!empty($sr['not_taken'])) { continue; }
+            if (!isset($subj[$sid])) { $subj[$sid] = ['name' => $def['name'], 'optional' => !empty($sr['optional']), 'pct' => [], 'full_sum' => 0.0, 'n' => 0]; }
+            $subj[$sid]['pct'][$term_id] = $sr['full'] > 0 ? ($sr['obtained'] / $sr['full']) * 100 : 0.0;
+            $subj[$sid]['full_sum'] += $sr['full'];
+            $subj[$sid]['n']++;
+        }
+    }
+
+    if (!$per_term) { $empty['group_pct'] = []; return $empty; }
+
+    $pct_by_term = []; $opt_by_term = [];
+    foreach ($need as $tid) {
+        $pct_by_term[$tid] = isset($per_term[$tid]) ? $per_term[$tid]['percentage'] : 0.0; // অনুপস্থিত/ডেটা নেই = ০
+        $opt_by_term[$tid] = isset($per_term[$tid]) ? (float) $per_term[$tid]['opt_gpa_add'] : 0.0;
+    }
+    $calc = rc_pct_compute($model_key, $active, $pct_by_term, $pick_group_id);
+    $final_percentage = $calc['total'];
+
+    $subject_breakdown = [];
+    foreach ($subj as $sid => $sb) {
+        $sp = [];
+        foreach ($need as $tid) { $sp[$tid] = $sb['pct'][$tid] ?? 0.0; }
+        $sc = rc_pct_compute($model_key, $active, $sp, $pick_group_id)['total'];
+        $avg_full = $sb['n'] > 0 ? $sb['full_sum'] / $sb['n'] : 0.0;
+        $subject_breakdown[$sid] = [
+            'name' => $sb['name'], 'optional' => $sb['optional'],
+            'avg_obtained' => ($sc / 100) * $avg_full, 'avg_full' => $avg_full,
+        ];
+    }
+
+    $sum_full = 0.0;
+    foreach ($per_term as $pt) { $sum_full += $pt['full_total']; }
+    $final_full = $sum_full / count($per_term);
+    $final_obtained = ($final_percentage / 100) * $final_full;
+
+    // ফেল = ফাইনাল %-এর Grade Point সেটিংসে পাস গ্রেড না পড়লে (মাসিক/ক্লাস টেস্টে আলাদা ফেল ধরা হয় না)
+    $final_gl = 'F'; $final_gpa = 0.00; $final_fail = false;
+    foreach ($grade_bands as $band) {
+        if ($final_percentage >= (float) $band['mark_from'] && $final_percentage <= (float) $band['mark_to']) {
+            $final_gl = $band['grade_letter']; $final_gpa = (float) $band['gpa']; break;
+        }
+    }
+    if ($final_gl === 'F') { $final_fail = true; }
+    if (!$final_fail) {
+        $opt_add = rc_pct_compute($model_key, $active, $opt_by_term, $pick_group_id)['total'];
+        [$final_gpa, $final_gl] = array_slice(rc_apply_optional_bonus($final_gpa, $opt_add, $grade_bands, $final_gl, ''), 0, 2);
+    }
+
+    return [
+        'per_term' => $per_term,
+        'subject_breakdown' => $subject_breakdown,
+        'final_obtained' => $final_obtained,
+        'final_full' => $final_full,
+        'final_percentage' => $final_percentage,
+        'final_gl' => $final_gl,
+        'final_gpa' => $final_gpa,
+        'final_fail' => $final_fail,
+        'group_pct' => $calc['group_pct'],
+        'config_missing' => false,
     ];
 }
 }
