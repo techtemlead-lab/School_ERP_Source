@@ -266,8 +266,9 @@ $result_map_json = mlv(json_encode(array_reduce($students_report, function ($car
     return $carry;
 }, [])));
 ?>
-<style>
-    @media print { .no-print { display: none !important; } body { background: #fff; } }
+<?php require_once __DIR__ . '/employee_attendance_common.php'; ea_print_css('landscape'); ?>
+    <style>
+    
     .mrl-header { text-align: center; margin-bottom: 10px; }
     .mrl-header h4 { font-weight: bold; color: #1e3a8a; margin-bottom: 4px; }
     .mrl-header .addr { color: #444; font-size: 13px; margin-bottom: 2px; }
@@ -424,7 +425,7 @@ $result_map_json = mlv(json_encode(array_reduce($students_report, function ($car
                 <span></span>
                 <div class="d-flex gap-2">
                     <button type="submit" name="send_result_sms" class="btn btn-primary fw-bold" style="background-color:#1e3a8a;" onclick="return confirm('সিলেক্ট করা অভিভাবকদের রেজাল্ট SMS পাঠানো হবে, নিশ্চিত?');"><i class="fa-solid fa-paper-plane"></i> Send SMS (All)</button>
-                    <button type="button" class="btn btn-primary fw-bold" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
+                    <?php ea_print_controls('landscape', false); ?>
                 </div>
             </div>
 

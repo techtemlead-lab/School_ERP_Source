@@ -105,17 +105,17 @@ if (!function_exists('ea_print_header')) {
 
 if (!function_exists('ea_print_controls')) {
     /** Portrait/Landscape বেছে নেওয়ার ড্রপডাউন + Print বাটন (স্ক্রিনে দেখায়, প্রিন্টে লুকায়)। */
-    function ea_print_controls(string $default = 'portrait'): void
+    function ea_print_controls(string $default = 'portrait', bool $wrap = true): void
     {
         $default = $default === 'landscape' ? 'landscape' : 'portrait';
-        echo '<div class="d-flex justify-content-end align-items-center gap-2 mb-2 no-print">'
+        echo ($wrap ? '<div class="d-flex justify-content-end align-items-center gap-2 mb-2 no-print">' : '<span class="d-inline-flex align-items-center gap-2 no-print">')
            . '<label class="small fw-bold mb-0" for="eaOrient">Page:</label>'
            . '<select id="eaOrient" class="form-select form-select-sm" style="width:auto;">'
            . '<option value="portrait"' . ($default === 'portrait' ? ' selected' : '') . '>Portrait</option>'
            . '<option value="landscape"' . ($default === 'landscape' ? ' selected' : '') . '>Landscape</option>'
            . '</select>'
            . '<button type="button" class="btn btn-sm btn-primary fw-bold" style="background-color:#1e3a8a;" onclick="eaPrint()"><i class="fa-solid fa-print"></i> Print</button>'
-           . '</div>'
+           . ($wrap ? '</div>' : '</span>')
            . '<script>function eaPrint(){var o=document.getElementById("eaOrient").value;var s=document.getElementById("eaPageStyle");'
            . 'if(!s){s=document.createElement("style");s.id="eaPageStyle";document.head.appendChild(s);}'
            . 's.textContent="@page{size:A4 "+o+";margin:8mm;}";window.print();}</script>';
@@ -129,5 +129,28 @@ if (!function_exists('ea_inst_name')) {
         if ($n !== '') { return $n; }
         try { return (string) ($pdo->query("SELECT institute_name FROM institute_settings WHERE id = 1")->fetchColumn() ?: ''); }
         catch (PDOException $e) { return ''; }
+    }
+}
+
+if (!function_exists('ea_print_css')) {
+    /** সাইডবার/টপবার লুকিয়ে টেবিলকে পুরো পৃষ্ঠায় ফিট করার প্রিন্ট CSS (লেআউট-এর ভেতরের রিপোর্ট পেজের জন্য)। */
+    function ea_print_css(string $orientation = 'portrait', int $font_px = 11): void
+    {
+        $o = $orientation === 'landscape' ? 'landscape' : 'portrait';
+        echo '<style>@media print {
+        @page { size: A4 ' . $o . '; margin: 8mm; }
+        html, body { background: #fff !important; height: auto !important; overflow: visible !important; }
+        .no-print, .sidebar, .sticky-top-area, .top-navbar, .breadcrumb-bar, .right-sidebar, footer { display: none !important; }
+        .main-wrapper, .main-wrapper.expanded { margin-left: 0 !important; width: 100% !important; min-height: 0 !important; }
+        .content-body { padding: 0 !important; margin: 0 !important; }
+        .card-custom { box-shadow: none !important; border: none !important; padding: 0 !important; margin: 0 !important; }
+        .table-responsive { overflow: visible !important; }
+        .card-custom table { width: 100% !important; font-size: ' . (int) $font_px . 'px !important; }
+        .card-custom table th, .card-custom table td { padding: 3px 4px !important; }
+        .card-custom table thead { display: table-header-group; }
+        .card-custom table tr { page-break-inside: avoid; }
+        .mbb-mark-cell { min-width: 0 !important; }
+        * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }</style>';
     }
 }
