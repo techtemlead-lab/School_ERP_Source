@@ -146,24 +146,70 @@ JS;
 // ------------------------------------------------------------------
 // Admit Card ডিজাইন (Result > Download Admit Card)
 // ------------------------------------------------------------------
-if (!function_exists('ac_css')) {
-    function ac_css(): string
+if (!function_exists('ac_layout')) {
+    /**
+     * Admit Card লেআউট: preset (4rect | 4sq | 3rect | custom) + custom হলে ori/w/h (mm)।
+     * A4, মার্জিন ৮mm, কার্ডের মাঝে ৪mm gap। রিটার্ন: ori, w, h (mm), cols, rows, per, gap, mode, dw (design px), k (scale)
+     */
+    function ac_layout(array $in = []): array
     {
-        return <<<'CSS'
+        $presets = [
+            '4rect' => ['portrait', 94, 135],
+            '4sq'   => ['portrait', 94, 94],
+            '3rect' => ['portrait', 194, 90],
+        ];
+        $preset = (string) ($in['preset'] ?? '4rect');
+        if ($preset !== 'custom' && !isset($presets[$preset])) { $preset = '4rect'; }
+        if ($preset === 'custom') {
+            $ori = (($in['ori'] ?? 'portrait') === 'landscape') ? 'landscape' : 'portrait';
+            $w = (float) ($in['w'] ?? 94); $h = (float) ($in['h'] ?? 94);
+        } else {
+            [$ori, $w, $h] = $presets[$preset];
+        }
+        $gap = 4; $margin = 8;
+        $pw = ($ori === 'landscape' ? 297 : 210) - 2 * $margin;
+        $ph = ($ori === 'landscape' ? 210 : 297) - 2 * $margin;
+        $w = max(50.0, min((float) $pw, $w));
+        $h = max(40.0, min((float) $ph, $h));
+        $cols = max(1, (int) floor(($pw + $gap) / ($w + $gap)));
+        $rows = max(1, (int) floor(($ph + $gap) / ($h + $gap)));
+        $aspect = $w / $h;
+        // কার্ডের ভেতরের কনটেন্টের ন্যূনতম ডিজাইন-উচ্চতা (H0) ও চওড়া (minDw) অনুযায়ী dw; যাতে কিছু কাটা না পড়ে
+        if ($aspect >= 1.6)      { $mode = 'wide'; $h0 = 340; $min_dw = 760; }
+        elseif ($aspect >= 1.2)  { $mode = 'std';  $h0 = 300; $min_dw = 400; }
+        else                     { $mode = 'tall'; $h0 = 380; $min_dw = 300; }
+        $dw = (int) ceil(max($min_dw, $h0 * $aspect));
+        $k = ($w * 3.7795) / $dw;
+        return [
+            'preset' => $preset, 'ori' => $ori, 'w' => round($w, 1), 'h' => round($h, 1),
+            'cols' => $cols, 'rows' => $rows, 'per' => $cols * $rows, 'gap' => $gap,
+            'mode' => $mode, 'dw' => $dw, 'k' => $k, 'dh' => ($h * 3.7795) / $k,
+        ];
+    }
+}
+
+if (!function_exists('ac_css')) {
+    function ac_css(?array $L = null): string
+    {
+        $L = $L ?: ac_layout();
+        $css = <<<'CSS'
 <style>
-@page { size: A4; margin: 8mm; }
 @media print {
     .no-print, .sidebar, .sticky-top-area, .top-navbar, .breadcrumb-bar, footer, .sidebar-overlay { display: none !important; }
     html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; height: auto !important; overflow: visible !important; }
     .main-wrapper, .main-wrapper.expanded { margin-left: 0 !important; width: 100% !important; min-height: 0 !important; padding: 0 !important; }
     .content-body { padding: 0 !important; margin: 0 !important; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .ac-grid { display: grid !important; grid-template-columns: repeat(2, 94mm); justify-content: center; gap: 4mm !important; }
-    .ac-grid .admitcard2 { width: 94mm !important; box-shadow: none !important; }
+    .ac-page { margin: 0 !important; border: none !important; padding: 0 !important; page-break-after: always; break-after: page; }
+    .ac-page:last-child { page-break-after: auto; break-after: auto; }
+    .ac-cell .admitcard2 { box-shadow: none !important; }
 }
-.ac-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; }
+.ac-pages { display: block; }
+.ac-page { display: grid; justify-content: center; align-content: start; margin: 0 auto 18px; padding: 8px; border: 1px dashed #cbd5e1; }
+.ac-cell { position: relative; overflow: hidden; border-radius: 10px; }
 .admitcard2 {
-    position: relative; width: 400px; max-width: 100%; background: #fff; overflow: hidden; text-align: left;
+    position: absolute; top: 0; left: 0; transform-origin: top left; display: flex; flex-direction: column;
+    background: #fff; overflow: hidden; text-align: left; box-sizing: border-box;
     border: 1.5px solid #0f766e; border-radius: 10px; font-family: 'Segoe UI', Arial, sans-serif;
     box-shadow: 0 2px 10px rgba(15,118,110,.15); page-break-inside: avoid; break-inside: avoid;
 }
@@ -190,7 +236,7 @@ if (!function_exists('ac_css')) {
     padding: 2px 12px; border-radius: 20px;
 }
 .admitcard2 .ad-title .term { font-weight: 700; font-size: 12px; color: #0f3d3e; }
-.admitcard2 .ad-body { display: flex; gap: 11px; padding: 11px; position: relative; }
+.admitcard2 .ad-body { display: flex; align-items: center; flex: 1 1 auto; gap: 11px; padding: 11px; position: relative; }
 .admitcard2 .ad-body::before {
     content: ''; position: absolute; inset: 0; background: var(--ad-wm) center/50% no-repeat; opacity: .06; pointer-events: none;
 }
@@ -203,7 +249,7 @@ if (!function_exists('ac_css')) {
 .admitcard2 .ad-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; }
 .admitcard2 .ad-grid span { display: block; font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: .4px; line-height: 1.2; }
 .admitcard2 .ad-grid b { font-size: 12.5px; color: #0f172a; line-height: 1.3; }
-.admitcard2 .ad-qr { width: 66px; height: 66px; flex: 0 0 66px; background: #fff; padding: 2px; border: 1px solid #cbd5e1; border-radius: 6px; align-self: flex-start; }
+.admitcard2 .ad-qr { width: 66px; height: 66px; flex: 0 0 66px; background: #fff; padding: 2px; border: 1px solid #cbd5e1; border-radius: 6px; }
 .admitcard2 .ad-qr img, .admitcard2 .ad-qr canvas { width: 100% !important; height: 100% !important; }
 .admitcard2 .ad-foot {
     display: flex; justify-content: space-between; align-items: flex-end; gap: 10px;
@@ -211,8 +257,24 @@ if (!function_exists('ac_css')) {
 }
 .admitcard2 .ad-sign { flex: 1; text-align: center; font-size: 9.5px; color: #475569; border-top: 1px solid #64748b; padding-top: 2px; }
 .admitcard2 .ad-note { text-align: center; font-size: 8.5px; color: #64748b; padding: 0 8px 6px; background: #f8fafc; }
+/* wide (চওড়া কার্ড): বড় ফন্ট/ছবি */
+.admitcard2.ac-wide .ad-photo { width: 110px; height: 132px; flex-basis: 110px; }
+.admitcard2.ac-wide .ad-qr { width: 90px; height: 90px; flex-basis: 90px; }
+.admitcard2.ac-wide .ad-name { font-size: 22px; }
+.admitcard2.ac-wide .ad-grid b { font-size: 16px; }
+.admitcard2.ac-wide .ad-inst b { font-size: 20px; }
+.admitcard2.ac-wide .ad-inst small { font-size: 12px; }
+/* tall/square: ছবি+তথ্য ওপরে, QR নিচে মাঝে */
+.admitcard2.ac-tall .ad-body { flex-wrap: wrap; justify-content: center; align-content: center; }
+.admitcard2.ac-tall .ad-info { flex: 1 1 150px; }
+.admitcard2.ac-tall .ad-qr { margin: 0 auto; }
 </style>
 CSS;
+        $page = '@page { size: A4 ' . $L['ori'] . '; margin: 8mm; }';
+        $dyn  = '.ac-page { grid-template-columns: repeat(' . (int) $L['cols'] . ', ' . $L['w'] . 'mm); gap: ' . (int) $L['gap'] . 'mm; }'
+              . '.ac-cell { width: ' . $L['w'] . 'mm; height: ' . $L['h'] . 'mm; }'
+              . '.admitcard2 { width: ' . $L['dw'] . 'px; height: ' . round($L['dh'], 2) . 'px; transform: scale(' . round($L['k'], 5) . '); }';
+        return str_replace('<style>', '<style>' . $page . $dyn, $css);
     }
 }
 
@@ -224,8 +286,9 @@ if (!function_exists('ac_card')) {
     {
         $logo = !empty($d['logo']) ? '../' . ltrim($d['logo'], '/') : '';
         $wm = $logo !== '' ? "--ad-wm:url('" . sc_e($logo) . "');" : '';
+        $L = $d['layout'] ?? ac_layout();
         ob_start(); ?>
-        <div class="admitcard2">
+        <div class="ac-cell"><div class="admitcard2 ac-<?php echo sc_e($L['mode']); ?>">
             <div class="ad-head">
                 <div class="ad-logo">
                     <?php if ($logo !== ''): ?><img src="<?php echo sc_e($logo); ?>" alt="Logo">
@@ -264,7 +327,7 @@ if (!function_exists('ac_card')) {
                 <div class="ad-sign">Head of Institute</div>
             </div>
             <div class="ad-note">পরীক্ষার হলে এই কার্ডটি অবশ্যই সঙ্গে আনতে হবে।</div>
-        </div>
+        </div></div>
         <?php
         return ob_get_clean();
     }
