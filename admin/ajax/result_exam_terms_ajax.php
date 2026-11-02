@@ -50,6 +50,14 @@ $pdo->exec(
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
 );
 
+// Main/Sub টার্ম ও ওয়েট কলাম (result_exam_terms.php-এর সাথে একই লজিক)
+require_once __DIR__ . '/../../config/report_card_helpers.php';
+rc_pct_ensure_term_columns($pdo);
+$et_active_model = '';
+try { $et_active_model = (string) $pdo->query("SELECT aggregate_result_type FROM exam_result_settings WHERE id = 1")->fetchColumn(); } catch (Throwable $e) { $et_active_model = ''; }
+$et_model_on   = rc_pct_is_model($et_active_model);
+$et_model_type = $et_model_on ? rc_pct_models()[$et_active_model]['type'] : '';
+
 $current_session = $pdo->query("SELECT * FROM academic_sessions WHERE is_current_session = 1 LIMIT 1")->fetch();
 $current_session_id = $current_session ? (int) $current_session['id'] : 0;
 $current_session_name = $current_session['session_name'] ?? '—';
@@ -71,6 +79,11 @@ $sql = "SELECT * FROM exam_terms WHERE " . implode(' AND ', $where) . " ORDER BY
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $rows = $stmt->fetchAll();
+$et_names = [];
+$nq = $pdo->prepare("SELECT id, term_name FROM exam_terms WHERE session_id = ?");
+$nq->execute([$current_session_id]);
+foreach ($nq->fetchAll() as $nr) { $et_names[(int) $nr['id']] = $nr['term_name']; }
+if ($et_model_on) { $rows = rc_term_tree_order($rows); }
 ?>
 <div class="d-flex justify-content-between align-items-center mb-3">
     <a href="index.php?page=result_exam_terms&view=add" class="btn btn-success"><i class="fa-solid fa-plus"></i></a>
@@ -114,6 +127,7 @@ $rows = $stmt->fetchAll();
                     <th>Term Name</th>
                     <th>Final Term ?</th>
                     <th>Aggregated Result ?</th>
+                    <?php if ($et_model_on): ?><th>Type / Weight</th><?php endif; ?>
                     <th>Status</th>
                     <th>Actions</th>
                 </tr>
@@ -129,6 +143,7 @@ $rows = $stmt->fetchAll();
                         </select>
                     </th>
                     <th></th>
+                    <?php if ($et_model_on): ?><th></th><?php endif; ?>
                     <th>
                         <select name="f_status" id="et_f_status" class="form-select form-select-sm">
                             <option value="All" <?php echo $f_status === 'All' ? 'selected' : ''; ?>>All</option>
@@ -144,17 +159,21 @@ $rows = $stmt->fetchAll();
                     <tr>
                         <td><?php echo $srl++; ?></td>
                         <td><?php echo (int) $row['rank']; ?></td>
-                        <td><?php echo etv($row['term_name']); ?></td>
+                        <td<?php echo !empty($row['depth']) ? ' style="padding-left:28px;"' : ''; ?>><?php echo !empty($row['depth']) ? '<span class="text-muted">↳</span> ' : ''; ?><?php echo etv($row['term_name']); ?></td>
                         <td><?php echo $row['is_final_term'] ? '<span class="badge bg-primary">Yes</span>' : '<span class="text-muted">No</span>'; ?></td>
                         <td><?php echo $row['is_aggregated_result'] ? '<span class="badge bg-primary">Yes</span>' : '<span class="text-muted">No</span>'; ?></td>
+                        <?php if ($et_model_on): ?><td><?php echo rc_term_weight_cell_html($row, $et_names, $et_model_type); ?></td><?php endif; ?>
                         <td><?php echo $row['status'] === 'Active' ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>'; ?></td>
                         <td class="text-nowrap">
+                            <?php if ($et_model_on && empty($row['parent_term_id']) && in_array($et_model_type, ['nested', 'standalone', 'avg_group'], true)): ?>
+                                <a href="index.php?page=result_exam_terms&view=add&parent=<?php echo (int) $row['id']; ?>" class="btn btn-sm btn-outline-success" title="এই Main টার্মের ভেতরে Sub (মাসিক/ক্লাস টেস্ট) যোগ করুন"><i class="fa-solid fa-plus"></i> Sub</a>
+                            <?php endif; ?>
                             <a href="index.php?page=result_exam_terms&view=edit&id=<?php echo (int) $row['id']; ?>" class="btn btn-sm btn-outline-primary" title="Edit"><i class="fa-solid fa-pen"></i></a>
                             <button type="button" class="btn btn-sm btn-outline-danger" title="Delete" onclick="return wcRowAction('index.php?page=result_exam_terms', 'delete_term', <?php echo (int) $row['id']; ?>, 'মুছে ফেলবেন?');"><i class="fa-solid fa-trash"></i></button>
                         </td>
                     </tr>
                 <?php endforeach; else: ?>
-                    <tr><td colspan="7" class="text-center text-muted py-3">No data found</td></tr>
+                    <tr><td colspan="<?php echo $et_model_on ? 8 : 7; ?>" class="text-center text-muted py-3">No data found</td></tr>
                 <?php endif; ?>
             </tbody>
         </table>
