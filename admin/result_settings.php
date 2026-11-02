@@ -121,6 +121,9 @@ $pct_labels = [
     'Percentage Model 3' => 'মডেল ৩ — প্রতি টার্ম আলাদা রেজাল্ট (মাসিক + টার্ম), অন্য টার্মের সাথে যোগ হয় না',
     'Percentage Model 4' => 'মডেল ৪ — সাময়িক ও মাসিক পরীক্ষার আলাদা শতকরা মিলিয়ে ফাইনাল ফলাফল',
 ];
+$avg_labels = [
+    'Average Model 1' => 'গড় মডেল — মাসিক + টার্ম নম্বরের গড় করে গ্রুপের রেজাল্ট, তারপর গ্রুপগুলোর গড় = ফাইনাল',
+];
 // মডেল সিলেক্ট করলে আগে দেখানোর ব্যাখ্যা: [কীভাবে কাজ করে (লাইন...), সূত্র, উদাহরণ]
 $pct_explain = [
     'Percentage Model 1' => [
@@ -161,6 +164,20 @@ $pct_explain = [
         'formula' => 'ফাইনাল % = Σ (প্রতিটা পরীক্ষার % × তার ওয়েট) ÷ ১০০ (সাময়িক ও মাসিক সব মিলিয়ে)',
         'example' => 'সাময়িক ৭০/৬০/৭৫% (ওয়েট ১০/১০/৬৫), মাসিক ৮০/৯০/৭০% (ওয়েট ৫/৫/৫) → ৭ + ৬ + ৪৮.৭৫ + ৪ + ৪.৫ + ৩.৫ = ৭৩.৭৫%',
     ],
+];
+$pct_explain['Average Model 1'] = [
+    'how' => [
+        'প্রতিটা গ্রুপ (যেমন "১ম টার্ম") = কিছু মাসিক/ক্লাস টেস্ট + টার্ম পরীক্ষা। গ্রুপের পরীক্ষাগুলোর প্রাপ্ত নম্বরের সাধারণ গড় (সমান ভাগ, কোনো ওয়েট/শতকরা নেই) = ঐ গ্রুপের রেজাল্ট।',
+        'তারপর সব গ্রুপের রেজাল্টের গড় = ফাইনাল রেজাল্ট (প্রাপ্ত নম্বরের গড়)। ফাইনাল % = গড় প্রাপ্ত নম্বর ÷ গড় পূর্ণমান × ১০০।',
+        'কোন গ্রুপে কোন কোন মাসিক/ক্লাস টেস্ট যুক্ত হবে তা নিচে গ্রুপ বানানোর সময়ই বেছে নেওয়া যাবে।',
+        'সাবধান: মাসিকের পূর্ণমান (যেমন ২০) আর টার্মের পূর্ণমান (যেমন ১০০) আলাদা হলে নম্বরের গড় টার্মের দিকে বেশি ঝুঁকবে না — দুটোর পূর্ণমানও একইভাবে গড় হয়। সমান পূর্ণমানের পরীক্ষা একসাথে রাখলে হিসাব সবচেয়ে পরিষ্কার।',
+    ],
+    'notes' => [
+        'কোনো পরীক্ষায় অনুপস্থিত থাকলে বা মার্ক এন্ট্রি না থাকলে সেই পরীক্ষার নম্বর ০ ধরেই গড় হয়।',
+        'পাস/ফেল ও গ্রেড ঠিক হয় ফাইনাল %-এর Grade Point সেটিং অনুযায়ী।',
+    ],
+    'formula' => 'গ্রুপের রেজাল্ট = (মাসিক নম্বর + টার্ম নম্বর) ÷ ২ ; ফাইনাল = সব গ্রুপের রেজাল্টের গড়',
+    'example' => 'সব পরীক্ষা ১০০-এর মধ্যে। ১ম গ্রুপ: মাসিক ৮০, টার্ম ৭০ → ৭৫ ; ২য় গ্রুপ: ৮০, ৬০ → ৭০ ; ফাইনাল গ্রুপ: ৯০, ৭৫ → ৮২.৫ ; ফাইনাল = (৭৫ + ৭০ + ৮২.৫) ÷ ৩ = ৭৫.৮৩ (পূর্ণমান ১০০ হলে ৭৫.৮৩%)',
 ];
 $pct_common_notes = [
     'কোনো পরীক্ষায় অনুপস্থিত থাকলে বা মার্ক এন্ট্রি না থাকলে সেই পরীক্ষা ০% ধরা হয় (ওয়েট অন্যদের মধ্যে ভাগ হয় না)।',
@@ -564,6 +581,12 @@ function render_color(string $name, string $label, string $val): void
                     </div>
                 <?php endforeach; ?>
                 <div class="fw-bold small mt-3 mb-2" style="color:#1e3a8a;">গড় (Average) ভিত্তিক পদ্ধতি</div>
+                <?php foreach ($avg_labels as $t => $lbl): ?>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="radio" name="aggregate_result_type" id="agg_<?php echo md5($t); ?>" value="<?php echo rsv($t); ?>" data-pct="1" <?php echo $settings['aggregate_result_type'] === $t ? 'checked' : ''; ?>>
+                        <label class="form-check-label" for="agg_<?php echo md5($t); ?>"><?php echo rsv($lbl); ?></label>
+                    </div>
+                <?php endforeach; ?>
                 <?php foreach ($aggregate_types as $t): ?>
                     <div class="form-check mb-2">
                         <input class="form-check-input" type="radio" name="aggregate_result_type" id="agg_<?php echo md5($t); ?>" value="<?php echo rsv($t); ?>" <?php echo $settings['aggregate_result_type'] === $t ? 'checked' : ''; ?>>
@@ -577,17 +600,17 @@ function render_color(string $name, string $label, string $val): void
         <div id="pctPanel" class="border rounded p-3 mb-4 bg-light d-none">
             <?php foreach ($pct_explain as $mk => $ex): ?>
                 <div class="pct-explain d-none" data-model="<?php echo rsv($mk); ?>">
-                    <h6 class="fw-bold" style="color:#1e3a8a;"><i class="fa-solid fa-circle-info"></i> <?php echo rsv($pct_labels[$mk]); ?> — কীভাবে কাজ করে</h6>
+                    <h6 class="fw-bold" style="color:#1e3a8a;"><i class="fa-solid fa-circle-info"></i> <?php echo rsv($pct_labels[$mk] ?? ($avg_labels[$mk] ?? $mk)); ?> — কীভাবে কাজ করে</h6>
                     <ul class="small mb-2">
                         <?php foreach ($ex['how'] as $line): ?><li><?php echo rsv($line); ?></li><?php endforeach; ?>
-                        <?php foreach ($pct_common_notes as $line): ?><li><?php echo rsv($line); ?></li><?php endforeach; ?>
+                        <?php foreach (($ex['notes'] ?? $pct_common_notes) as $line): ?><li><?php echo rsv($line); ?></li><?php endforeach; ?>
                     </ul>
                     <div class="small mb-1"><span class="badge bg-primary">সূত্র</span> <?php echo rsv($ex['formula']); ?></div>
                     <div class="small mb-0"><span class="badge bg-success">উদাহরণ</span> <?php echo rsv($ex['example']); ?></div>
                 </div>
             <?php endforeach; ?>
             <hr>
-            <h6 class="fw-bold mb-2"><i class="fa-solid fa-sliders"></i> ওয়েট সেট করুন <span class="text-muted small fw-normal">(সেশন: <?php echo rsv($current_session['session_name'] ?? '—'); ?>)</span></h6>
+            <h6 class="fw-bold mb-2"><i class="fa-solid fa-sliders"></i> <span id="pctEditorTitle">ওয়েট সেট করুন</span> <span class="text-muted small fw-normal">(সেশন: <?php echo rsv($current_session['session_name'] ?? '—'); ?>)</span></h6>
             <?php if (!$pct_terms): ?>
                 <div class="alert alert-warning py-2 small mb-0">
                     বর্তমান সেশনে কোনো সক্রিয় Exam Term নেই। আগে <a href="index.php?page=result_exam_terms">Exam Terms</a> পেজে টার্ম/মাসিক/ক্লাস টেস্ট তৈরি করুন, তারপর এখানে ওয়েট বসান।
@@ -783,9 +806,10 @@ function ynToggle(btn) {
             if (!m.fixed) { h += '<button type="button" class="btn btn-sm btn-outline-danger" data-rmg="' + gi + '" title="গ্রুপ মুছুন"><i class="fa-solid fa-trash"></i></button>'; }
             h += '</div></div>';
             grp.items.forEach(function (it, ii) {
+                var isAvg = m.type === 'avg_group';
                 h += '<div class="row g-2 align-items-center mb-1">' +
-                     '<div class="col-md-6"><select class="form-select form-select-sm" data-g="' + gi + '" data-i="' + ii + '" data-f="term_id">' + termOptions(it.term_id) + '</select></div>' +
-                     '<div class="col-md-3"><div class="input-group input-group-sm"><input type="number" step="0.01" min="0" max="100" class="form-control" placeholder="ওয়েট" value="' + esc(it.weight === 0 ? '' : it.weight) + '" data-g="' + gi + '" data-i="' + ii + '" data-f="weight"><span class="input-group-text">%</span></div></div>' +
+                     '<div class="col-md-' + (isAvg ? '9' : '6') + '"><select class="form-select form-select-sm" data-g="' + gi + '" data-i="' + ii + '" data-f="term_id">' + termOptions(it.term_id) + '</select></div>' +
+                     (isAvg ? '' : '<div class="col-md-3"><div class="input-group input-group-sm"><input type="number" step="0.01" min="0" max="100" class="form-control" placeholder="ওয়েট" value="' + esc(it.weight === 0 ? '' : it.weight) + '" data-g="' + gi + '" data-i="' + ii + '" data-f="weight"><span class="input-group-text">%</span></div></div>') +
                      '<div class="col-md-3"><button type="button" class="btn btn-sm btn-outline-danger" data-rmi="' + gi + ',' + ii + '" title="সারি মুছুন"><i class="fa-solid fa-xmark"></i></button></div></div>';
             });
             h += '<button type="button" class="btn btn-sm btn-outline-primary mt-1" data-addi="' + gi + '"><i class="fa-solid fa-plus"></i> পরীক্ষা যোগ করুন</button></div>';
@@ -801,11 +825,11 @@ function ynToggle(btn) {
         for (var gi = 0; gi < g.length; gi++) {
             var grp = g[gi], items = [], gs = 0;
             for (var ii = 0; ii < grp.items.length; ii++) {
-                var it = grp.items[ii], tid = +it.term_id || 0, w = Math.round(num(it.weight) * 100) / 100;
+                var it = grp.items[ii], tid = +it.term_id || 0, w = m.type === 'avg_group' ? 0 : Math.round(num(it.weight) * 100) / 100;
                 if (!tid && w <= 0) { continue; }
                 if (!tid) { return { ok: false, msg: 'প্রতিটা সারিতে একটা পরীক্ষা সিলেক্ট করুন।' }; }
                 if (used[tid]) { return { ok: false, msg: 'একই পরীক্ষা একাধিকবার ব্যবহার করা যাবে না।' }; }
-                if (w <= 0 || w > 100) { return { ok: false, msg: 'ওয়েট ০-এর বেশি এবং ১০০-এর মধ্যে হতে হবে।' }; }
+                if (m.type !== 'avg_group' && (w <= 0 || w > 100)) { return { ok: false, msg: 'ওয়েট ০-এর বেশি এবং ১০০-এর মধ্যে হতে হবে।' }; }
                 used[tid] = 1; items.push({ term_id: tid, weight: w }); gs += w; allItems++; allSum += w;
             }
             var name = m.fixed ? grp.name : (grp.name || '').trim();
@@ -813,7 +837,14 @@ function ynToggle(btn) {
             if (!m.fixed && !items.length && name === '' && gw <= 0) { continue; }
             clean.push({ name: name, weight: gw, items: items, sum: gs });
         }
-        if (!allItems) { return { ok: false, msg: 'কমপক্ষে একটা পরীক্ষা যোগ করুন এবং ওয়েট দিন।' }; }
+        if (!allItems) { return { ok: false, msg: m.type === 'avg_group' ? 'কমপক্ষে একটা পরীক্ষা সিলেক্ট করুন।' : 'কমপক্ষে একটা পরীক্ষা যোগ করুন এবং ওয়েট দিন।' }; }
+        if (m.type === 'avg_group') {
+            for (var a = 0; a < clean.length; a++) {
+                if (clean[a].name === '') { return { ok: false, msg: 'প্রতিটা গ্রুপের একটা নাম দিন।', clean: clean }; }
+                if (!clean[a].items.length) { return { ok: false, msg: '"' + clean[a].name + '" গ্রুপে কোনো পরীক্ষা নেই — পরীক্ষা যোগ করুন বা গ্রুপটা মুছুন।', clean: clean }; }
+            }
+            return { ok: true, msg: clean.length + 'টা গ্রুপ ✔ — প্রতিটা গ্রুপ = তার পরীক্ষাগুলোর গড়; ফাইনাল = গ্রুপগুলোর গড়।', clean: clean };
+        }
         if (m.type === 'flat') {
             if (Math.abs(allSum - 100) > EPS) { return { ok: false, msg: 'সব ওয়েটের যোগফল এখন ' + fmt(allSum) + '% — ঠিক ১০০% হতে হবে।', clean: clean }; }
             return { ok: true, msg: 'সব ওয়েটের যোগফল ' + fmt(allSum) + '% ✔', clean: clean };
@@ -839,6 +870,11 @@ function ynToggle(btn) {
             var s = 0; grp.items.forEach(function (it) { if (+it.term_id) { s += num(it.weight); } });
             var b = document.getElementById('pctGSum' + gi);
             if (!b) { return; }
+            if (m.type === 'avg_group') {
+                var cnt = 0; grp.items.forEach(function (it) { if (+it.term_id) { cnt++; } });
+                b.textContent = 'পরীক্ষা: ' + cnt + 'টি'; b.className = 'badge me-2 bg-secondary';
+                return;
+            }
             b.textContent = (m.type === 'flat' ? 'এই তালিকার মোট: ' : 'ভেতরের যোগফল: ') + fmt(s) + '%' + (m.type === 'flat' ? '' : ' / 100%');
             b.className = 'badge me-2 ' + (m.type === 'flat' ? 'bg-secondary' : (Math.abs(s - 100) <= EPS ? 'bg-success' : 'bg-danger'));
         });
@@ -874,6 +910,8 @@ function ynToggle(btn) {
         current = sel ? sel.value : null;
         panel.classList.toggle('d-none', !current);
         document.querySelectorAll('.pct-explain').forEach(function (d) { d.classList.toggle('d-none', d.getAttribute('data-model') !== current); });
+        var ttl = document.getElementById('pctEditorTitle');
+        if (ttl && current) { ttl.textContent = P.meta[current].type === 'avg_group' ? 'গ্রুপ ও পরীক্ষা বেছে নিন' : 'ওয়েট সেট করুন'; }
         if (current && editor) { render(); }
         rsRefreshBar();
     }
