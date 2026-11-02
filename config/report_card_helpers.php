@@ -636,6 +636,8 @@ function rc_pct_models(): array
         'Percentage Model 2' => ['type' => 'nested',     'fixed_groups' => null],
         'Percentage Model 3' => ['type' => 'standalone', 'fixed_groups' => null],
         'Percentage Model 4' => ['type' => 'flat',       'fixed_groups' => ['সাময়িক পরীক্ষা', 'মাসিক পরীক্ষা']],
+        // গড় মডেল: প্রতিটা গ্রুপ = তার পরীক্ষাগুলোর (মাসিক + টার্ম) নম্বরের সাধারণ গড়; ফাইনাল = গ্রুপগুলোর গড়। ওয়েট/শতকরা নেই।
+        'Average Model 1'    => ['type' => 'avg_group',  'fixed_groups' => null],
     ];
 }
 }
@@ -727,12 +729,12 @@ function rc_pct_validate_config(string $model_key, array $groups_in, array $vali
         $items = [];
         foreach ((array) ($g['items'] ?? []) as $it) {
             $tid = (int) ($it['term_id'] ?? 0);
-            $w = round((float) ($it['weight'] ?? 0), 2);
+            $w = $type === 'avg_group' ? 0.0 : round((float) ($it['weight'] ?? 0), 2); // গড় মডেলে ওয়েট নেই
             if ($tid <= 0 && $w <= 0) { continue; } // ফাঁকা সারি
             if ($tid <= 0) { return ['প্রতিটা সারিতে একটা পরীক্ষা সিলেক্ট করতে হবে।', []]; }
             if (!in_array($tid, $valid_term_ids, true)) { return ['সিলেক্ট করা পরীক্ষা এই সেশনের সক্রিয় Exam Term নয়।', []]; }
             if (isset($used[$tid])) { return ['একই পরীক্ষা একাধিকবার ব্যবহার করা যাবে না।', []]; }
-            if ($w <= 0 || $w > 100) { return ['ওয়েট ০-এর বেশি এবং ১০০-এর মধ্যে হতে হবে।', []]; }
+            if ($type !== 'avg_group' && ($w <= 0 || $w > 100)) { return ['ওয়েট ০-এর বেশি এবং ১০০-এর মধ্যে হতে হবে।', []]; }
             $used[$tid] = true;
             $items[] = ['term_id' => $tid, 'weight' => $w];
         }
@@ -743,6 +745,15 @@ function rc_pct_validate_config(string $model_key, array $groups_in, array $vali
     $all_items = 0; $all_sum = 0.0;
     foreach ($clean as $g) { foreach ($g['items'] as $i) { $all_items++; $all_sum += $i['weight']; } }
     if ($all_items === 0) { return ['কমপক্ষে একটা পরীক্ষা যোগ করুন।', []]; }
+
+    if ($type === 'avg_group') {
+        foreach ($clean as $k => $g) {
+            if ($g['name'] === '') { return ['প্রতিটা গ্রুপের একটা নাম দিন।', []]; }
+            if (!$g['items']) { return ['"' . $g['name'] . '" গ্রুপে কোনো পরীক্ষা নেই — পরীক্ষা যোগ করুন বা গ্রুপটা মুছুন।', []]; }
+            $clean[$k]['weight'] = 0.0;
+        }
+        return ['', $clean];
+    }
 
     if ($type === 'flat') {
         if (abs($all_sum - 100) > $eps) { return ['সব পরীক্ষার ওয়েটের যোগফল ঠিক ১০০ হতে হবে (এখন ' . rtrim(rtrim(number_format($all_sum, 2, '.', ''), '0'), '.') . ')।', []]; }
@@ -827,6 +838,34 @@ function rc_pct_compute(string $model_key, array $groups, array $pct_by_term, in
 }
 }
 
+// গড় মডেলের শুদ্ধ হিসাব: গ্রুপ = তার পরীক্ষাগুলোর নম্বরের সাধারণ গড় (মার্ক নেই/অনুপস্থিত পরীক্ষা = ০ নম্বর);
+// ফাইনাল = গ্রুপগুলোর গড়। পূর্ণমানের গড়ও একইভাবে (যে পরীক্ষার পূর্ণমান জানা — অর্থাৎ Subject Assign আছে — শুধু সেগুলোর গড়)।
+// $obt_by_term / $full_by_term = [term_id => মান]; ফেরত: obtained, full, group_obtained, group_full
+if (!function_exists('rc_avg_group_compute')) {
+function rc_avg_group_compute(array $groups, array $obt_by_term, array $full_by_term): array
+{
+    $g_obt = []; $g_full = []; $sum_o = 0.0; $sum_f = 0.0; $n = 0;
+    foreach ($groups as $gi => $g) {
+        $gid = $g['id'] ?? $gi;
+        $cnt = count($g['items']);
+        if ($cnt === 0) { continue; }
+        $so = 0.0; $sf = 0.0; $nf = 0;
+        foreach ($g['items'] as $it) {
+            $tid = $it['term_id'];
+            $so += (float) ($obt_by_term[$tid] ?? 0);
+            if (isset($full_by_term[$tid])) { $sf += (float) $full_by_term[$tid]; $nf++; }
+        }
+        $g_obt[$gid] = $so / $cnt;
+        $g_full[$gid] = $nf > 0 ? $sf / $nf : 0.0;
+        $sum_o += $g_obt[$gid]; $sum_f += $g_full[$gid]; $n++;
+    }
+    return [
+        'obtained' => $n ? $sum_o / $n : 0.0, 'full' => $n ? $sum_f / $n : 0.0,
+        'group_obtained' => $g_obt, 'group_full' => $g_full,
+    ];
+}
+}
+
 if (!function_exists('rc_aggregate_pct_model')) {
 function rc_aggregate_pct_model(PDO $pdo, int $student_id, array $term_ids, int $class_id, string $model_key, array $grade_bands, int $pick_group_id = 0): array
 {
@@ -884,8 +923,10 @@ function rc_aggregate_pct_model(PDO $pdo, int $student_id, array $term_ids, int 
             $sr = $sr_map[$sid] ?? null;
             if ($sr === null) { continue; } // Group-এর নয় / Not Eligible
             if (!empty($sr['not_taken'])) { continue; }
-            if (!isset($subj[$sid])) { $subj[$sid] = ['name' => $def['name'], 'optional' => !empty($sr['optional']), 'pct' => [], 'full_sum' => 0.0, 'n' => 0]; }
+            if (!isset($subj[$sid])) { $subj[$sid] = ['name' => $def['name'], 'optional' => !empty($sr['optional']), 'pct' => [], 'obt' => [], 'full' => [], 'full_sum' => 0.0, 'n' => 0]; }
             $subj[$sid]['pct'][$term_id] = $sr['full'] > 0 ? ($sr['obtained'] / $sr['full']) * 100 : 0.0;
+            $subj[$sid]['obt'][$term_id] = (float) $sr['obtained'];
+            $subj[$sid]['full'][$term_id] = (float) $sr['full'];
             $subj[$sid]['full_sum'] += $sr['full'];
             $subj[$sid]['n']++;
         }
@@ -898,25 +939,37 @@ function rc_aggregate_pct_model(PDO $pdo, int $student_id, array $term_ids, int 
         $pct_by_term[$tid] = isset($per_term[$tid]) ? $per_term[$tid]['percentage'] : 0.0; // অনুপস্থিত/ডেটা নেই = ০
         $opt_by_term[$tid] = isset($per_term[$tid]) ? (float) $per_term[$tid]['opt_gpa_add'] : 0.0;
     }
-    $calc = rc_pct_compute($model_key, $active, $pct_by_term, $pick_group_id);
-    $final_percentage = $calc['total'];
-
     $subject_breakdown = [];
-    foreach ($subj as $sid => $sb) {
-        $sp = [];
-        foreach ($need as $tid) { $sp[$tid] = $sb['pct'][$tid] ?? 0.0; }
-        $sc = rc_pct_compute($model_key, $active, $sp, $pick_group_id)['total'];
-        $avg_full = $sb['n'] > 0 ? $sb['full_sum'] / $sb['n'] : 0.0;
-        $subject_breakdown[$sid] = [
-            'name' => $sb['name'], 'optional' => $sb['optional'],
-            'avg_obtained' => ($sc / 100) * $avg_full, 'avg_full' => $avg_full,
-        ];
+    if ($type === 'avg_group') {
+        // গড় মডেল: নম্বরের সাধারণ গড় (গ্রুপের গড় → গ্রুপগুলোর গড়); % = গড় প্রাপ্ত ÷ গড় পূর্ণমান
+        $obt_by_term = []; $full_by_term = [];
+        foreach ($per_term as $tid => $pt) { $obt_by_term[$tid] = (float) $pt['obtained_total']; $full_by_term[$tid] = (float) $pt['full_total']; }
+        $calc_a = rc_avg_group_compute($active, $obt_by_term, $full_by_term);
+        $final_obtained = $calc_a['obtained']; $final_full = $calc_a['full'];
+        $final_percentage = $final_full > 0 ? ($final_obtained / $final_full) * 100 : 0.0;
+        $calc = ['group_pct' => $calc_a['group_obtained']];
+        foreach ($subj as $sid => $sb) {
+            $sc = rc_avg_group_compute($active, $sb['obt'], $sb['full']);
+            $subject_breakdown[$sid] = ['name' => $sb['name'], 'optional' => $sb['optional'], 'avg_obtained' => $sc['obtained'], 'avg_full' => $sc['full']];
+        }
+    } else {
+        $calc = rc_pct_compute($model_key, $active, $pct_by_term, $pick_group_id);
+        $final_percentage = $calc['total'];
+        foreach ($subj as $sid => $sb) {
+            $sp = [];
+            foreach ($need as $tid) { $sp[$tid] = $sb['pct'][$tid] ?? 0.0; }
+            $sc = rc_pct_compute($model_key, $active, $sp, $pick_group_id)['total'];
+            $avg_full = $sb['n'] > 0 ? $sb['full_sum'] / $sb['n'] : 0.0;
+            $subject_breakdown[$sid] = [
+                'name' => $sb['name'], 'optional' => $sb['optional'],
+                'avg_obtained' => ($sc / 100) * $avg_full, 'avg_full' => $avg_full,
+            ];
+        }
+        $sum_full = 0.0;
+        foreach ($per_term as $pt) { $sum_full += $pt['full_total']; }
+        $final_full = $sum_full / count($per_term);
+        $final_obtained = ($final_percentage / 100) * $final_full;
     }
-
-    $sum_full = 0.0;
-    foreach ($per_term as $pt) { $sum_full += $pt['full_total']; }
-    $final_full = $sum_full / count($per_term);
-    $final_obtained = ($final_percentage / 100) * $final_full;
 
     // ফেল = ফাইনাল %-এর Grade Point সেটিংসে পাস গ্রেড না পড়লে (মাসিক/ক্লাস টেস্টে আলাদা ফেল ধরা হয় না)
     $final_gl = 'F'; $final_gpa = 0.00; $final_fail = false;
@@ -927,7 +980,9 @@ function rc_aggregate_pct_model(PDO $pdo, int $student_id, array $term_ids, int 
     }
     if ($final_gl === 'F') { $final_fail = true; }
     if (!$final_fail) {
-        $opt_add = rc_pct_compute($model_key, $active, $opt_by_term, $pick_group_id)['total'];
+        $opt_add = $type === 'avg_group'
+            ? rc_avg_group_compute($active, $opt_by_term, [])['obtained']
+            : rc_pct_compute($model_key, $active, $opt_by_term, $pick_group_id)['total'];
         [$final_gpa, $final_gl] = array_slice(rc_apply_optional_bonus($final_gpa, $opt_add, $grade_bands, $final_gl, ''), 0, 2);
     }
 

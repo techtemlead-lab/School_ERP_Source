@@ -34,7 +34,8 @@ $settings = $pdo->query("SELECT aggregate_result_type FROM exam_result_settings 
 $aggregate_type = $settings['aggregate_result_type'] ?? 'Terms Wise Percentage';
 // শতকরা ওয়েট মডেল (মডেল ১-৪) সিলেক্ট থাকলে Term-গুলো মডেলের কনফিগ থেকে আসে, চেকবক্স থেকে নয়
 $is_pct = rc_pct_is_model($aggregate_type);
-$agg_display = $is_pct ? ('শতকরা ' . str_replace('Percentage Model ', 'মডেল ', $aggregate_type)) : $aggregate_type;
+$is_avg_model = $is_pct && (rc_pct_models()[$aggregate_type]['type'] ?? '') === 'avg_group';
+$agg_display = $is_avg_model ? 'গড় মডেল ১ (মাসিক + টার্ম গড়)' : ($is_pct ? ('শতকরা ' . str_replace('Percentage Model ', 'মডেল ', $aggregate_type)) : $aggregate_type);
 
 $current_session = $pdo->query("SELECT * FROM academic_sessions WHERE is_current_session = 1 LIMIT 1")->fetch();
 $current_session_id = $current_session ? (int) $current_session['id'] : 0;
@@ -249,9 +250,9 @@ $fail_pct = $total_students > 0 ? round(($total_fail / $total_students) * 100) :
             </div>
             <?php if ($is_pct): ?>
             <div class="col-md-9">
-                <label class="form-label fw-bold">পরীক্ষা ও ওয়েট</label>
+                <label class="form-label fw-bold"><?php echo $is_avg_model ? 'গ্রুপ ও পরীক্ষা' : 'পরীক্ষা ও ওয়েট'; ?></label>
                 <div class="small text-muted mt-1">
-                    এই মডেলে কোন কোন পরীক্ষা কত শতাংশে যুক্ত হবে তা Master Settings-এ সেট করা কনফিগ থেকে আসে।
+                    <?php echo $is_avg_model ? 'এই মডেলে কোন গ্রুপে কোন কোন পরীক্ষা যুক্ত হবে তা Master Settings-এ সেট করা কনফিগ থেকে আসে।' : 'এই মডেলে কোন কোন পরীক্ষা কত শতাংশে যুক্ত হবে তা Master Settings-এ সেট করা কনফিগ থেকে আসে।'; ?>
                     <?php if (!$pct_groups): ?><span class="text-danger fw-bold">এই সেশনের জন্য এখনো ওয়েট সেট করা হয়নি।</span><?php endif; ?>
                 </div>
                 <?php if ($pct_is_standalone && $pct_groups): ?>
@@ -296,7 +297,7 @@ $fail_pct = $total_students > 0 ? round(($total_fail / $total_students) * 100) :
 <?php if ($searched): ?>
     <?php if ($no_terms_selected): ?>
         <div class="alert alert-warning mt-3 no-print"><?php echo $is_pct
-            ? 'এই সেশনের জন্য এই শতকরা মডেলের ওয়েট সেট করা নেই। আগে <a href="index.php?page=result_settings#templates">Master Settings</a> থেকে মডেল সিলেক্ট করে ওয়েট সেভ করুন।'
+            ? 'এই সেশনের জন্য এই মডেলের কনফিগ সেট করা নেই। আগে <a href="index.php?page=result_settings#templates">Master Settings</a> থেকে মডেল সিলেক্ট করে ওয়েট সেভ করুন।'
             : 'অন্তত একটা Exam Term সিলেক্ট করুন।'; ?></div>
     <?php elseif (empty($grade_bands)): ?>
         <div class="alert alert-warning mt-3 no-print">
@@ -331,7 +332,7 @@ $fail_pct = $total_students > 0 ? round(($total_fail / $total_students) * 100) :
                             <th>Roll</th>
                             <th class="far-left">Name</th>
                             <?php foreach ($subject_columns as $sid => $sname): ?>
-                                <th><?php echo farv($sname); ?> <span class="text-muted small d-block" style="font-weight:400;"><?php echo $is_pct ? '(ওয়েটেড)' : '(গড়)'; ?></span></th>
+                                <th><?php echo farv($sname); ?> <span class="text-muted small d-block" style="font-weight:400;"><?php echo ($is_pct && !$is_avg_model) ? '(ওয়েটেড)' : '(গড়)'; ?></span></th>
                             <?php endforeach; ?>
                             <th>Total</th>
                             <th>%</th>
