@@ -83,10 +83,12 @@ if (!$searched) {
 }
 
 // শতকরা মডেল: ওয়েট কনফিগ থেকে Term নেওয়া হয়। মডেল ৩-এ (প্রতি টার্ম আলাদা রেজাল্ট) যে গ্রুপ সিলেক্ট করা, শুধু তার Term-গুলো
-$pct_groups = []; $pct_pick_group_id = 0; $pct_pick_name = '';
+$pct_groups = []; $pct_pick_group_id = 0; $pct_pick_name = ''; $pct_struct = null;
 $pct_is_standalone = $is_pct && (rc_pct_models()[$aggregate_type]['type'] ?? '') === 'standalone';
 if ($is_pct) {
-    $pct_groups = rc_pct_load_config($pdo, $f_session_id, $aggregate_type);
+    // কাঠামো আসে Exam Terms পেজের Main/Sub টার্ম ও ওয়েট থেকে; ভুল থাকলে (যেমন ওয়েটের যোগফল ১০০ নয়) রেজাল্ট বের হয় না, কারণ দেখায়
+    $pct_struct = rc_pct_structure($pdo, $f_session_id, $aggregate_type);
+    $pct_groups = $pct_struct['errors'] ? [] : $pct_struct['groups'];
     $f_term_ids = rc_pct_config_term_ids($pct_groups);
     if ($pct_is_standalone && $pct_groups) {
         $want = (int) ($_GET['pct_group_id'] ?? 0);
@@ -252,8 +254,8 @@ $fail_pct = $total_students > 0 ? round(($total_fail / $total_students) * 100) :
             <div class="col-md-9">
                 <label class="form-label fw-bold"><?php echo $is_avg_model ? 'গ্রুপ ও পরীক্ষা' : 'পরীক্ষা ও ওয়েট'; ?></label>
                 <div class="small text-muted mt-1">
-                    <?php echo $is_avg_model ? 'এই মডেলে কোন গ্রুপে কোন কোন পরীক্ষা যুক্ত হবে তা Master Settings-এ সেট করা কনফিগ থেকে আসে।' : 'এই মডেলে কোন কোন পরীক্ষা কত শতাংশে যুক্ত হবে তা Master Settings-এ সেট করা কনফিগ থেকে আসে।'; ?>
-                    <?php if (!$pct_groups): ?><span class="text-danger fw-bold">এই সেশনের জন্য এখনো ওয়েট সেট করা হয়নি।</span><?php endif; ?>
+                    <?php echo $is_avg_model ? 'এই মডেলে কোন গ্রুপে কোন কোন পরীক্ষা যুক্ত হবে তা Exam Terms পেজের Main/Sub কাঠামো থেকে আসে।' : 'এই মডেলে কোন কোন পরীক্ষা কত শতাংশে যুক্ত হবে তা Exam Terms পেজের Main/Sub কাঠামো ও ওয়েট থেকে আসে।'; ?>
+                    <?php if (!$pct_groups): ?><span class="text-danger fw-bold">কাঠামো/ওয়েট এখনো ঠিক হয়নি — Search করলে কারণ দেখাবে।</span><?php endif; ?>
                 </div>
                 <?php if ($pct_is_standalone && $pct_groups): ?>
                     <div class="mt-2" style="max-width:320px;">
@@ -296,9 +298,14 @@ $fail_pct = $total_students > 0 ? round(($total_fail / $total_students) * 100) :
 
 <?php if ($searched): ?>
     <?php if ($no_terms_selected): ?>
-        <div class="alert alert-warning mt-3 no-print"><?php echo $is_pct
-            ? 'এই সেশনের জন্য এই মডেলের কনফিগ সেট করা নেই। আগে <a href="index.php?page=result_settings#templates">Master Settings</a> থেকে মডেল সিলেক্ট করে ওয়েট সেভ করুন।'
-            : 'অন্তত একটা Exam Term সিলেক্ট করুন।'; ?></div>
+        <?php if ($is_pct): ?>
+            <div class="mt-3 no-print">
+                <?php echo rc_pct_structure_html($pct_struct, $aggregate_type); ?>
+                <div class="small">ওয়েট ঠিক করতে <a href="index.php?page=result_exam_terms">Exam Terms</a> পেজে যান — টার্ম বানানোর সময়ই Main/Sub ও ওয়েট দেওয়া যায়।</div>
+            </div>
+        <?php else: ?>
+            <div class="alert alert-warning mt-3 no-print">অন্তত একটা Exam Term সিলেক্ট করুন।</div>
+        <?php endif; ?>
     <?php elseif (empty($grade_bands)): ?>
         <div class="alert alert-warning mt-3 no-print">
             এই সেশনের জন্য কোনো <strong>Grade Point</strong> সেট করা নেই। আগে
