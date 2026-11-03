@@ -204,7 +204,7 @@ $view = $_GET['view'] ?? 'config';
                             <th style="width:150px;">Student ID</th>
                             <th>Name</th>
                             <th style="width:90px;">Roll</th>
-                            <th class="mbb-mark-cell text-center"><?php echo mbv($main_exam_label); ?></th>
+                            <th class="mbb-mark-cell text-center">Student Signature</th>
                         </tr>
                     </thead>
                     <tbody>
