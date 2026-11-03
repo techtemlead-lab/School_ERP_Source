@@ -58,6 +58,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_routine'])) {
     if ($class_id <= 0 || $shift_id <= 0 || $section_id <= 0 || $term_id <= 0 || $part_id <= 0) {
         $_SESSION['er_err'] = 'Class, Shift, Section, Exam Term এবং Exam Part সবগুলো সিলেক্ট করুন।';
     } else {
+        // ছুটির দিনে (সাপ্তাহিক ছুটি বা Academic Calendar-এর ছুটি) নতুন/বদলানো তারিখ: নিশ্চিত না করলে সেভ হবে না
+        $er_block = [];
+        if (empty($_POST['force_holiday'])) {
+            try {
+                require_once __DIR__ . '/../config/academic_calendar_helpers.php';
+                $er_w = ac_weekly_holidays($pdo);
+                $er_h = ac_holiday_ranges($pdo, '2000-01-01', '2100-12-31');
+                $old_q = $pdo->prepare("SELECT subject_id, exam_date FROM exam_routines WHERE class_id=? AND shift_id=? AND section_id=? AND term_id=? AND part_id=?");
+                $old_q->execute([$class_id, $shift_id, $section_id, $term_id, $part_id]);
+                $old_dates = [];
+                foreach ($old_q->fetchAll() as $o) { $old_dates[(int) $o['subject_id']] = (string) $o['exam_date']; }
+                foreach ($subject_ids as $sid) {
+                    $sid = (int) $sid;
+                    $d = trim($_POST['exam_date'][$sid] ?? '');
+                    if ($d === '' || (($old_dates[$sid] ?? '') === $d)) { continue; }
+                    $reasons = [];
+                    $dn = date('l', strtotime($d));
+                    if (in_array($dn, $er_w, true)) { $reasons[] = 'সাপ্তাহিক ছুটি (' . $dn . ')'; }
+                    foreach ($er_h as $h) { if ($d >= $h['start_date'] && $d <= $h['end_date']) { $reasons[] = $h['holiday_name']; } }
+                    if ($reasons) { $er_block[] = $d . ' — ' . implode(', ', $reasons); }
+                }
+            } catch (Throwable $e) { /* টেবিল না থাকলে চেক বন্ধ */ }
+        }
+        if ($er_block) {
+            $_SESSION['er_err'] = 'এই তারিখগুলো ছুটির দিন: ' . implode(' | ', $er_block) . '। ছুটির দিনে পরীক্ষা রাখতে চাইলে Save দিয়ে নিশ্চিত করুন।';
+            header('Location: index.php?page=result_exam_routine&class_id=' . $class_id . '&shift_id=' . $shift_id . '&section_id=' . $section_id . '&term_id=' . $term_id . '&part_id=' . $part_id);
+            exit();
+        }
+
         $kept_ids = [];
         $stmt = $pdo->prepare(
             "INSERT INTO exam_routines
@@ -353,6 +382,21 @@ document.addEventListener('change', function (e) {
         el.dataset.okHoliday = '';
     }
 });
+
+// Save-এর সময়: ছুটির দিনে তারিখ নিশ্চিত (Yes) করা থাকলে সার্ভারকে জানানো
+document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (!form.querySelector || !form.querySelector('#routineTable')) return;
+    var needForce = false;
+    form.querySelectorAll('input[type="date"][name^="exam_date"]').forEach(function (inp) {
+        if (inp.value && erHolidayReason(inp.value)) {
+            if (inp.dataset.okHoliday === inp.value) { needForce = true; }
+        }
+    });
+    var f = form.querySelector('input[name="force_holiday"]');
+    if (!f) { f = document.createElement('input'); f.type = 'hidden'; f.name = 'force_holiday'; form.appendChild(f); }
+    f.value = needForce ? '1' : '';
+}, true);
 
 function removeRoutineRow(btn) {
     var row = btn.closest('tr');

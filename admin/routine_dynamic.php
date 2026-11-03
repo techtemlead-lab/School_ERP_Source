@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../config/academic_calendar_helpers.php';
 require_once __DIR__ . '/../config/routine_access.php';
 $routine_destination_branch = erp_routine_access($pdo, 'routine_dynamic');
 // admin/routine_dynamic.php - Dynamic Routine (স্ক্রিনশট অনুযায়ী)
@@ -88,6 +89,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_routine'])) {
 
     // Break/Tiffin পিরিয়ডে Subject/Teacher লাগে না (0 রাখা হয়)
     if ($has_break) { $subject_id = 0; $teacher_id = 0; }
+
+    // সাপ্তাহিক ছুটির দিনে (যেমন Friday/Saturday) নতুন রুটিন: নিশ্চিত না করলে তৈরি হবে না
+    if ($id === 0 && in_array($day, $week_days, true) && ac_weekly_conflicts($pdo, [$day]) && empty($_POST['force_holiday'])) {
+        $_SESSION['rd_err'] = $day . ' সাপ্তাহিক ছুটির দিন (Weekly Holiday)। ছুটির দিনে রুটিন তৈরি করতে চাইলে Save দিয়ে নিশ্চিত করুন।';
+        header('Location: index.php?page=routine_dynamic&' . $qs);
+        exit();
+    }
 
     if (!$class_id || !$shift_id || !$section_id || !in_array($day, $week_days, true) || (!$has_break && (!$subject_id || !$teacher_id))) {
         $_SESSION['rd_err'] = $has_break ? 'Day আবশ্যক।' : 'Day, Subject, Teacher — এই ফিল্ডগুলো আবশ্যক।';
@@ -691,6 +699,10 @@ function render_routine_table(array $week_days, array $day_entries, int $sel_cla
                 return false;
             }
         }
+        const rmIdEl = document.getElementById('rmId');
+        if (!parseInt((rmIdEl && rmIdEl.value) || 0, 10)) {
+            return window.rtHolidayForm(document.getElementById('routineModalForm'), [document.getElementById('rmDay').value]);
+        }
         return true;
     }
 
@@ -701,3 +713,4 @@ function render_routine_table(array $week_days, array $day_entries, int $sel_cla
         }
     });
 </script>
+<?php echo ac_routine_holiday_js($pdo); ?>
