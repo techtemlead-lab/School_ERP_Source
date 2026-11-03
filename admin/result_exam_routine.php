@@ -158,7 +158,13 @@ foreach ($terms as $t) { if ((int) $t['id'] === $sel_term) { $sel_term_name = $t
 .er-print-head { display: none; }
 @media print {
     .er-print-head { display: block; text-align: center; margin-bottom: 16px; }
+    @page { size: A4 portrait; margin: 10mm; }
+    #routineTable { width: 100% !important; font-size: 14px; }
+    #routineTable th, #routineTable td { padding: 6px 8px !important; }
+    #routineTable input.er-hide-print { display: none !important; }
+    .er-print-val { display: inline !important; font-weight: 600; }
 }
+.er-print-val { display: none; }
 </style>
 
 <div class="card-custom no-print">
@@ -433,5 +439,36 @@ function removeRoutineRow(btn) {
     elSection.addEventListener('change', loadTable);
     elTerm.addEventListener('change', loadTable);
     elPart.addEventListener('change', loadTable);
+})();
+</script>
+
+<script>
+// প্রিন্টে date/time ইনপুট বক্স না দেখিয়ে সুন্দর টেক্সট (তারিখ + বার, AM/PM) দেখানো
+(function () {
+    var DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    function fmt(inp) {
+        var v = inp.value;
+        if (!v) { return ''; }
+        if (inp.type === 'date') {
+            var p = v.split('-'); var d = new Date(+p[0], +p[1] - 1, +p[2]);
+            return p[2] + '-' + p[1] + '-' + p[0] + ' (' + DAYS[d.getDay()] + ')';
+        }
+        if (inp.type === 'time') {
+            var t = v.split(':'); var h = +t[0]; var ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+            return (h < 10 ? '0' : '') + h + ':' + t[1] + ' ' + ap;
+        }
+        return v;
+    }
+    window.addEventListener('beforeprint', function () {
+        document.querySelectorAll('#routineTable .er-print-val').forEach(function (n) { n.remove(); });
+        document.querySelectorAll('#routineTable input[type="date"], #routineTable input[type="time"]').forEach(function (inp) {
+            var sp = document.createElement('span'); sp.className = 'er-print-val'; sp.textContent = fmt(inp);
+            inp.classList.add('er-hide-print'); inp.parentNode.insertBefore(sp, inp);
+        });
+    });
+    window.addEventListener('afterprint', function () {
+        document.querySelectorAll('#routineTable .er-print-val').forEach(function (n) { n.remove(); });
+        document.querySelectorAll('#routineTable input.er-hide-print').forEach(function (n) { n.classList.remove('er-hide-print'); });
+    });
 })();
 </script>

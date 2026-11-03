@@ -350,6 +350,7 @@ if ($fr_bid2 !== null) {
         .main-wrapper, .main-wrapper.expanded { margin-left: 0 !important; }
     }
     </style>
+    <?php require_once __DIR__ . '/employee_attendance_common.php'; ea_print_css('landscape', 9); ?>
 
     <div class="no-print d-flex justify-content-between align-items-center mb-3">
         <a href="index.php?page=payroll_generate_salary_sheet" class="btn btn-secondary"><i class="fa-solid fa-arrow-left"></i> Back</a>

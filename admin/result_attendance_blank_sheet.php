@@ -150,6 +150,8 @@ $view = $_GET['view'] ?? 'config';
             display: inline-block; font-weight: bold; font-size: 14px; border: 1.5px solid #333;
             border-radius: 3px; padding: 5px 20px; margin-bottom: 14px;
         }
+    .bab-sign-cell { min-width: 150px; width: 28%; }
+        .bab-sign-cell:not(th) { height: 30px; }
     </style>
 
     <div class="no-print d-flex justify-content-between align-items-center mb-3">
@@ -183,6 +185,7 @@ $view = $_GET['view'] ?? 'config';
                             <th style="width:150px;">ID</th>
                             <th>Name</th>
                             <th style="width:90px;">Roll</th>
+                            <th class="bab-sign-cell text-center">Signature</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -192,6 +195,7 @@ $view = $_GET['view'] ?? 'config';
                                 <td class="text-primary fw-bold"><?php echo babv($stu['student_id']); ?></td>
                                 <td><?php echo babv($stu['name_en']); ?></td>
                                 <td><?php echo babv($stu['roll_no']); ?></td>
+                                <td class="bab-sign-cell">&nbsp;</td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
