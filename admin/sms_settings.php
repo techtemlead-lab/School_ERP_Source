@@ -43,7 +43,10 @@ function save_sms_section(PDO $pdo, array $toggle_fields, array $text_fields, bo
     }
     foreach ($text_fields as $f) {
         $set_parts[] = "$f = ?";
-        $params[] = trim($_POST[$f] ?? '');
+        $val = trim($_POST[$f] ?? '');
+        // টোকেন/URL-এ কোনো ফাঁকা স্পেস বা নতুন লাইন থাকে না (কপি-পেস্টে ঢুকে গেলে গেটওয়ে টোকেন চিনতে পারে না)
+        if (in_array($f, ['api_token', 'api_url', 'balance_api_url'], true)) { $val = preg_replace('/\s+/', '', $val); }
+        $params[] = $val;
     }
     if ($has_api_enabled) {
         $set_parts[] = "api_enabled = ?";
@@ -133,7 +136,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['sms_err'] = 'ফর্মের মেয়াদ শেষ হয়ে গেছে, পেজ রিলোড করে আবার চেষ্টা করুন।';
         } else {
             $result = sms_check_balance($pdo);
-            if ($result['success']) {
+            if (!empty($result['simulated'])) {
+                $_SESSION['sms_err'] = 'ব্যালেন্স আসল নয় — এই সার্ভারে SMS/Integration বন্ধ আছে (ERP_INTEGRATIONS_ENABLED=0), তাই গেটওয়ে থেকে আসলে ব্যালেন্স আনা হয়নি। সার্ভারের Administrator-কে চালু করতে বলুন।';
+            } elseif ($result['success']) {
                 $_SESSION['sms_msg'] = 'বর্তমান SMS ব্যালেন্সঃ ' . $result['balance'];
             } else {
                 $_SESSION['sms_err'] = 'ব্যালেন্স চেক করা যায়নি — ' . $result['response'];
@@ -156,7 +161,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_test_sms'])) {
             $_SESSION['sms_err'] = 'Test SMS পাঠাতে একটা মোবাইল নম্বর দিন।';
         } else {
             $result = send_sms($pdo, $test_phone, 'This is a test SMS from School ERP.');
-            if ($result['success']) {
+            if (!empty($result['simulated'])) {
+                $_SESSION['sms_err'] = 'Test SMS আসলে পাঠানো হয়নি — এই সার্ভারে SMS/Integration বন্ধ আছে (ERP_INTEGRATIONS_ENABLED=0)। সার্ভারের Administrator-কে চালু করতে বলুন, তারপর আবার টেস্ট করুন।';
+            } elseif ($result['success']) {
                 $_SESSION['sms_msg'] = 'Test SMS পাঠানো হয়েছে। গেটওয়ে রেসপন্সঃ ' . $result['response'];
                 sec_log_activity($pdo, 'SMS', 'Send', "Test SMS পাঠানো হয়েছে: {$test_phone}");
             } else {
