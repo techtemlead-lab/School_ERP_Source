@@ -87,6 +87,47 @@ function sms_get_gateway_settings(PDO $pdo): array
 }
 
 /**
+ * সার্ভারে বাইরের সার্ভিস (SMS/WhatsApp/GPS) বন্ধ করা আছে কিনা — ডেমো হোস্ট অথবা ERP_INTEGRATIONS_ENABLED=0।
+ * বন্ধ থাকলে আসলে কিছু পাঠানো হয় না (সিমুলেটেড রেসপন্স আসে)।
+ */
+if (!function_exists('sms_integrations_disabled')) {
+    function sms_integrations_disabled(): bool
+    {
+        return function_exists('erp_is_demo') && (erp_is_demo() || (function_exists('erp_env') && erp_env('ERP_INTEGRATIONS_ENABLED', '1') === '0'));
+    }
+}
+
+/**
+ * গেটওয়ের উত্তর দেখে বোঝা — সত্যিই পাঠানো হলো কিনা। আগে যেকোনো উত্তরকেই "সফল" ধরা হতো,
+ * ফলে GreenWeb "Error: Invalid token" দিলেও অ্যাপ "পাঠানো হয়েছে" দেখাত।
+ * রিটার্ন: [bool ok, string reason]
+ */
+if (!function_exists('sms_interpret_response')) {
+    function sms_interpret_response(string $resp, int $http_code = 200): array
+    {
+        $t = trim($resp);
+        if ($http_code >= 400) { return [false, 'গেটওয়ে HTTP ' . $http_code . ' দিয়েছে' . ($t !== '' ? ' — ' . mb_substr($t, 0, 200) : '')]; }
+        if ($t === '') { return [false, 'গেটওয়ে ফাঁকা উত্তর দিয়েছে।']; }
+        $j = json_decode($t, true);
+        if (is_array($j)) {
+            $items = (isset($j[0]) && is_array($j[0])) ? $j : [$j];
+            foreach ($items as $it) {
+                if (!is_array($it)) { continue; }
+                $st = strtolower((string) ($it['status'] ?? ''));
+                if (in_array($st, ['failed', 'fail', 'error'], true) || isset($it['error'])) {
+                    return [false, (string) ($it['statusmsg'] ?? $it['message'] ?? $it['error'] ?? $t)];
+                }
+            }
+            return [true, ''];
+        }
+        if (preg_match('/^\s*(error|failed|fail)\b/i', $t) || preg_match('/invalid\s+token|authentication\s+failed|unauthori[sz]ed|insufficient|low\s+balance|not\s+enough\s+balance|ip\s+not\s+(allowed|whitelisted)/i', $t)) {
+            return [false, mb_substr($t, 0, 300)];
+        }
+        return [true, ''];
+    }
+}
+
+/**
  * একটা নম্বরে SMS পাঠানো — যেকোনো HTTP-ভিত্তিক BD SMS গেটওয়ে সাপোর্ট করে
  * (GreenWeb, BulkSMSBD, Alpha SMS, Elitbuzz, Adn SMS ইত্যাদি), কারণ
  * প্যারামিটার নাম হার্ডকোড না করে URL-টাকে টেমপ্লেট হিসেবে ব্যবহার করা হয়।
@@ -108,7 +149,7 @@ function sms_get_gateway_settings(PDO $pdo): array
  */
 function send_sms(PDO $pdo, string $phone, string $message): array
 {
-    if (function_exists('erp_is_demo') && (erp_is_demo() || erp_env('ERP_INTEGRATIONS_ENABLED','1')==='0')) { return ['success'=>true,'response'=>'DEMO: SMS simulated. No message was sent.']; }
+    if (sms_integrations_disabled()) { return ['success'=>true,'simulated'=>true,'response'=>'DEMO: SMS simulated. No message was sent.']; }
     $phone = preg_replace('/[^0-9]/', '', $phone);
     if (strlen($phone) === 11 && str_starts_with($phone, '01')) {
         $phone = '88' . $phone; // BD কোড
@@ -175,10 +216,16 @@ function send_sms(PDO $pdo, string $phone, string $message): array
     ]);
     $resp = curl_exec($ch);
     $err  = curl_error($ch);
+    $http = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
     if ($resp === false) {
         return ['success' => false, 'response' => $err ?: 'SMS API রেসপন্স করেনি।'];
+    }
+
+    [$ok, $reason] = sms_interpret_response((string) $resp, $http);
+    if (!$ok) {
+        return ['success' => false, 'response' => 'গেটওয়ে এরর — ' . $reason];
     }
 
     return ['success' => true, 'response' => (string) $resp];
@@ -208,7 +255,7 @@ function sms_apply_template(string $template, array $data): string
  */
 function sms_check_balance(PDO $pdo): array
 {
-    if (function_exists('erp_is_demo') && (erp_is_demo() || erp_env('ERP_INTEGRATIONS_ENABLED','1')==='0')) { return ['success'=>true,'balance'=>500,'response'=>'DEMO: simulated balance']; }
+    if (sms_integrations_disabled()) { return ['success'=>true,'simulated'=>true,'balance'=>500,'response'=>'DEMO: simulated balance']; }
     sms_ensure_schema($pdo);
     $row = $pdo->query("SELECT api_token, api_user, api_sender_id, balance_api_url FROM sms_settings WHERE id = 1")->fetch();
     $url = trim($row['balance_api_url'] ?? '');
