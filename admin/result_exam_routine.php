@@ -170,13 +170,32 @@ if ($all_selected) {
     foreach ($ex_stmt->fetchAll() as $er) { $existing[(int) $er['subject_id']] = $er; }
 }
 
-$institute = $pdo->query("SELECT institute_name FROM institute_settings WHERE id = 1")->fetch();
-$institute_name = $institute['institute_name'] ?? 'School Name';
+$institute = $pdo->query("SELECT * FROM institute_settings WHERE id = 1")->fetch() ?: [];
+$er_bid = branch_current_id();
+if ($er_bid !== null) {
+    $er_bq = $pdo->prepare("SELECT * FROM branches WHERE id = ? LIMIT 1");
+    $er_bq->execute([$er_bid]);
+    $er_branch = $er_bq->fetch() ?: [];
+} else {
+    $er_branch = $pdo->query("SELECT * FROM branches WHERE status = 'Active' ORDER BY id ASC LIMIT 1")->fetch() ?: [];
+}
+$institute_name = ($er_branch['branch_name'] ?? '') ?: ($institute['institute_name'] ?? 'School Name');
+$er_logo    = trim((string) ($institute['logo_path'] ?? ''));
+$er_address = trim(implode(', ', array_filter([trim((string) ($er_branch['address'] ?? '')), trim((string) ($er_branch['city'] ?? ''))])) . (!empty($er_branch['zip_code']) ? '-' . $er_branch['zip_code'] : ''), ', ');
+$er_phone   = ($er_branch['phone'] ?? '') ?: ($institute['phone_number'] ?? '');
+$er_web     = trim((string) ($institute['website'] ?? ''));
+$er_sig     = trim((string) ($er_branch['signature_path'] ?? ''));
 
 $sel_class_name = '';
 foreach ($classes as $c) { if ((int) $c['id'] === $sel_class) { $sel_class_name = $c['class_name']; break; } }
 $sel_term_name = '';
 foreach ($terms as $t) { if ((int) $t['id'] === $sel_term) { $sel_term_name = $t['term_name']; break; } }
+$sel_shift_name = '';
+foreach ($shifts as $sh) { if ((int) $sh['id'] === $sel_shift) { $sel_shift_name = $sh['shift_name']; break; } }
+$sel_section_name = '';
+foreach ($sections as $sc) { if ((int) $sc['id'] === $sel_section) { $sel_section_name = $sc['section_name']; break; } }
+$sel_part_name = '';
+foreach ($parts as $pt) { if ((int) $pt['id'] === $sel_part) { $sel_part_name = $pt['part_name']; break; } }
 ?>
 
 <style>
@@ -184,9 +203,22 @@ foreach ($terms as $t) { if ((int) $t['id'] === $sel_term) { $sel_term_name = $t
     .no-print { display: none !important; }
     .card-custom { border: none !important; box-shadow: none !important; }
 }
-.er-print-head { display: none; }
+.er-print-head, .er-print-foot { display: none; }
 @media print {
-    .er-print-head { display: block; text-align: center; margin-bottom: 16px; }
+    .er-print-head { display: block; text-align: center; margin-bottom: 14px; }
+    .er-ph-top { display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 6px; }
+    .er-ph-logo { width: 70px; height: 70px; object-fit: contain; }
+    .er-ph-inst h4 { margin: 0 0 3px; font-weight: 800; color: #1e3a8a; font-size: 20px; }
+    .er-ph-line { font-size: 12px; color: #333; line-height: 1.35; }
+    .er-ph-web { color: #2563eb; }
+    .er-ph-meta { font-size: 13px; margin-top: 4px; }
+    .er-ph-title { display: inline-block; margin-top: 8px; padding: 4px 18px; border: 1.5px solid #333; border-radius: 3px; font-weight: 700; font-size: 14px; }
+    .er-print-foot { display: flex !important; justify-content: space-between; gap: 30px; margin-top: 90px; page-break-inside: avoid; }
+    .er-sign { flex: 1; text-align: center; }
+    .er-sign-img { display: block; height: 50px; }
+    .er-sign-img img { max-height: 50px; max-width: 100%; }
+    .er-sign-line { border-top: 1px solid #333; padding-top: 4px; font-size: 13px; font-weight: 600; }
+    .er-title-row { display: none !important; }
     @page { size: A4 portrait; margin: 10mm; }
     #routineTable { width: 100% !important; font-size: 14px; }
     #routineTable th, #routineTable td { padding: 6px 8px !important; }
@@ -268,16 +300,26 @@ foreach ($terms as $t) { if ((int) $t['id'] === $sel_term) { $sel_term_name = $t
 </div>
 
 <div class="card-custom mt-3">
-    <div class="d-flex align-items-center gap-2 mb-3">
+    <div class="d-flex align-items-center gap-2 mb-3 er-title-row">
         <i class="fa-solid fa-calendar-days text-primary"></i>
         <h6 class="mb-0">Exam Routine</h6>
     </div>
 
     <div id="err_result_wrap">
         <div class="er-print-head">
-            <h5 class="mb-0"><?php echo erv($institute_name); ?></h5>
-            <div><?php echo erv($sel_class_name); ?> - <?php echo erv($sel_term_name); ?> — Exam Routine</div>
-            <div class="small">Session : <?php echo erv($current_session_name); ?></div>
+            <div class="er-ph-top">
+                <?php if ($er_logo !== ''): ?><img class="er-ph-logo" src="../<?php echo erv(ltrim($er_logo, '/')); ?>" alt="Logo"><?php endif; ?>
+                <div class="er-ph-inst">
+                    <h4><?php echo erv($institute_name); ?></h4>
+                    <?php if ($er_address !== ''): ?><div class="er-ph-line">(<?php echo erv($er_address); ?>)</div><?php endif; ?>
+                    <?php if ($er_phone !== ''): ?><div class="er-ph-line">Phone: <?php echo erv($er_phone); ?></div><?php endif; ?>
+                    <?php if ($er_web !== ''): ?><div class="er-ph-line er-ph-web"><?php echo erv($er_web); ?></div><?php endif; ?>
+                </div>
+            </div>
+            <div class="er-ph-meta">
+                Class : <?php echo erv($sel_class_name); ?><?php echo $sel_shift_name !== '' ? ', Shift : ' . erv($sel_shift_name) : ''; ?><?php echo $sel_section_name !== '' ? ', Section : ' . erv($sel_section_name) : ''; ?>
+            </div>
+            <div class="er-ph-title">Exam Routine : <?php echo erv($sel_term_name); ?><?php echo $sel_part_name !== '' ? ' (' . erv($sel_part_name) . ')' : ''; ?> - <?php echo erv($current_session_name); ?></div>
         </div>
 
         <?php if (!$all_selected): ?>
@@ -335,6 +377,14 @@ foreach ($terms as $t) { if ((int) $t['id'] === $sel_term) { $sel_term_name = $t
                     <button type="submit" name="save_routine" class="btn btn-primary px-5 fw-bold" style="background-color:#1e3a8a;border-color:#1e3a8a;">Save Routine</button>
                 </div>
             </form>
+            <div class="er-print-foot">
+                <div class="er-sign"><span class="er-sign-img"></span><div class="er-sign-line">Class Teacher</div></div>
+                <div class="er-sign"><span class="er-sign-img"></span><div class="er-sign-line">Exam Controller</div></div>
+                <div class="er-sign">
+                    <span class="er-sign-img"><?php if ($er_sig !== ''): ?><img src="../<?php echo erv(ltrim($er_sig, '/')); ?>" alt=""><?php endif; ?></span>
+                    <div class="er-sign-line">Head of Institute</div>
+                </div>
+            </div>
         <?php endif; ?>
     </div>
 </div>
