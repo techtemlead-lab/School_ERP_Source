@@ -103,6 +103,31 @@ function ac_weekly_holidays(PDO $pdo): array
     }
 }
 
+// দেওয়া দিনগুলোর (Saturday, Friday…) মধ্যে কোনগুলো সাপ্তাহিক ছুটি (Branch সেটিং অনুযায়ী)
+if (!function_exists('ac_weekly_conflicts')) {
+    function ac_weekly_conflicts(PDO $pdo, array $days): array
+    {
+        $weekly = ac_weekly_holidays($pdo);
+        return array_values(array_intersect(array_map('trim', $days), $weekly));
+    }
+}
+
+// ক্লাস রুটিন তৈরির পেজগুলোর জন্য: ছুটির দিনের JS চেক (সাপ্তাহিক ছুটির তালিকা JS-এ দেয়) — window.rtHolidayConfirm(days) true হলে এগোনো যাবে
+if (!function_exists('ac_routine_holiday_js')) {
+    function ac_routine_holiday_js(PDO $pdo): string
+    {
+        $weekly = json_encode(ac_weekly_holidays($pdo), JSON_UNESCAPED_UNICODE);
+        $tail   = json_encode(" সাপ্তাহিক ছুটির দিন (Weekly Holiday)।\n\nতবুও ক্লাস রুটিন তৈরি করতে চান?", JSON_UNESCAPED_UNICODE);
+        return '<script>window.RT_WEEKLY=' . $weekly . ';'
+            . 'window.rtHolidayConfirm=function(days){var h=(days||[]).filter(function(d){return window.RT_WEEKLY.indexOf(d)!==-1;});'
+            . 'if(!h.length){return true;}return confirm("\u26A0 "+h.join(", ")+' . $tail . ');};'
+            . 'window.rtHolidayForm=function(form,days){if(!window.rtHolidayConfirm(days)){return false;}'
+            . 'var h=(days||[]).filter(function(d){return window.RT_WEEKLY.indexOf(d)!==-1;});'
+            . 'if(h.length){var f=form.querySelector("input[name=force_holiday]");if(!f){f=document.createElement("input");f.type="hidden";f.name="force_holiday";form.appendChild(f);}f.value="1";}'
+            . 'return true;};</script>';
+    }
+}
+
 // দুই তারিখের মধ্যে ওভারল্যাপ করা Active এন্ট্রি (সব Category), start_date ASC
 function ac_entries(PDO $pdo, string $start, string $end): array
 {

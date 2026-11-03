@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../config/academic_calendar_helpers.php';
 // admin/routine_auto_generate.php - Smart Routine Creator (Auto-generate)
 // Class + Shift + Section বেছে, সাবজেক্ট-ভিত্তিক periods/week আর সময়-সেটিংস দিয়ে
 // স্বয়ংক্রিয়ভাবে সপ্তাহের রুটিন বসিয়ে দেয়। একই routines টেবিলে সেভ হয়, তাই
@@ -120,8 +121,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_preview'])) 
         $subj_ppw  = (array) ($_POST['periods_per_week'] ?? []);
         $subj_tchr = (array) ($_POST['teacher_id'] ?? []);
 
+        $ag_hol_days = ac_weekly_conflicts($pdo, $work_days);
         if (!$work_days) {
             $_SESSION['ag_err'] = 'অন্তত একটা কর্মদিবস বাছাই করুন।';
+        } elseif ($ag_hol_days && empty($_POST['force_holiday'])) {
+            $_SESSION['ag_err'] = implode(', ', $ag_hol_days) . ' সাপ্তাহিক ছুটির দিন (Weekly Holiday)। ছুটির দিনে রুটিন চাইলে প্রিভিউ বাটন চেপে নিশ্চিত করুন।';
         } else {
             $plan = [];
             foreach ($subj_ids as $i => $sid) {
@@ -361,7 +365,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_save'])) {
 
     <?php else: ?>
         <!-- ================= STEP 1: সেটিংস ফর্ম ================= -->
-        <form method="POST" action="index.php?page=routine_auto_generate&class_id=<?php echo $sel_class; ?>&shift_id=<?php echo $sel_shift; ?>&section_id=<?php echo $sel_section; ?>">
+        <form method="POST" action="index.php?page=routine_auto_generate&class_id=<?php echo $sel_class; ?>&shift_id=<?php echo $sel_shift; ?>&section_id=<?php echo $sel_section; ?>" onsubmit="return window.rtHolidayForm(this, Array.from(this.querySelectorAll('input[name=\'work_days[]\']:checked')).map(function (c) { return c.value; }))">
             <?php echo csrf_field(); ?>
             <input type="hidden" name="class_id" value="<?php echo $sel_class; ?>">
             <input type="hidden" name="shift_id" value="<?php echo $sel_shift; ?>">
@@ -430,3 +434,4 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_save'])) {
         </form>
     <?php endif; ?>
 </div>
+<?php echo ac_routine_holiday_js($pdo); ?>

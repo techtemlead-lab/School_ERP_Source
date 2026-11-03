@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../config/academic_calendar_helpers.php';
 require_once __DIR__ . '/../config/routine_access.php';
 $routine_destination_branch = erp_routine_access($pdo, 'routine_general');
 // admin/routine_general.php - General Routine (স্ক্রিনশট অনুযায়ী)
@@ -57,8 +58,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_routine'])) {
 
     if ($has_break) { $subject_id = 0; $teacher_id = 0; } // Break/Tiffin-এ Subject/Teacher লাগে না
 
+    $rt_hol_days = ($id === 0) ? ac_weekly_conflicts($pdo, (array) ($_POST['routine_days'] ?? [])) : [];
     if (!$section_id || (!$has_break && (!$subject_id || !$teacher_id))) {
         $_SESSION['rt_err'] = $has_break ? 'Section আবশ্যক।' : 'Section, Subject, Teacher — এই ফিল্ডগুলো আবশ্যক।';
+    } elseif ($rt_hol_days && empty($_POST['force_holiday'])) {
+        $_SESSION['rt_err'] = implode(', ', $rt_hol_days) . ' সাপ্তাহিক ছুটির দিন (Weekly Holiday)। ছুটির দিনে রুটিন তৈরি করতে চাইলে ফর্মে Save দিয়ে নিশ্চিত করুন।';
     } else {
         if ($id > 0) {
             $stmt = $pdo->prepare(
@@ -128,7 +132,7 @@ $week_days = ['Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'
         <?php if ($rt_err): ?><div class="alert alert-danger py-2"><?php echo htmlspecialchars($rt_err); ?></div><?php endif; ?>
         <?php if ($rt_msg): ?><div class="alert alert-success py-2"><?php echo htmlspecialchars($rt_msg); ?></div><?php endif; ?>
 
-        <form method="POST" action="index.php?page=routine_general" onsubmit="return validateRtTimesBeforeSubmit()">
+        <form method="POST" action="index.php?page=routine_general" onsubmit="return validateRtTimesBeforeSubmit() &amp;&amp; (parseInt(this.querySelector('[name=id]') ? (this.querySelector('[name=id]').value || 0) : 0) > 0 || window.rtHolidayForm(this, Array.from(this.querySelectorAll('input[name=\'routine_days[]\']:checked')).map(function (c) { return c.value; })))">
             <?php echo csrf_field(); ?>
             <input type="hidden" name="id" value="<?php echo (int) $d['id']; ?>">
 
@@ -639,3 +643,4 @@ $week_days = ['Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'
         </div>
     </div>
 <?php endif; ?>
+<?php echo ac_routine_holiday_js($pdo); ?>
