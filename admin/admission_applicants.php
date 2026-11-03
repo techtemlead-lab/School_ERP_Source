@@ -67,6 +67,7 @@ if ($view === 'details') {
 <style>
     @media print { .no-print { display: none !important; } body { background: #fff; } }
 </style>
+    <?php require_once __DIR__ . '/employee_attendance_common.php'; ea_print_css('landscape', 9); ?>
 
 <div class="card-custom mb-3 no-print">
     <div class="d-flex flex-wrap gap-2">

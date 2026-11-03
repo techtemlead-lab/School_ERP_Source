@@ -560,6 +560,17 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
         }
         .main-wrapper.expanded { margin-left: var(--sidebar-collapsed-width); }
 
+        /* সব পেজের প্রিন্ট: sidebar/topbar লুকিয়ে কনটেন্ট পুরো পাতায় (পেজ-নির্দিষ্ট প্রিন্ট CSS এর আগে কাজ করে) */
+        @media print {
+            html, body { background: #fff !important; height: auto !important; overflow: visible !important; }
+            .sidebar, .sidebar-overlay, .sticky-top-area, .top-navbar, .breadcrumb-bar, .sidebar-toggle-btn { display: none !important; }
+            .main-wrapper, .main-wrapper.expanded { margin-left: 0 !important; width: 100% !important; min-height: 0 !important; display: block !important; }
+            .content-body { padding: 0 !important; margin: 0 !important; }
+            .card-custom { box-shadow: none !important; }
+            .table-responsive { overflow: visible !important; }
+            * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+
         .sticky-top-area { position: sticky; top: 0; z-index: 999; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         .top-navbar {
             background: var(--primary); color: white; padding: 0px 20px; height: 60px;
