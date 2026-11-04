@@ -856,6 +856,8 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                         echo 'Result Module > Exam Procedure > Attendance (Exam)';
                     } elseif ($page == 'result_exam_seat_plan') {
                         echo 'Result Module > Exam Procedure > Exam Seat Plan';
+                    } elseif ($page == 'result_formative_entry') {
+                        echo 'Result Module > Exam Procedure > Formative / Class Test Marks Entry';
                     } elseif ($page == 'result_marks_entry_subject') {
                         echo 'Result Module > Exam Procedure > Marks Entry (Subject)';
                     } elseif ($page == 'result_marks_entry_exam') {
@@ -1240,6 +1242,7 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                 'result_exam_fee_settings'    => 'result_exam_fee_settings.php',
                 'result_exam_fee_collection'  => 'result_exam_fee_collection.php',
                 'result_marks_entry_subject'  => 'result_marks_entry_subject.php',
+                'result_formative_entry'      => 'result_formative_entry.php',
                 'result_marks_entry_exam'     => 'result_marks_entry_exam.php',
                 'result_download_admit_card'  => 'result_download_admit_card.php',
                 'result_attendance_blank_sheet' => 'result_attendance_blank_sheet.php',
