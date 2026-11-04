@@ -62,4 +62,12 @@ $pdo->exec("SET time_zone = '+06:00'");
 
 require_once __DIR__ . '/uploads.php'; // tenant_upload_rel() / tenant_upload_abs() — SaaS per-school file isolation
 
-if (erp_is_demo()) { demo_auto_login($pdo); }
+if (erp_is_demo()) {
+    require_once __DIR__ . '/demo_sync.php';
+    try {
+        demo_refresh_if_code_changed($pdo);
+    } catch (Throwable $e) {
+        error_log('Demo sync failed: ' . $e->getMessage());
+    }
+    demo_auto_login($pdo);
+}

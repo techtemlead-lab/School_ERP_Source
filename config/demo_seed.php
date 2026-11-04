@@ -151,4 +151,6 @@ function demo_seed_database(PDO $pdo,?int $anchor=null): void {
  $pdo->commit();
 
  foreach(['admin','employees','students','system_users'] as $table)$pdo->exec('CREATE TRIGGER '.demo_ident('demo_lock_'.$table).' BEFORE UPDATE ON '.demo_ident($table)." FOR EACH ROW BEGIN IF NOT(NEW.password <=> OLD.password) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='Password changes disabled in public demo'; END IF; END");
+ require_once __DIR__.'/demo_sync.php';
+ try { demo_sync_database($pdo); } catch (Throwable $e) { error_log('Demo sync failed: '.$e->getMessage()); }
 }

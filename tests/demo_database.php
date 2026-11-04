@@ -12,7 +12,9 @@ if($mode==='prepare'){
 $row=$pdo->query('SELECT * FROM demo_sandboxes WHERE ready=1 AND hour_key='.demo_hour().' ORDER BY id DESC LIMIT 1')->fetch();
 check((bool)$row,'seeded sandbox available');
 $db=$row['db_name'];$scoped=new PDO('mysql:host=db;dbname='.$db.';charset=utf8mb4',$row['db_user'],$row['db_pass'],[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION,PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC]);
-check((int)$scoped->query('SELECT COUNT(*) FROM students')->fetchColumn()===240,'240 fictional students');
+check((int)$scoped->query('SELECT COUNT(*) FROM students')->fetchColumn()===244,'244 fictional students including pending applicants');
+check((int)$scoped->query("SELECT COUNT(*) FROM students WHERE status='Active'")->fetchColumn()===240,'240 active fictional students');
+check((int)$scoped->query("SELECT COUNT(*) FROM students WHERE student_id LIKE 'DEMO-P%' AND status='Pending'")->fetchColumn()===4,'4 pending admission applicants');
 check((int)$scoped->query('SELECT COUNT(*) FROM exam_marks')->fetchColumn()===720,'sample exam marks');
 check((int)$scoped->query("SELECT COUNT(*) FROM employees")->fetchColumn()===24,'24 fictional teachers');
 check((int)$scoped->query("SELECT COUNT(*) FROM scholarship_applications")->fetchColumn()===12,'12 fictional scholarship applications');
@@ -36,9 +38,9 @@ $other=$pdo->query('SELECT db_name FROM demo_sandboxes WHERE ready=1 AND db_name
 check((bool)$other,'second sandbox exists');
 try{$scoped->query('SELECT * FROM '.demo_ident($other).'.students');throw new RuntimeException('Other visitor data exposed');}catch(PDOException $e){check(in_array($e->errorInfo[1]??0,[1044,1142],true),'other visitor database inaccessible');}
 try{$scoped->exec('DROP TRIGGER '.demo_ident('demo_lock_admin'));throw new RuntimeException('Password guard removable');}catch(PDOException $e){check(($e->errorInfo[1]??0)===1142,'password guard cannot be removed');}
-check((int)$scoped->query('SELECT COUNT(*) FROM library_books')->fetchColumn()===60,'60 library books');
+check((int)$scoped->query('SELECT COUNT(*) FROM library_books')->fetchColumn()===61,'61 library books');
 check((int)$scoped->query('SELECT COUNT(*) FROM library_issues')->fetchColumn()===120,'120 library loans');
-check((int)$scoped->query('SELECT COUNT(*) FROM transport_student_assign')->fetchColumn()===36,'36 transport assignments');
+check((int)$scoped->query('SELECT COUNT(*) FROM transport_student_assign')->fetchColumn()===37,'37 transport assignments');
 check((int)$scoped->query('SELECT COUNT(*) FROM student_daily_attendance')->fetchColumn()===7200,'30 days of sample attendance');
 check(demo_reset_at(3599)===3600&&demo_reset_at(3600)===7200,'reset follows clock hour');
 $pdo->exec('USE '.demo_ident($db));
