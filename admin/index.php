@@ -834,6 +834,8 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                     } elseif ($page == 'result_assign_exams') {
                         $sv = $_GET['view'] ?? 'list';
                         echo 'Result Module > Exam Settings > Assign Exam' . ($sv === 'add' ? ' > Assign Exam' : '');
+                    } elseif ($page == 'result_formative_settings') {
+                        echo 'Result Module > Exam Settings > Formative / Class Test';
                     } elseif ($page == 'result_merit_tiebreaker') {
                         echo 'Result Module > Exam Settings > Merit Tie-Breaker';
                     } elseif ($page == 'result_lock_control') {
@@ -1226,6 +1228,7 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                 'result_term_settings'        => 'result_term_settings.php',
                 'result_exam_parts'           => 'result_exam_parts.php',
                 'result_assign_exams'         => 'result_assign_exams.php',
+                'result_formative_settings'   => 'result_formative_settings.php',
                 'result_merit_tiebreaker'     => 'result_merit_tiebreaker.php',
                 'result_assign_subject_teacher' => 'result_assign_subject_teacher.php',
                 'result_working_days'         => 'result_working_days.php',

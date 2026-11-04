@@ -288,6 +288,7 @@ function sb_mod_ok(PDO $pdo, array $tree, string $modkey): bool
                         <li><a href="index.php?page=result_exam_parts">Exam Parts</a></li>
                         <li><a href="index.php?page=result_lock_control">Result Lock/Unlock</a></li>
                         <li><a href="index.php?page=result_assign_exams">Assign Exams</a></li>
+                        <li><a href="index.php?page=result_formative_settings">Formative / Class Test</a></li>
                         <li><a href="index.php?page=result_assign_subject_teacher">Assign Subject to Teacher</a></li>
                         <li><a href="index.php?page=result_working_days">Working Days</a></li>
                     </ul>
