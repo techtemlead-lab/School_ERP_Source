@@ -1,11 +1,12 @@
 <?php
 require_once __DIR__ . '/../config/portal_access.php';
-$result_portal_role = erp_portal_controller_role(['admin']);
+$result_portal_role = erp_portal_controller_role(['admin', 'teacher']);
 erp_portal_require_role($pdo, $result_portal_role, 'result_formative_report');
 // admin/result_formative_report.php - Result Module > Exam Procedure > Formative / Class Test Report
 // Class + Shift + Section + Term + Subject অনুযায়ী প্রতিটা ছাত্রের Component/Class Test-ভিত্তিক মার্ক ও মোট Formative মার্ক,
 // প্রিন্টসহ (প্রতিষ্ঠানের হেডার, Portrait/Landscape, নিচে স্বাক্ষর)।
 require_once __DIR__ . '/../config/formative_helpers.php';
+require_once __DIR__ . '/../config/exam_elig_grid.php';
 require_once __DIR__ . '/employee_attendance_common.php';
 
 $pdo->exec("CREATE TABLE IF NOT EXISTS formative_scores (id INT AUTO_INCREMENT PRIMARY KEY, session_id INT NOT NULL, term_id INT NOT NULL, subject_id INT NOT NULL, student_id INT NOT NULL, kind VARCHAR(12) NOT NULL, ref_id INT NOT NULL DEFAULT 0, score DECIMAL(6,2) NOT NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uniq_score (term_id, subject_id, student_id, kind, ref_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
@@ -23,9 +24,25 @@ $shift_id   = (int) ($_GET['shift_id'] ?? 0);
 $section_id = (int) ($_GET['section_id'] ?? 0);
 $term_id    = (int) ($_GET['term_id'] ?? 0);
 $subject_id = (int) ($_GET['subject_id'] ?? 0);
-$all_selected = $class_id && $shift_id && $section_id && $term_id && $subject_id;
+$group_id   = (int) ($_GET['group_id'] ?? 0);
+$is_teacher_ctx = $result_portal_role === 'teacher';
+$me_teacher_id  = $is_teacher_ctx ? (int) ($_SESSION['teacher_id'] ?? 0) : 0;
+$groups = $class_id ? ee_groups_of_class($pdo, $class_id) : [];
+if ($groups && !isset($groups[$group_id])) { $group_id = 0; }
+$need_group = $class_id && $groups && $group_id <= 0;
+$all_selected = $class_id && $shift_id && $section_id && $term_id && $subject_id && !$need_group;
 
-$classes  = $pdo->query("SELECT id, class_name FROM academic_classes WHERE status='Active' ORDER BY rank ASC, class_name ASC")->fetchAll();
+if ($is_teacher_ctx) {
+    $pairs = fe_teacher_pairs($pdo, $me_teacher_id);
+    $cls_ids = array_values(array_unique(array_map(function ($a) { return (int) $a['class_id']; }, $pairs)));
+    if ($cls_ids) {
+        $in_ph = implode(',', array_fill(0, count($cls_ids), '?'));
+        $cq = $pdo->prepare("SELECT id, class_name FROM academic_classes WHERE status='Active' AND id IN ($in_ph) ORDER BY rank ASC, class_name ASC");
+        $cq->execute($cls_ids); $classes = $cq->fetchAll();
+    } else { $classes = []; }
+} else {
+    $classes = $pdo->query("SELECT id, class_name FROM academic_classes WHERE status='Active' ORDER BY rank ASC, class_name ASC")->fetchAll();
+}
 $shifts   = $pdo->query("SELECT id, shift_name FROM academic_shifts WHERE status='Active' ORDER BY shift_name ASC")->fetchAll();
 $sections = [];
 if ($class_id && $shift_id) {
@@ -36,23 +53,27 @@ $tq = $pdo->prepare("SELECT id, term_name FROM exam_terms WHERE session_id=? AND
 $tq->execute([$sid]); $terms = $tq->fetchAll();
 $subjects = [];
 if ($class_id) {
-    $q = $pdo->prepare("SELECT id, subject_name FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY sort_order ASC, id ASC");
+    $q = $pdo->prepare("SELECT id, subject_name, group_id FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY sort_order ASC, id ASC");
     $q->execute([$class_id]); $subjects = $q->fetchAll();
+    if ($groups && $group_id > 0) { $subjects = array_values(array_filter($subjects, function ($s) use ($group_id) { $g = (int) ($s['group_id'] ?? 0); return $g === 0 || $g === $group_id; })); }
+    if ($is_teacher_ctx) {
+        $ok = [];
+        foreach ($pairs as $a) { if ((int) $a['class_id'] === $class_id) { $ok[(int) $a['subject_id']] = true; } }
+        $subjects = array_values(array_filter($subjects, function ($s) use ($ok) { return isset($ok[(int) $s['id']]); }));
+    }
 }
 $nm = function (array $rows, int $id, string $col): string { foreach ($rows as $r) { if ((int) $r['id'] === $id) { return (string) $r[$col]; } } return ''; };
 
 $setting = null; $components = []; $tests = []; $rows = []; $problem = '';
+if ($all_selected && $is_teacher_ctx && !fe_teacher_allowed($pdo, $me_teacher_id, $class_id, $subject_id)) {
+    $all_selected = false; $problem = 'এই Class/Subject আপনাকে এসাইন করা হয়নি।';
+}
 if ($all_selected) {
     [$setting, $components, $tests] = fe_resolve($pdo, $sid, $class_id, $subject_id, $term_id);
     if (!$setting) {
         $problem = 'এই Class/Subject/Term-এর জন্য Formative সেটিং করা নেই।';
     } else {
-        $where = ['s.class_id=?', 's.shift_id=?', 's.section_id=?', "s.status='Active'"];
-        $params = [$class_id, $shift_id, $section_id];
-        branch_apply_filter($where, $params, 's.branch_id');
-        $st = $pdo->prepare("SELECT s.id, s.student_id, s.roll_no, s.name_en FROM students s WHERE " . implode(' AND ', $where) . " ORDER BY (s.roll_no + 0) ASC, s.roll_no ASC");
-        $st->execute($params);
-        $students = $st->fetchAll();
+        $students = fe_students($pdo, $class_id, $shift_id, $section_id, $group_id);
         $sq = $pdo->prepare("SELECT student_id, kind, ref_id, score FROM formative_scores WHERE term_id=? AND subject_id=?");
         $sq->execute([$term_id, $subject_id]);
         $saved = [];
@@ -78,11 +99,16 @@ $title = 'Formative / Class Test Report : ' . $nm($terms, $term_id, 'term_name')
         <div class="col-md-2"><label class="form-label">Section</label><select name="section_id" class="form-select"><option value="0">—</option><?php foreach ($sections as $c): ?><option value="<?php echo (int) $c['id']; ?>" <?php echo $section_id === (int) $c['id'] ? 'selected' : ''; ?>><?php echo frv($c['section_name']); ?></option><?php endforeach; ?></select></div>
         <div class="col-md-2"><label class="form-label">Exam Term</label><select name="term_id" class="form-select"><option value="0">—</option><?php foreach ($terms as $c): ?><option value="<?php echo (int) $c['id']; ?>" <?php echo $term_id === (int) $c['id'] ? 'selected' : ''; ?>><?php echo frv($c['term_name']); ?></option><?php endforeach; ?></select></div>
         <div class="col-md-2"><label class="form-label">Subject</label><select name="subject_id" class="form-select"><option value="0">—</option><?php foreach ($subjects as $c): ?><option value="<?php echo (int) $c['id']; ?>" <?php echo $subject_id === (int) $c['id'] ? 'selected' : ''; ?>><?php echo frv($c['subject_name']); ?></option><?php endforeach; ?></select></div>
+        <?php if ($groups): ?><div class="col-md-2"><label class="form-label">Group</label><select name="group_id" class="form-select"><option value="0">—</option><?php foreach ($groups as $gid => $gname): ?><option value="<?php echo (int) $gid; ?>" <?php echo $group_id === (int) $gid ? 'selected' : ''; ?>><?php echo frv($gname); ?></option><?php endforeach; ?></select></div><?php endif; ?>
         <div class="col-md-2"><button class="btn btn-primary w-100" type="submit">দেখুন</button></div>
     </form>
 </div></div>
 
-<?php if (!$all_selected): ?>
+<?php if ($need_group): ?>
+    <div class="alert alert-warning no-print">এই ক্লাসে <b>Group</b> আছে — উপরে থেকে Group সিলেক্ট করুন।</div>
+<?php elseif ($problem): ?>
+    <div class="alert alert-warning no-print"><?php echo frv($problem); ?></div>
+<?php elseif (!$all_selected): ?>
     <div class="text-center text-muted py-4 no-print">উপরে Class, Shift, Section, Exam Term ও Subject সিলেক্ট করুন।</div>
 <?php elseif ($problem): ?>
     <div class="alert alert-warning no-print"><?php echo frv($problem); ?></div>

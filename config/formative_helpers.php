@@ -70,3 +70,40 @@ function fe_compute(array $setting, array $components, array $tests, array $in):
     return round(min($full, $pct / 100.0 * $full), 2);
 }
 
+
+function fe_teacher_pairs(PDO $pdo, int $teacher_id): array {
+    $stmt = $pdo->prepare(
+        "SELECT class_id, subject_id FROM teacher_subject_assignments WHERE employee_id = ?
+         UNION
+         SELECT class_id, subject_id FROM routines WHERE teacher_id = ? AND status = 'Active' AND class_id IS NOT NULL"
+    );
+    try { $stmt->execute([$teacher_id, $teacher_id]); return $stmt->fetchAll(); } catch (Throwable $e) { return []; }
+}
+function fe_teacher_allowed(PDO $pdo, int $teacher_id, int $class_id, int $subject_id): bool {
+    foreach (fe_teacher_pairs($pdo, $teacher_id) as $a) {
+        if ((int) $a['class_id'] === $class_id && (int) $a['subject_id'] === $subject_id) { return true; }
+    }
+    return false;
+}
+
+
+function fe_students(PDO $pdo, int $class_id, int $shift_id, int $section_id, int $group_id = 0): array {
+    $where = ['s.class_id=?', 's.shift_id=?', 's.section_id=?', "s.status='Active'"];
+    $params = [$class_id, $shift_id, $section_id];
+    if ($group_id > 0) { $where[] = 's.group_id=?'; $params[] = $group_id; }
+    branch_apply_filter($where, $params, 's.branch_id');
+    $st = $pdo->prepare("SELECT s.id, s.student_id, s.roll_no, s.name_en FROM students s WHERE " . implode(' AND ', $where) . " ORDER BY (s.roll_no + 0) ASC, s.roll_no ASC");
+    $st->execute($params);
+    return $st->fetchAll();
+}
+
+
+// Assign Exam-এ ঐ Class/Term/Part/Subject-এর Full Mark (Exam)। না থাকলে null।
+function fe_assign_full(PDO $pdo, int $class_id, int $term_id, int $part_id, int $subject_id): ?float {
+    try {
+        $q = $pdo->prepare("SELECT full_mark_exam FROM exam_assign_subjects WHERE class_id=? AND term_id=? AND part_id=? AND subject_id=? AND status='Active' ORDER BY id DESC LIMIT 1");
+        $q->execute([$class_id, $term_id, $part_id, $subject_id]);
+        $v = $q->fetchColumn();
+        return $v === false ? null : (float) $v;
+    } catch (Throwable $e) { return null; } // টেবিল এখনো তৈরি হয়নি = কিছু এসাইন করা নেই
+}
