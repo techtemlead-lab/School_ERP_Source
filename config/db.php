@@ -58,4 +58,16 @@ try {
 // থাকে না, তাই নিরাপদ ফিক্সড অফসেট ব্যবহার করা হলো (বাংলাদেশে কোনো DST নেই, তাই +06:00 সবসময় ঠিক)
 $pdo->exec("SET time_zone = '+06:00'");
 
+// Demo school: when application code changes, create any new tables/columns and
+// fill features that still have no dummy rows. A full hourly reset still
+// restores the golden snapshot first (cron/reset_demo_db.php).
+if (($tenant['school_code'] ?? '') === 'demo') {
+    require_once __DIR__ . '/demo_sync.php';
+    try {
+        demo_refresh_if_code_changed($pdo);
+    } catch (Throwable $e) {
+        error_log('Demo sync failed: ' . $e->getMessage());
+    }
+}
+
 require_once __DIR__ . '/uploads.php'; // tenant_upload_rel() / tenant_upload_abs() — SaaS per-school file isolation

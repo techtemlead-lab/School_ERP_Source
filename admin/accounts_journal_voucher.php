@@ -25,7 +25,7 @@ $title_map    = [
     'Contra'  => 'কন্ট্রা ভাউচার (Contra) — নগদ/ব্যাংক এর মধ্যে স্থানান্তর',
 ];
 
-function jv(string $val): string { return htmlspecialchars($val, ENT_QUOTES, 'UTF-8'); }
+function jv(?string $val): string { return htmlspecialchars((string) $val, ENT_QUOTES, 'UTF-8'); }
 function jv_money($n): string { return number_format((float) $n, 2); }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['post_voucher'])) {
