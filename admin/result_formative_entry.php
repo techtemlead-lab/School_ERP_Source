@@ -10,6 +10,7 @@ erp_portal_require_role($pdo, $result_portal_role, 'result_formative_entry');
 // ফলাফল কখনো Formative Full Mark-এর বেশি হয় না।
 require_once __DIR__ . '/../config/report_card_helpers.php';
 require_once __DIR__ . '/../config/formative_helpers.php';
+require_once __DIR__ . '/../config/exam_elig_grid.php';
 
 $fe_err = $_SESSION['fe_err'] ?? '';
 $fe_msg = $_SESSION['fe_msg'] ?? '';
@@ -44,21 +45,6 @@ $sid = $current_session ? (int) $current_session['id'] : 0;
 
 function fev($v): string { return htmlspecialchars((string) ($v ?? ''), ENT_QUOTES, 'UTF-8'); }
 
-function fe_teacher_pairs(PDO $pdo, int $teacher_id): array {
-    $stmt = $pdo->prepare(
-        "SELECT class_id, subject_id FROM teacher_subject_assignments WHERE employee_id = ?
-         UNION
-         SELECT class_id, subject_id FROM routines WHERE teacher_id = ? AND status = 'Active' AND class_id IS NOT NULL"
-    );
-    try { $stmt->execute([$teacher_id, $teacher_id]); return $stmt->fetchAll(); } catch (Throwable $e) { return []; }
-}
-function fe_teacher_allowed(PDO $pdo, int $teacher_id, int $class_id, int $subject_id): bool {
-    foreach (fe_teacher_pairs($pdo, $teacher_id) as $a) {
-        if ((int) $a['class_id'] === $class_id && (int) $a['subject_id'] === $subject_id) { return true; }
-    }
-    return false;
-}
-
 function fe_att_percent(PDO $pdo, int $student_id, string $from, string $to): ?float {
     $q = $pdo->prepare("SELECT COUNT(*) AS total, SUM(status='Present') AS present FROM student_daily_attendance WHERE student_id=? AND attendance_date BETWEEN ? AND ?");
     $q->execute([$student_id, $from, $to]);
@@ -72,22 +58,17 @@ $shift_id   = (int) ($_POST['shift_id'] ?? $_GET['shift_id'] ?? 0);
 $section_id = (int) ($_POST['section_id'] ?? $_GET['section_id'] ?? 0);
 $term_id    = (int) ($_POST['term_id'] ?? $_GET['term_id'] ?? 0);
 $subject_id = (int) ($_POST['subject_id'] ?? $_GET['subject_id'] ?? 0);
+$group_id   = (int) ($_POST['group_id'] ?? $_GET['group_id'] ?? 0);
+$groups     = $class_id ? ee_groups_of_class($pdo, $class_id) : [];
+if ($groups && !isset($groups[$group_id])) { $group_id = 0; }
 $att_from   = (string) ($_POST['att_from'] ?? $_GET['att_from'] ?? date('Y-01-01'));
 $att_to     = (string) ($_POST['att_to'] ?? $_GET['att_to'] ?? date('Y-m-d'));
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $att_from)) { $att_from = date('Y-01-01'); }
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $att_to)) { $att_to = date('Y-m-d'); }
 $self = 'index.php?page=result_formative_entry';
-$back = $self . '&class_id=' . $class_id . '&shift_id=' . $shift_id . '&section_id=' . $section_id . '&term_id=' . $term_id . '&subject_id=' . $subject_id . '&att_from=' . $att_from . '&att_to=' . $att_to;
-$all_selected = $class_id && $shift_id && $section_id && $term_id && $subject_id;
-
-function fe_students(PDO $pdo, int $class_id, int $shift_id, int $section_id): array {
-    $where = ['s.class_id=?', 's.shift_id=?', 's.section_id=?', "s.status='Active'"];
-    $params = [$class_id, $shift_id, $section_id];
-    branch_apply_filter($where, $params, 's.branch_id');
-    $st = $pdo->prepare("SELECT s.id, s.student_id, s.roll_no, s.name_en FROM students s WHERE " . implode(' AND ', $where) . " ORDER BY (s.roll_no + 0) ASC, s.roll_no ASC");
-    $st->execute($params);
-    return $st->fetchAll();
-}
+$back = $self . '&class_id=' . $class_id . '&shift_id=' . $shift_id . '&section_id=' . $section_id . '&term_id=' . $term_id . '&subject_id=' . $subject_id . '&group_id=' . $group_id . '&att_from=' . $att_from . '&att_to=' . $att_to;
+$need_group = $class_id && $groups && $group_id <= 0;
+$all_selected = $class_id && $shift_id && $section_id && $term_id && $subject_id && !$need_group;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_formative'])) {
     if (!csrf_verify($_POST['csrf_token'] ?? null)) {
@@ -110,7 +91,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_formative'])) {
                 $_SESSION['fe_err'] = 'Component-এর ওজনের যোগফল ' . fe_num($wsum) . '% — ১০০% হতে হবে (Settings পেজে ঠিক করুন)।';
             } else {
                 $part_id = (int) $setting['part_id'];
-                $allowed_ids = array_flip(array_map(function ($s) { return (int) $s['id']; }, fe_students($pdo, $class_id, $shift_id, $section_id)));
+                $assign_full = fe_assign_full($pdo, $class_id, $term_id, $part_id, $subject_id);
+                if ($assign_full === null) {
+                    $_SESSION['fe_err'] = 'সেভ হয়নি — Settings-এ বাছা Exam Part-এ এই Subject Assign Exam পেজে এসাইন করা নেই, তাই রেজাল্টে মার্ক ধরা হতো না। আগে Assign Exams পেজে Full Mark সেট করুন।';
+                    header('Location: ' . $back); exit();
+                }
+                if ($assign_full < (float) $setting['full_mark'] - 0.0001) { $setting['full_mark'] = $assign_full; } // রেজাল্টের Full Mark-এর বেশি কখনো নয়
+                $allowed_ids = array_flip(array_map(function ($s) { return (int) $s['id']; }, fe_students($pdo, $class_id, $shift_id, $section_id, $group_id)));
                 $del = $pdo->prepare("DELETE FROM formative_scores WHERE term_id=? AND subject_id=? AND student_id=? AND kind=? AND ref_id=?");
                 $ins = $pdo->prepare("INSERT INTO formative_scores (session_id, term_id, subject_id, student_id, kind, ref_id, score) VALUES (?,?,?,?,?,?,?)");
                 $mk  = $pdo->prepare("INSERT INTO exam_marks (session_id, term_id, part_id, subject_id, class_id, shift_id, section_id, student_id, marks_obtained) VALUES (?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE marks_obtained=VALUES(marks_obtained)");
@@ -185,8 +172,9 @@ $tq = $pdo->prepare("SELECT id, term_name FROM exam_terms WHERE session_id=? AND
 $tq->execute([$sid]); $terms = $tq->fetchAll();
 $subjects = [];
 if ($class_id) {
-    $q = $pdo->prepare("SELECT id, subject_name FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY sort_order ASC, id ASC");
+    $q = $pdo->prepare("SELECT id, subject_name, group_id FROM academic_subjects WHERE class_id=? AND status='Active' ORDER BY sort_order ASC, id ASC");
     $q->execute([$class_id]); $subjects = $q->fetchAll();
+    if ($groups && $group_id > 0) { $subjects = array_values(array_filter($subjects, function ($s) use ($group_id) { $g = (int) ($s['group_id'] ?? 0); return $g === 0 || $g === $group_id; })); }
     if ($is_teacher_ctx) {
         $ok = [];
         foreach ($pairs as $a) { if ((int) $a['class_id'] === $class_id) { $ok[(int) $a['subject_id']] = true; } }
@@ -205,7 +193,7 @@ if ($all_selected) {
         } elseif ($setting['mode'] === 'Component' && !$components) {
             $problem = 'Component মোডে কোনো সক্রিয় Component নেই (Settings পেজে যোগ করুন)।';
         } else {
-            $students = fe_students($pdo, $class_id, $shift_id, $section_id);
+            $students = fe_students($pdo, $class_id, $shift_id, $section_id, $group_id);
             $sq = $pdo->prepare("SELECT student_id, kind, ref_id, score FROM formative_scores WHERE term_id=? AND subject_id=?");
             $sq->execute([$term_id, $subject_id]);
             foreach ($sq->fetchAll() as $r) { $saved[(int) $r['student_id']][$r['kind'] . ':' . $r['ref_id']] = $r['score']; }
@@ -228,12 +216,15 @@ if ($all_selected) {
         <div class="col-md-2"><label class="form-label">Section</label><select name="section_id" class="form-select"><option value="0">—</option><?php foreach ($sections as $c): ?><option value="<?php echo (int) $c['id']; ?>" <?php echo $section_id === (int) $c['id'] ? 'selected' : ''; ?>><?php echo fev($c['section_name']); ?></option><?php endforeach; ?></select></div>
         <div class="col-md-2"><label class="form-label">Exam Term</label><select name="term_id" class="form-select"><option value="0">—</option><?php foreach ($terms as $c): ?><option value="<?php echo (int) $c['id']; ?>" <?php echo $term_id === (int) $c['id'] ? 'selected' : ''; ?>><?php echo fev($c['term_name']); ?></option><?php endforeach; ?></select></div>
         <div class="col-md-2"><label class="form-label">Subject</label><select name="subject_id" class="form-select"><option value="0">—</option><?php foreach ($subjects as $c): ?><option value="<?php echo (int) $c['id']; ?>" <?php echo $subject_id === (int) $c['id'] ? 'selected' : ''; ?>><?php echo fev($c['subject_name']); ?></option><?php endforeach; ?></select></div>
+        <?php if ($groups): ?><div class="col-md-2"><label class="form-label">Group</label><select name="group_id" class="form-select"><option value="0">—</option><?php foreach ($groups as $gid => $gname): ?><option value="<?php echo (int) $gid; ?>" <?php echo $group_id === (int) $gid ? 'selected' : ''; ?>><?php echo fev($gname); ?></option><?php endforeach; ?></select></div><?php endif; ?>
         <div class="col-md-2"><button class="btn btn-primary w-100" type="submit">দেখুন</button></div>
         <div class="col-md-3"><label class="form-label small">উপস্থিতি হিসাবের তারিখ: শুরু</label><input type="date" name="att_from" class="form-control form-control-sm" value="<?php echo fev($att_from); ?>"></div>
         <div class="col-md-3"><label class="form-label small">শেষ</label><input type="date" name="att_to" class="form-control form-control-sm" value="<?php echo fev($att_to); ?>"></div>
     </form>
 
-    <?php if (!$all_selected): ?>
+    <?php if ($need_group): ?>
+        <div class="alert alert-warning text-center py-3 mb-0">এই ক্লাসে <b>Group</b> আছে — উপরে থেকে Group সিলেক্ট করুন।</div>
+    <?php elseif (!$all_selected): ?>
         <div class="text-center text-muted py-4">উপরে Class, Shift, Section, Exam Term ও Subject সিলেক্ট করুন।</div>
     <?php elseif ($problem): ?>
         <div class="alert alert-warning"><?php echo fev($problem); ?></div>
@@ -242,6 +233,9 @@ if ($all_selected) {
     <?php else:
         $mode_direct_tests = $setting['mode'] !== 'Component' && $tests;
         $mode_direct_single = $setting['mode'] !== 'Component' && !$tests; ?>
+        <?php $af = fe_assign_full($pdo, $class_id, $term_id, (int) $setting['part_id'], $subject_id);
+        if ($af === null): ?><div class="alert alert-danger py-2 small">এই Subject Settings-এ বাছা Exam Part-এ Assign Exam করা নেই — <a href="index.php?page=result_assign_exams">Assign Exams</a> থেকে Full Mark সেট না করলে মার্ক রেজাল্টে ধরা হবে না এবং সেভ হবে না।</div>
+        <?php elseif (abs($af - (float) $setting['full_mark']) > 0.0001): ?><div class="alert alert-warning py-2 small">সতর্কতা: Settings-এর Formative Full Mark (<?php echo fe_num($setting['full_mark']); ?>) আর Assign Exam-এর Full Mark (<?php echo fe_num($af); ?>) মিলছে না<?php echo $af < (float) $setting['full_mark'] ? ' — মোট মার্ক ' . fe_num($af) . '-এর বেশি হবে না।' : '।'; ?></div><?php endif; ?>
         <div class="alert alert-info py-2 small">
             Formative Full Mark: <strong><?php echo fe_num($setting['full_mark']); ?></strong> ·
             <?php if ($setting['mode'] === 'Component'): ?>মোড: Component (প্রতিটা ঘর ০–১০০, ওজন অনুযায়ী মিলে যাবে)
@@ -250,7 +244,7 @@ if ($all_selected) {
         </div>
         <form method="POST" action="<?php echo fev($self); ?>" id="feForm">
             <?php echo csrf_field(); ?><input type="hidden" name="save_formative" value="1">
-            <input type="hidden" name="class_id" value="<?php echo $class_id; ?>"><input type="hidden" name="shift_id" value="<?php echo $shift_id; ?>"><input type="hidden" name="section_id" value="<?php echo $section_id; ?>"><input type="hidden" name="term_id" value="<?php echo $term_id; ?>"><input type="hidden" name="subject_id" value="<?php echo $subject_id; ?>">
+            <input type="hidden" name="class_id" value="<?php echo $class_id; ?>"><input type="hidden" name="shift_id" value="<?php echo $shift_id; ?>"><input type="hidden" name="section_id" value="<?php echo $section_id; ?>"><input type="hidden" name="term_id" value="<?php echo $term_id; ?>"><input type="hidden" name="subject_id" value="<?php echo $subject_id; ?>"><input type="hidden" name="group_id" value="<?php echo $group_id; ?>">
             <input type="hidden" name="att_from" value="<?php echo fev($att_from); ?>"><input type="hidden" name="att_to" value="<?php echo fev($att_to); ?>">
             <div class="table-responsive"><table class="table table-bordered table-sm align-middle" id="feTable">
                 <thead class="table-light"><tr><th>Sl.</th><th>ID</th><th>Name</th><th>Roll</th>

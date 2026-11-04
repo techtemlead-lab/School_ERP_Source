@@ -67,14 +67,14 @@ $tp_brand_icon_data_uri = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d
 
         <!-- Result Module -->
         <li class="has-submenu">
-            <a href="#" data-bs-toggle="collapse" data-bs-target="#tResultSubmenu" aria-expanded="<?php echo in_array($tp_page, ['result_exam_routine', 'result_marks_entry_subject', 'result_formative_entry', 'teacher_questions'], true) ? 'true' : 'false'; ?>" title="Result Module">
+            <a href="#" data-bs-toggle="collapse" data-bs-target="#tResultSubmenu" aria-expanded="<?php echo in_array($tp_page, ['result_exam_routine', 'result_marks_entry_subject', 'result_formative_entry', 'result_formative_report', 'teacher_questions'], true) ? 'true' : 'false'; ?>" title="Result Module">
                 <span class="d-flex align-items-center gap-2">
                     <i class="fa-solid fa-graduation-cap menu-icon"></i>
                     <span class="menu-text">Result Module</span>
                 </span>
                 <i class="fa-solid fa-chevron-down small menu-text"></i>
             </a>
-            <ul class="collapse submenu <?php echo in_array($tp_page, ['result_exam_routine', 'result_marks_entry_subject', 'result_formative_entry', 'teacher_questions'], true) ? 'show' : ''; ?>" id="tResultSubmenu">
+            <ul class="collapse submenu <?php echo in_array($tp_page, ['result_exam_routine', 'result_marks_entry_subject', 'result_formative_entry', 'result_formative_report', 'teacher_questions'], true) ? 'show' : ''; ?>" id="tResultSubmenu">
                 <li class="has-submenu">
                     <a href="#" data-bs-toggle="collapse" data-bs-target="#tExamProcedureSubmenu" aria-expanded="true" title="Exam Procedure">
                         <span>Exam Procedure</span>
@@ -84,6 +84,7 @@ $tp_brand_icon_data_uri = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d
                         <li><a href="index.php?page=result_exam_routine" class="<?php echo $tp_page === 'result_exam_routine' ? 'active' : ''; ?>">Exam Routine</a></li>
                         <li><a href="index.php?page=result_marks_entry_subject" class="<?php echo $tp_page === 'result_marks_entry_subject' ? 'active' : ''; ?>">Marks Entry (Subject)</a></li>
                         <li><a href="index.php?page=result_formative_entry" class="<?php echo $tp_page === 'result_formative_entry' ? 'active' : ''; ?>">Formative / Class Test Entry</a></li>
+                        <li><a href="index.php?page=result_formative_report" class="<?php echo $tp_page === 'result_formative_report' ? 'active' : ''; ?>">Formative / Class Test Report</a></li>
                         <li><a href="index.php?page=teacher_questions" class="<?php echo $tp_page === 'teacher_questions' ? 'active' : ''; ?>">Question Upload</a></li>
                     </ul>
                 </li>
