@@ -19,6 +19,13 @@ $pdo->exec(
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
 );
 
+try {
+    $admTypeColumn = $pdo->query("SHOW COLUMNS FROM institute_settings LIKE 'admission_type'")->fetch();
+    if (!$admTypeColumn) {
+        $pdo->exec("ALTER TABLE institute_settings ADD COLUMN admission_type VARCHAR(20) NOT NULL DEFAULT 'General'");
+    }
+} catch (Throwable $e) {
+}
 $global_admission_type = $pdo->query("SELECT admission_type FROM institute_settings WHERE id = 1")->fetch()['admission_type'] ?? 'General';
 $method = ['General' => 'None', 'Admission Test' => 'Test', 'Lottery' => 'Lottery'][$global_admission_type] ?? 'None';
 

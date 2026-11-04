@@ -8,6 +8,29 @@ function psp_money($n): string { return number_format((float) $n, 2); }
 
 $months = [1 => 'January', 2 => 'February', 3 => 'March', 4 => 'April', 5 => 'May', 6 => 'June', 7 => 'July', 8 => 'August', 9 => 'September', 10 => 'October', 11 => 'November', 12 => 'December'];
 
+if (!function_exists('sp_ensure_column')) {
+    function sp_ensure_column(PDO $pdo, string $table, string $column, string $definition): void
+    {
+        $chk = $pdo->prepare('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?');
+        $chk->execute([$table, $column]);
+        if (!$chk->fetch()) {
+            $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$column` $definition");
+        }
+    }
+}
+try {
+    if ($pdo->query("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'payroll_salary_sheet_items'")->fetchColumn()) {
+        sp_ensure_column($pdo, 'payroll_salary_sheet_items', 'payment_status', "ENUM('Unpaid','Paid') NOT NULL DEFAULT 'Unpaid'");
+        sp_ensure_column($pdo, 'payroll_salary_sheet_items', 'payment_method', 'VARCHAR(20) NULL');
+        sp_ensure_column($pdo, 'payroll_salary_sheet_items', 'payment_date', 'DATE NULL');
+        sp_ensure_column($pdo, 'payroll_salary_sheet_items', 'payment_reference', 'VARCHAR(100) NULL');
+        sp_ensure_column($pdo, 'payroll_salary_sheet_items', 'payment_remarks', 'VARCHAR(255) NULL');
+        sp_ensure_column($pdo, 'payroll_salary_sheet_items', 'paid_by', 'VARCHAR(100) NULL');
+        sp_ensure_column($pdo, 'payroll_salary_sheet_items', 'paid_at', 'TIMESTAMP NULL');
+    }
+} catch (Throwable $e) {
+}
+
 $view = $_GET['view'] ?? 'list';
 ?>
 

@@ -18,6 +18,13 @@ $pdo->exec(
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
 );
 
+try {
+    $admTypeColumn = $pdo->query("SHOW COLUMNS FROM institute_settings LIKE 'admission_type'")->fetch();
+    if (!$admTypeColumn) {
+        $pdo->exec("ALTER TABLE institute_settings ADD COLUMN admission_type VARCHAR(20) NOT NULL DEFAULT 'General'");
+    }
+} catch (Throwable $e) {
+}
 $am_msg = $_SESSION['am_msg'] ?? '';
 $am_err = $_SESSION['am_err'] ?? '';
 unset($_SESSION['am_msg'], $_SESSION['am_err']);
