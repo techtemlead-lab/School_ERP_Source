@@ -8,7 +8,7 @@ $vd_err = $_SESSION['vd_err'] ?? '';
 unset($_SESSION['vd_msg'], $_SESSION['vd_err']);
 
 $view = $_GET['view'] ?? 'list';
-function vd(string $val): string { return htmlspecialchars($val, ENT_QUOTES, 'UTF-8'); }
+function vd(?string $val): string { return htmlspecialchars((string) $val, ENT_QUOTES, 'UTF-8'); }
 function vd_money($n): string { return number_format((float) $n, 2); }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {

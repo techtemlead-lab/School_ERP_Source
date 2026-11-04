@@ -99,6 +99,8 @@ function reset_demo_database(bool $force = false): array
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 0;");
         $pdo->exec($sql);
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 1;");
+        require_once __DIR__ . '/../config/demo_sync.php';
+        demo_after_snapshot($pdo);
     } catch (\Throwable $e) {
         return [
             'success' => false,
