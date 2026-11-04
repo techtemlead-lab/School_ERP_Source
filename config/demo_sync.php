@@ -171,10 +171,6 @@ function demo_extract_create_sql(string $source): array
                 }
                 continue;
             }
-            if ($c === "'" || $c === '"') {
-                $inQuote = $c;
-                continue;
-            }
             if ($c === '(') {
                 $depth++;
                 $seenParen = true;
@@ -184,9 +180,15 @@ function demo_extract_create_sql(string $source): array
                 $depth = max(0, $depth - 1);
                 continue;
             }
+            // A double quote here closes the PHP string that holds the statement.
+            // SQL files end the statement with a semicolon instead.
             if ($seenParen && $depth === 0 && ($c === ';' || $c === '"')) {
                 $end = $i;
                 break;
+            }
+            if ($c === "'" || $c === '"') {
+                $inQuote = $c;
+                continue;
             }
         }
         if ($end === null) {
