@@ -306,6 +306,7 @@ function sb_mod_ok(PDO $pdo, array $tree, string $modkey): bool
                         <li><a href="index.php?page=result_exam_seat_plan">Exam Seat Plan</a></li>
                         <li><a href="index.php?page=result_marks_entry_subject">Marks Entry (Subject)</a></li>
                         <li><a href="index.php?page=result_formative_entry">Formative / Class Test Entry</a></li>
+                        <li><a href="index.php?page=result_formative_report">Formative / Class Test Report</a></li>
                         <li><a href="index.php?page=result_marks_entry_exam">Marks Entry (Exam)</a></li>
                         <li><a href="index.php?page=result_exam_fee_settings">Exam Fee Gateway Settings</a></li>
                         <li><a href="index.php?page=result_exam_fee_collection">Exam Fee Online Payments</a></li>
