@@ -164,7 +164,7 @@ if ($searched && $f_class_id && $f_shift_id && $f_section_id && $f_term_id) {
     // rc_get_subject_defs() ফাংশন দিয়ে (part_id=0 হলে Combined mode: Term-এর সব Part একসাথে যোগ হয়)।
     // আগে এখানে সরাসরি eas.part_id = ? দিয়ে কুয়েরি হতো, যেটা Part সিলেক্ট না করলে (part_id=0) কোনো
     // রো-ই ম্যাচ করত না এবং "কোনো Subject Assign করা নেই" ভুল এরর দেখাত — এই ফিক্সে সেটা ঠিক হলো।
-    $defs = rc_get_subject_defs($pdo, $f_class_id, $f_term_id, $f_part_id);
+    $defs = rc_get_subject_defs($pdo, $f_class_id, $f_term_id, $f_part_id, $f_group_id);
     $subject_cols = [];
     foreach ($defs as $subj_id => $def) {
         $sfull = 0.0;

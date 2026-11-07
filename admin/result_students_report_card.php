@@ -169,6 +169,7 @@ $f_section_id = (int) ($_GET['section_id'] ?? 0);
 $f_term_id    = (int) ($_GET['term_id'] ?? 0);
 $f_part_id    = (int) ($_GET['part_id'] ?? 0);
 $f_student_id = (int) ($_GET['student_id'] ?? 0);
+$arabic_mode  = array_key_exists($_GET['arabic_mode'] ?? '', rc_arabic_modes()) ? $_GET['arabic_mode'] : 'separate';
 $show_merit   = isset($_GET['search_result']) ? isset($_GET['show_merit']) : true;
 $searched     = isset($_GET['search_result']);
 // Class Teacher স্কোপে অন্য ক্লাসের স্টুডেন্ট আইডি দিলে ব্লক
@@ -253,7 +254,8 @@ if ($searched && $f_class_id && $f_term_id) {
                 $stu_row = $stu_info_stmt->fetch();
                 if (!$stu_row) { continue; }
 
-                $result = rc_student_result($defs, $marks_all[$sid_target] ?? [], $att_all[$sid_target] ?? [], $grade_bands, rc_excluded_subjects($pdo, $defs, (int) $f_term_id, (int) $sid_target));
+                // শাখা (Group) অনুযায়ী সাবজেক্ট বাদ (rc_excluded_subjects) + আরবি আলাদা ব্লকে/সহ/ছাড়া ($arabic_mode)
+                $result = rc_student_result_mode($defs, $marks_all[$sid_target] ?? [], $att_all[$sid_target] ?? [], $grade_bands, $arabic_mode, rc_excluded_subjects($pdo, $defs, (int) $f_term_id, (int) $sid_target));
 
                 // "Show Working Days & Attend Absent" টগলের জন্য — অটো হিসাব, ম্যানুয়াল এন্ট্রির
                 // দরকার নেই। student_daily_attendance টেবিল থেকে Present/Absent কাউন্ট করে
@@ -274,6 +276,7 @@ if ($searched && $f_class_id && $f_term_id) {
                 // Class Position (Show Merit চেক করা থাকলে) — এই স্টুডেন্টের নিজের
                 // Class/Shift/Section/Group-এর সবার মধ্যে Rank
                 $class_position = null; $class_total_count = null; $class_pass_count = null; $class_fail_count = null;
+                $arabic_position = null;
                 if ($show_merit) {
                     $stu_group_id = (int) ($stu_row['group_id'] ?? 0);
                     $cls_stu_stmt = $pdo->prepare(
@@ -308,8 +311,9 @@ if ($searched && $f_class_id && $f_term_id) {
 
                         $totals = [];
                         foreach ($cls_stu_ids as $csid) {
-                            $cres = rc_student_result($defs, $marks_cls[$csid] ?? [], $att_cls[$csid] ?? [], $grade_bands, rc_excluded_subjects($pdo, $defs, (int) $f_term_id, (int) $csid));
-                            $totals[$csid] = ['total' => $cres['obtained_total'], 'gpa' => $cres['overall_gpa'], 'fail' => $cres['overall_fail']];
+                            $cres = rc_student_result_mode($defs, $marks_cls[$csid] ?? [], $att_cls[$csid] ?? [], $grade_bands, $arabic_mode, rc_excluded_subjects($pdo, $defs, (int) $f_term_id, (int) $csid));
+                            $totals[$csid] = ['total' => $cres['obtained_total'], 'gpa' => $cres['overall_gpa'], 'fail' => $cres['overall_fail'],
+                                              'a_total' => $cres['arabic']['obtained_total'] ?? null, 'a_fail' => $cres['arabic']['fail'] ?? false];
                         }
                         $class_total_count = count($totals);
                         $passed = array_filter($totals, fn($t) => !$t['fail']);
@@ -326,12 +330,26 @@ if ($searched && $f_class_id && $f_term_id) {
                             $prev_val = $t[$rank_key];
                             $rank++;
                         }
+                        // আরবি ব্লকের নিজস্ব Position (শাখা ধরে, আরবির মোট নম্বর অনুযায়ী; আরবিতে ফেল করলে Position নেই)
+                        if (!empty($result['arabic'])) {
+                            $ar_pass = array_filter($totals, fn($t) => $t['a_total'] !== null && !$t['a_fail']);
+                            uasort($ar_pass, fn($a, $b) => $b['a_total'] <=> $a['a_total']);
+                            $ar_rank = 1; $ar_prev = null; $ar_prev_rank = 1;
+                            foreach ($ar_pass as $csid => $t) {
+                                $ar_assigned = ($ar_prev !== null && $t['a_total'] === $ar_prev) ? $ar_prev_rank : $ar_rank;
+                                if ($ar_assigned === $ar_rank) { $ar_prev_rank = $ar_rank; }
+                                if ($csid === $sid_target) { $arabic_position = $ar_assigned; }
+                                $ar_prev = $t['a_total'];
+                                $ar_rank++;
+                            }
+                        }
                     }
                 }
 
                 $reports[] = array_merge($result, [
                     'student' => $stu_row,
                     'present_days' => $present_days, 'absent_days' => $absent_days, 'working_days' => $working_days,
+                    'arabic_position' => $arabic_position,
                     'class_position' => $class_position, 'class_total_count' => $class_total_count,
                     'class_pass_count' => $class_pass_count, 'class_fail_count' => $class_fail_count,
                 ]);
@@ -569,6 +587,18 @@ if ($searched) {
                     </div>
                 </div>
             </div>
+            <div class="col-md-4">
+                <div class="row mb-3 align-items-center">
+                    <label class="col-sm-4 col-form-label fw-bold text-end">Arabic</label>
+                    <div class="col-sm-8">
+                        <select name="arabic_mode" class="form-select">
+                            <?php foreach (rc_arabic_modes() as $am_key => $am_label): ?>
+                                <option value="<?php echo rcv($am_key); ?>" <?php echo $arabic_mode === $am_key ? 'selected' : ''; ?>><?php echo rcv($am_label); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="text-center mt-2">
@@ -730,6 +760,7 @@ if ($searched) {
                     <?php $rc_gi++; endforeach; ?>
                 </tbody>
             </table>
+            <?php include __DIR__ . '/partials/report_card_arabic_block.php'; ?>
 
             <div class="rc-extra-row">
                 <?php if ($RC_PART_PERCENT): ?>

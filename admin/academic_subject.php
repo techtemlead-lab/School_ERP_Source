@@ -16,6 +16,13 @@ try {
     }
 } catch (PDOException $e) { /* কলাম থাকলে/চেক ব্যর্থ হলে চুপচাপ এগোনো */ }
 
+// result_block কলাম (main | arabic) — আরবি সাবজেক্ট রিপোর্ট কার্ডে আলাদা "Arabic Result" ব্লকে যায়
+try {
+    if (!$pdo->query("SHOW COLUMNS FROM academic_subjects LIKE 'result_block'")->fetch()) {
+        $pdo->exec("ALTER TABLE academic_subjects ADD COLUMN result_block VARCHAR(10) NOT NULL DEFAULT 'main'");
+    }
+} catch (PDOException $e) { /* চুপচাপ এগোনো */ }
+
 // -----------------------------------------------------------
 // POST Handlers (Create / Update / Delete)
 // -----------------------------------------------------------
@@ -81,6 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $full_marks       = (int) ($_POST['full_marks'] ?? 100);
         $rank_in          = trim((string) ($_POST['sort_order'] ?? ''));   // Edit ভিউ: Rank (ক্রম) — ফাঁকা থাকলে বদলাবে না
         $subject_type     = $_POST['subject_type'] ?? 'Compulsory';
+        $result_block     = ($_POST['result_block'] ?? 'main') === 'arabic' ? 'arabic' : 'main';
         $status           = ($_POST['status'] ?? 'Active') === 'Inactive' ? 'Inactive' : 'Active';
         // Optional subject-এ GP থেকে যত বাদ যাবে (ডিফল্ট ২)। Optional না হলে NULL।
         $optional_deduct  = max(0, min(10, (int) (($_POST['optional_count'] ?? '') !== '' ? $_POST['optional_count'] : 2)));
@@ -112,9 +120,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $combined_param = $combined_with_id > 0 ? $combined_with_id : null;
                 $group_param = $resolve_group_id($class_id);
                 $stmt = $pdo->prepare(
-                    "UPDATE academic_subjects SET class_id=?, subject_name=?, combined_with_id=?, group_id=?, full_marks=?, subject_type=?, optional_count=?, status=?, religion=? WHERE id=?"
+                    "UPDATE academic_subjects SET class_id=?, subject_name=?, combined_with_id=?, group_id=?, full_marks=?, subject_type=?, optional_count=?, status=?, religion=?, result_block=? WHERE id=?"
                 );
-                $stmt->execute([$class_id, $subject_name, $combined_param, $group_param, $full_marks, $subject_type, $optional_param, $status, $religion_param, $id]);
+                $stmt->execute([$class_id, $subject_name, $combined_param, $group_param, $full_marks, $subject_type, $optional_param, $status, $religion_param, $result_block, $id]);
                 if ($rank_in !== '' && (int) $rank_in > 0) {
                     // নতুন Rank বসাতে চাইলে: ওই ক্রমে ঢুকিয়ে বাকিদের সরিয়ে দেওয়া (প্রতি Class-এ ১..n)
                     $ids = $pdo->prepare("SELECT id FROM academic_subjects WHERE class_id = ? AND id <> ? ORDER BY sort_order ASC, id ASC");
@@ -164,14 +172,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $chk = $pdo->prepare("SELECT id FROM academic_subjects WHERE class_id=? AND subject_name=? AND (group_id <=> ?)");
                 $ins = $pdo->prepare(
-                    "INSERT INTO academic_subjects (class_id, subject_name, combined_with_id, group_id, full_marks, subject_type, optional_count, status, sort_order, religion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    "INSERT INTO academic_subjects (class_id, subject_name, combined_with_id, group_id, full_marks, subject_type, optional_count, status, sort_order, religion, result_block) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 );
                 $created = 0;
                 $skipped = 0;
                 foreach ($targets as [$cid, $gid]) {
                     $chk->execute([$cid, $subject_name, $gid]);
                     if ($chk->fetch()) { $skipped++; continue; } // আগে থেকেই থাকলে বাদ
-                    $ins->execute([$cid, $subject_name, $combined_param, $gid, $full_marks, $subject_type, $optional_param, $status, subject_rank_next($pdo, $cid), $religion_param]);
+                    $ins->execute([$cid, $subject_name, $combined_param, $gid, $full_marks, $subject_type, $optional_param, $status, subject_rank_next($pdo, $cid), $religion_param, $result_block]);
                     $created++;
                 }
                 if ($created > 0) {
@@ -263,7 +271,7 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
     }
     $d = $edit_row ?: [
         'id' => 0, 'class_id' => '', 'subject_name' => '', 'combined_with_id' => '', 'current_group_name' => '',
-        'full_marks' => 100, 'subject_type' => 'Compulsory', 'status' => 'Active', 'optional_count' => null, 'religion' => '',
+        'full_marks' => 100, 'subject_type' => 'Compulsory', 'status' => 'Active', 'optional_count' => null, 'religion' => '', 'result_block' => 'main',
     ];
     // ডান পাশের প্যানেলের জন্য: Class অনুযায়ী আগে থেকে তৈরি Subject-গুলো (Group সহ)
     $subj_by_class = [];
@@ -427,6 +435,21 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
                     <div class="form-check">
                         <input class="form-check-input" type="radio" name="subject_type" id="typeCA" value="Continuous Assessment" <?php echo $d['subject_type'] === 'Continuous Assessment' ? 'checked' : ''; ?>>
                         <label class="form-check-label" for="typeCA">Continuous Assessment</label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Result Block — আরবি সাবজেক্ট রিপোর্ট কার্ডে মূল টেবিলের বাইরে আলাদা "Arabic Result" ব্লকে দেখায় -->
+            <div class="row mb-3 align-items-center">
+                <label class="col-sm-3 col-form-label fw-bold text-end">Result Block</label>
+                <div class="col-sm-7 d-flex gap-4 align-items-center">
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="result_block" id="blockMain" value="main" <?php echo ($d['result_block'] ?? 'main') !== 'arabic' ? 'checked' : ''; ?>>
+                        <label class="form-check-label" for="blockMain">মূল রেজাল্ট (সাধারণ)</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="result_block" id="blockArabic" value="arabic" <?php echo ($d['result_block'] ?? 'main') === 'arabic' ? 'checked' : ''; ?>>
+                        <label class="form-check-label" for="blockArabic">আরবি রেজাল্ট (আলাদা ব্লক)</label>
                     </div>
                 </div>
             </div>
@@ -932,7 +955,7 @@ function sjv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_
                                 <td><?php echo sjv($row['subject_name']); ?></td>
                                 <td><?php echo (int) $row['full_marks']; ?></td>
                                 <td><?php echo $row['group_name'] ? sjv($row['group_name']) : 'No Group'; ?></td>
-                                <td><?php echo sjv($row['subject_type']); ?><?php if (sr_norm($row['religion'] ?? '') !== ''): ?> <span class="badge bg-info text-dark"><?php echo htmlspecialchars(sr_norm($row['religion']), ENT_QUOTES, 'UTF-8'); ?></span><?php endif; ?></td>
+                                <td><?php echo sjv($row['subject_type']); ?><?php echo (($row['result_block'] ?? 'main') === 'arabic') ? ' <span class="badge bg-success">আরবি</span>' : ''; ?><?php if (sr_norm($row['religion'] ?? '') !== ''): ?> <span class="badge bg-info text-dark"><?php echo htmlspecialchars(sr_norm($row['religion']), ENT_QUOTES, 'UTF-8'); ?></span><?php endif; ?></td>
                                 <td><?php echo ($row['subject_type'] === 'Optional') ? 'GP − ' . ($row['optional_count'] !== null ? (int) $row['optional_count'] : 2) : '-'; ?></td>
                                 <td><?php echo $row['status'] === 'Active' ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>'; ?></td>
                                 <td class="text-nowrap">

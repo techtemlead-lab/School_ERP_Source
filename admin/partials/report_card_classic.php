@@ -141,6 +141,7 @@
                 <?php endforeach; ?>
             </tbody>
         </table>
+        <?php include __DIR__ . '/report_card_arabic_block.php'; ?>
 
         <div class="sc-bottom">
             <div class="sc-summary">

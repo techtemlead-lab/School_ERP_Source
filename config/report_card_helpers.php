@@ -6,12 +6,70 @@
 // ব্যবহার হয়, যাতে দুই জায়গায় হিসাব কখনো আলাদা না হয়ে যায়।
 // -----------------------------------------------------------------
 
+// -----------------------------------------------------------------
+// শাখা (Group) ও আরবি ব্লক সাপোর্ট
+// - academic_subjects.group_id = NULL/0 → সব শাখার জন্য সাধারণ সাবজেক্ট; নির্দিষ্ট group_id → শুধু সেই শাখার
+// - academic_subjects.result_block = 'main' (ডিফল্ট) | 'arabic' (রিপোর্ট কার্ডে আলাদা "Arabic Result" ব্লক)
+// -----------------------------------------------------------------
+if (!function_exists('rc_ensure_result_block_column')) {
+function rc_ensure_result_block_column(PDO $pdo): void
+{
+    static $done = false;
+    if ($done) { return; }
+    $done = true;
+    try {
+        if (!$pdo->query("SHOW COLUMNS FROM academic_subjects LIKE 'result_block'")->fetch()) {
+            $pdo->exec("ALTER TABLE academic_subjects ADD COLUMN result_block VARCHAR(10) NOT NULL DEFAULT 'main'");
+        }
+    } catch (PDOException $e) { /* চেক ব্যর্থ হলে চুপচাপ এগোনো */ }
+}
+}
+
+if (!function_exists('rc_arabic_modes')) {
+// separate = আরবি আলাদা ব্লকে (মূল Total/GPA/Fail-এ ধরা হয় না) | merged = আরবি সহ একসাথে (আরবিতে ফেল করলে মূল রেজাল্টও ফেল)
+// exclude = আরবি ছাড়া (শুধু মূল রেজাল্ট, আরবি ব্লক দেখানো হয় না)
+function rc_arabic_modes(): array { return ['separate' => 'আরবি আলাদা ব্লকে', 'merged' => 'আরবি সহ (একসাথে)', 'exclude' => 'আরবি ছাড়া']; }
+}
+
+if (!function_exists('rc_filter_defs_by_group')) {
+function rc_filter_defs_by_group(array $defs, int $group_id): array
+{
+    if ($group_id <= 0) { return $defs; }
+    return array_filter($defs, function ($d) use ($group_id) {
+        $g = (int) ($d['group_id'] ?? 0);
+        return $g === 0 || $g === $group_id;
+    });
+}
+}
+
+if (!function_exists('rc_student_group_id')) {
+function rc_student_group_id(PDO $pdo, int $student_row_id): int
+{
+    $st = $pdo->prepare("SELECT group_id FROM students WHERE id = ?");
+    $st->execute([$student_row_id]);
+    return (int) $st->fetchColumn();
+}
+}
+
+if (!function_exists('rc_split_defs')) {
+// ফেরত: [main_defs, arabic_defs]
+function rc_split_defs(array $defs): array
+{
+    $main = []; $ar = [];
+    foreach ($defs as $sid => $d) {
+        if (($d['result_block'] ?? 'main') === 'arabic') { $ar[$sid] = $d; } else { $main[$sid] = $d; }
+    }
+    return [$main, $ar];
+}
+}
+
 if (!function_exists('rc_get_subject_defs')) {
-function rc_get_subject_defs(PDO $pdo, int $class_id, int $term_id, int $part_id): array
+function rc_get_subject_defs(PDO $pdo, int $class_id, int $term_id, int $part_id, int $group_id = 0): array
 {
     require_once __DIR__ . '/subject_rank.php'; subject_rank_ensure($pdo);
+    rc_ensure_result_block_column($pdo);
     $sql = "SELECT eas.part_id, eas.subject_id, eas.full_mark_exam, eas.pass_mark_exam, eas.pass_individual, eas.fail_on_absent,
-                   asub.subject_name, asub.subject_type, asub.optional_count
+                   asub.subject_name, asub.subject_type, asub.optional_count, asub.group_id AS subject_group_id, asub.result_block
             FROM exam_assign_subjects eas
             INNER JOIN academic_subjects asub ON asub.id = eas.subject_id
             WHERE eas.class_id = ? AND eas.term_id = ? AND eas.status = 'Active'";
@@ -32,13 +90,15 @@ function rc_get_subject_defs(PDO $pdo, int $class_id, int $term_id, int $part_id
             $defs[$sid] = [
                 'subject_id' => $sid, 'name' => $r['subject_name'], 'parts' => [],
                 'subject_type' => $r['subject_type'] ?? 'Compulsory',
+                'group_id' => (int) ($r['subject_group_id'] ?? 0),
+                'result_block' => ($r['result_block'] ?? 'main') === 'arabic' ? 'arabic' : 'main',
                 // Optional subject-এ GP থেকে যত বাদ যাবে (ডিফল্ট ২ — বাংলাদেশের নিয়ম)
                 'optional_deduct' => $r['optional_count'] !== null ? (float) $r['optional_count'] : 2.0,
             ];
         }
         $defs[$sid]['parts'][(int) $r['part_id']] = $r;
     }
-    return $defs;
+    return rc_filter_defs_by_group($defs, $group_id);
 }
 }
 
@@ -253,6 +313,45 @@ function rc_student_result(array $defs, array $marks_map, array $att_map, array 
         'optional_obtained' => $opt_obt,
         'optional_full' => $opt_full,
     ];
+}
+}
+
+if (!function_exists('rc_student_result_mode')) {
+/**
+ * শাখা-ভিত্তিক সাবজেক্ট ($defs আগে থেকেই rc_filter_defs_by_group দিয়ে ছাঁটা) ধরে রেজাল্ট বের করে।
+ * $mode: separate | merged | exclude (rc_arabic_modes() দেখুন)।
+ * ফেরত: rc_student_result()-এর মতোই অ্যারে + 'arabic' কী (separate মোডে আরবি থাকলে ব্লকের তথ্য, নাহলে null)।
+ * 'arabic' = [rows, full_total, obtained_total, fail, gl, gp, part_marks[part_id=>মার্ক], parts[part_id=>true]]
+ */
+function rc_student_result_mode(array $defs, array $marks_map, array $att_map, array $grade_bands, string $mode = 'separate', array $exclude = []): array
+{
+    // $exclude = rc_excluded_subjects() এর ফল (অন্য শাখার / Not Eligible সাবজেক্ট বাদ)
+    if ($exclude = array_filter($exclude)) { $defs = array_diff_key($defs, $exclude); }
+    if ($mode === 'merged') {
+        $res = rc_student_result($defs, $marks_map, $att_map, $grade_bands);
+        $res['arabic'] = null;
+        return $res;
+    }
+    [$main_defs, $ar_defs] = rc_split_defs($defs);
+    $res = rc_student_result($main_defs, $marks_map, $att_map, $grade_bands);
+    $res['arabic'] = null;
+    if ($mode === 'separate' && $ar_defs) {
+        $ar = rc_student_result($ar_defs, $marks_map, $att_map, $grade_bands);
+        $part_marks = []; $part_ids = [];
+        foreach ($ar_defs as $sid => $d) {
+            foreach ($d['parts'] as $pid => $pinfo) {
+                $part_ids[$pid] = true;
+                $m = $marks_map[$sid][$pid] ?? null;
+                if ($m !== null) { $part_marks[$pid] = ($part_marks[$pid] ?? 0.0) + (float) $m; }
+            }
+        }
+        $res['arabic'] = [
+            'rows' => $ar['subject_rows'], 'full_total' => $ar['full_total'], 'obtained_total' => $ar['obtained_total'],
+            'fail' => $ar['overall_fail'], 'gl' => $ar['overall_gl'], 'gp' => $ar['overall_gpa'],
+            'percentage' => $ar['percentage'], 'part_marks' => $part_marks, 'parts' => $part_ids,
+        ];
+    }
+    return $res;
 }
 }
 
@@ -484,7 +583,8 @@ function rc_aggregate_terms_result(PDO $pdo, int $student_id, array $term_ids, i
     $subject_union = [];
 
     foreach ($term_ids as $term_id) {
-        $defs = rc_get_subject_defs($pdo, $class_id, $term_id, 0); // 0 = Combined (সব Part)
+        // শাখা অনুযায়ী সাবজেক্ট; আরবি সাবজেক্ট মূল Total/GPA-তে ধরা হয় না (আলাদা ব্লকে দেখানো হয়)
+        $defs = rc_split_defs(rc_get_subject_defs($pdo, $class_id, $term_id, 0, rc_student_group_id($pdo, $student_id)))[0];
         if (!$defs) { continue; }
         $subject_ids = array_keys($defs);
         $in_subj = implode(',', array_fill(0, count($subject_ids), '?'));
@@ -945,7 +1045,7 @@ function rc_aggregate_pct_model(PDO $pdo, int $student_id, array $term_ids, int 
     $per_term = [];
     $subj = []; // subject_id => ['name','optional','pct'=>[term_id=>%],'full_sum','n']
     foreach ($need as $term_id) {
-        $defs = rc_get_subject_defs($pdo, $class_id, $term_id, 0);
+        $defs = rc_split_defs(rc_get_subject_defs($pdo, $class_id, $term_id, 0, rc_student_group_id($pdo, $student_id)))[0];
         if (!$defs) { continue; } // এই পরীক্ষায় Subject Assign নেই → ০% ধরা হবে
         $subject_ids = array_keys($defs);
         $in_subj = implode(',', array_fill(0, count($subject_ids), '?'));

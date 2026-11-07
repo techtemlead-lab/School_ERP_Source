@@ -73,7 +73,7 @@ if ($searched) {
 
         foreach ($terms_in_session as $trm) {
             $term_id = (int) $trm['id'];
-            $defs = rc_get_subject_defs($pdo, $stu_class_id, $term_id, 0);
+            $defs = rc_split_defs(rc_get_subject_defs($pdo, $stu_class_id, $term_id, 0, rc_student_group_id($pdo, $f_student_id)))[0];
             if (!$defs) {
                 $term_results[] = ['term_id' => $term_id, 'term_name' => $trm['term_name'], 'no_data' => true];
                 continue;

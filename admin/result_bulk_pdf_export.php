@@ -87,6 +87,20 @@ function bpe_build_html(array $student, array $result, string $inst_name, string
             . '</tr>';
     }
 
+    // শাখা-ভিত্তিক আলাদা "Arabic Result" ব্লক (থাকলে)
+    $arabic_html = '';
+    if (!empty($result['arabic'])) {
+        $ab = $result['arabic'];
+        $fmt = function ($n) { return rtrim(rtrim(number_format((float) $n, 2), '0'), '.'); };
+        $names = implode(', ', array_map(function ($r) { return $r['name']; }, $ab['rows']));
+        $arabic_html = '<table class="marks"><tr><th>Arabic Result</th><th>Department</th><th>Total</th><th>Grade</th><th>GP</th></tr>'
+            . '<tr><td style="text-align:left;">' . bpev($names) . '</td>'
+            . '<td>' . bpev($student['group_name'] ?? '-') . '</td>'
+            . '<td>' . bpev($fmt($ab['obtained_total'])) . ' / ' . bpev($fmt($ab['full_total'])) . '</td>'
+            . '<td>' . ($ab['fail'] ? '<span style="color:#c0392b;font-weight:bold;">F</span>' : bpev($ab['gl'])) . '</td>'
+            . '<td>' . bpev(number_format($ab['fail'] ? 0 : $ab['gp'], 2)) . '</td></tr></table>';
+    }
+
     $overall_color = $result['overall_fail'] ? '#c0392b' : '#1e7e34';
     $overall_text  = $result['overall_fail'] ? 'Fail' : 'Pass';
     $remark_text = trim((string) ($result['overall_remarks'] ?? ''));
@@ -133,6 +147,7 @@ function bpe_build_html(array $student, array $result, string $inst_name, string
             <tr><th>SL</th><th>Subject</th><th>Marks (Obtained/Full)</th><th>Grade</th><th>GP</th><th>Status</th></tr>
             ' . $rows . '
         </table>
+        ' . $arabic_html . '
         <table class="summary" width="100%">
             <tr>
                 <td><b>Total:</b> ' . bpev(number_format($result['obtained_total'], 2)) . ' / ' . bpev(number_format($result['full_total'], 2)) . '</td>
@@ -167,7 +182,7 @@ if ($do_export && $f_session_id && $f_class_id && $f_term_id) {
     $stu_where = ["status = 'Active'", "class_id = ?"];
     $stu_params = [$f_class_id];
     if (function_exists('branch_apply_filter')) { branch_apply_filter($stu_where, $stu_params); }
-    $stu_stmt = $pdo->prepare("SELECT id, student_id, name_en, roll_no FROM students WHERE " . implode(' AND ', $stu_where) . " ORDER BY CAST(roll_no AS UNSIGNED) ASC, name_en ASC");
+    $stu_stmt = $pdo->prepare("SELECT id, student_id, name_en, roll_no, group_id, (SELECT group_name FROM academic_groups WHERE academic_groups.id = students.group_id) AS group_name FROM students WHERE " . implode(' AND ', $stu_where) . " ORDER BY CAST(roll_no AS UNSIGNED) ASC, name_en ASC");
     $stu_stmt->execute($stu_params);
     $students = $stu_stmt->fetchAll();
 
@@ -210,7 +225,8 @@ if ($do_export && $f_session_id && $f_class_id && $f_term_id) {
         $att_map = [];
         foreach ($at->fetchAll() as $r) { $att_map[$r['subject_id']][$r['part_id']] = $r['status']; }
 
-        $result = rc_student_result($defs, $marks_map, $att_map, $grade_bands, rc_excluded_subjects($pdo, $defs, (int) $f_term_id, (int) $sid));
+        // শাখা অনুযায়ী সাবজেক্ট বাদ; আরবি আলাদা ব্লকে
+        $result = rc_student_result_mode($defs, $marks_map, $att_map, $grade_bands, 'separate', rc_excluded_subjects($pdo, $defs, (int) $f_term_id, (int) $sid));
         $html = bpe_build_html($student, $result, $inst_name, $inst_addr, $term_name, $session_name, $class_name);
 
         $mpdf = new \Mpdf\Mpdf([

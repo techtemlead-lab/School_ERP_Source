@@ -118,7 +118,7 @@ if ($searched && $f_class_id && $f_term_id) {
     $part_name    = $f_part_id ? $one("SELECT part_name FROM exam_parts WHERE id = ?", $f_part_id) : '';
     $sheet_session_name = $one("SELECT session_name FROM academic_sessions WHERE id = ?", $f_session_id) ?: date('Y');
 
-    $defs = rc_get_subject_defs($pdo, $f_class_id, $f_term_id, $f_part_id);
+    $defs = rc_get_subject_defs($pdo, $f_class_id, $f_term_id, $f_part_id, $f_group_id);
     $subject_ids = array_keys($defs);
 
     $gs = $pdo->prepare("SELECT grade_letter, gpa, mark_from, mark_to FROM exam_grade_points WHERE session_id = ? ORDER BY mark_from DESC");

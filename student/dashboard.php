@@ -79,7 +79,7 @@ try {
 
     if ($rterm) {
         $result_term_name = $rterm['term_name'];
-        $r_defs = rc_get_subject_defs($pdo, (int) $student['class_id'], (int) $rterm['id'], 0);
+        $r_defs = rc_split_defs(rc_get_subject_defs($pdo, (int) $student['class_id'], (int) $rterm['id'], 0, (int) ($student['group_id'] ?? 0)))[0];
         $r_subject_ids = array_keys($r_defs);
 
         if ($r_subject_ids) {
