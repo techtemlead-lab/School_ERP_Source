@@ -56,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_sms'])) {
             $_SESSION['al_err'] = 'কোনো শিক্ষার্থী সিলেক্ট করা হয়নি।';
         } else {
             $tpl_row = $pdo->query("SELECT content_absent FROM sms_settings WHERE id = 1")->fetch();
-            $template = $tpl_row['content_absent'] ?? 'Dear guardian, {FIRST_NAME} {LAST_NAME} is absent on {SCHOOL_NAME} today.';
+            $template = sms_template_get($pdo, 'absent'); // SMS Template Settings (ফাঁকা হলে ডিফল্ট)
             $school = $pdo->query("SELECT institute_name FROM institute_settings WHERE id = 1")->fetch()['institute_name'] ?? '';
 
             $in = implode(',', array_fill(0, count($ids), '?'));
@@ -77,6 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_sms'])) {
                     'FIRST_NAME'  => $name_parts[0] ?? '',
                     'LAST_NAME'   => $name_parts[1] ?? '',
                     'SCHOOL_NAME' => $school,
+                    'DATE'        => date('d/m/Y'),
                 ]);
                 $result = send_sms($pdo, $stu['guardian_phone'], $message);
                 $log_stmt->execute([$stu['id'], $stu['guardian_phone'], $message, $result['success'] ? 'Sent' : 'Failed', $result['response'], $sent_by]);

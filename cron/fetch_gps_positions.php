@@ -94,11 +94,13 @@ foreach ($vehicles as $v) {
         $was_at_school = $last_type === 'Arrived School';
 
         if ($currently_at_school && !$was_at_school) {
-            $sent = transport_notify_route_guardians($pdo, (int) $v['id'], "{NAME} এর স্কুল বাস (" . transport_bus_label($v) . ") স্কুলে পৌঁছেছে।");
+            $tpl = transport_sms_template($pdo, 'transport_arrive_school', ['BUS' => transport_bus_label($v)]);
+            $sent = $tpl !== null ? transport_notify_route_guardians($pdo, (int) $v['id'], $tpl) : 0;
             $ins_event->execute([$v['id'], 'Arrived School', null, date('Y-m-d H:i:s'), $lat, $lng, $sent > 0 ? 1 : 0]);
             tlog("Vehicle #{$v['id']}: Arrived School event + SMS পাঠানো হয়েছে।");
         } elseif (!$currently_at_school && $was_at_school) {
-            $sent = transport_notify_route_guardians($pdo, (int) $v['id'], "{NAME} এর স্কুল বাস (" . transport_bus_label($v) . ") স্কুল ছেড়ে রওনা দিয়েছে।");
+            $tpl = transport_sms_template($pdo, 'transport_depart_school', ['BUS' => transport_bus_label($v)]);
+            $sent = $tpl !== null ? transport_notify_route_guardians($pdo, (int) $v['id'], $tpl) : 0;
             $ins_event->execute([$v['id'], 'Departed School', null, date('Y-m-d H:i:s'), $lat, $lng, $sent > 0 ? 1 : 0]);
             tlog("Vehicle #{$v['id']}: Departed School event + SMS পাঠানো হয়েছে।");
         }
@@ -114,7 +116,8 @@ foreach ($vehicles as $v) {
         if ($dist_stop <= (int) $stop['radius_m']) {
             $last_stop_event_stmt->execute([$v['id'], $stop['id']]);
             if (!$last_stop_event_stmt->fetch()) {
-                $sent = transport_notify_stop_guardians($pdo, (int) $v['id'], (int) $stop['id'], "{NAME} এর স্কুল বাস (" . transport_bus_label($v) . ") আপনার স্টপেজ (" . $stop['stop_name'] . ") এ পৌঁছেছে।");
+                $tpl = transport_sms_template($pdo, 'transport_stop_reached', ['BUS' => transport_bus_label($v), 'STOP' => $stop['stop_name']]);
+                $sent = $tpl !== null ? transport_notify_stop_guardians($pdo, (int) $v['id'], (int) $stop['id'], $tpl) : 0;
                 $ins_event->execute([$v['id'], 'Stop Reached', $stop['id'], date('Y-m-d H:i:s'), $lat, $lng, $sent > 0 ? 1 : 0]);
                 tlog("Vehicle #{$v['id']}: Stop Reached ({$stop['stop_name']}) event + SMS পাঠানো হয়েছে।");
             }
@@ -131,6 +134,17 @@ tlog("সম্পন্ন — {$processed} টি গাড়ির পজি
 // -----------------------------------------------------------
 // SMS Helper ফাংশনসমূহ
 // -----------------------------------------------------------
+/**
+ * SMS Settings > SMS Template Settings-এর টেমপ্লেট থেকে মেসেজ বানায় ({NAME} ইচ্ছাকৃতভাবে বাকি থাকে —
+ * প্রতিটা অভিভাবকের জন্য নিচের transport_notify_* ফাংশন বসায়)। ইভেন্টের SMS বন্ধ করা থাকলে null।
+ */
+function transport_sms_template(PDO $pdo, string $key, array $data): ?string
+{
+    if (!sms_template_enabled($pdo, $key)) { return null; }
+    $data['SCHOOL_NAME'] = $pdo->query("SELECT institute_name FROM institute_settings WHERE id = 1")->fetch()['institute_name'] ?? '';
+    return sms_template_render($pdo, $key, $data);
+}
+
 function transport_bus_label(array $v): string
 {
     $label = $v['bus_no'] ? 'Bus-' . $v['bus_no'] : $v['vehicle_no'];

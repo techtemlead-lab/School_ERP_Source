@@ -86,7 +86,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             sec_log_activity($pdo, 'Transport', 'Update', "ট্রান্সপোর্ট ফি পেমেন্ট রেকর্ড করা হয়েছে: {$inv['name_en']} - ৳" . number_format($pay_amount, 2) . " ({$payment_method})");
             if (!empty($inv['guardian_phone'])) {
                 $sms_to = $inv['guardian_phone'];
-                $sms_msg = "প্রিয় অভিভাবক, {$inv['name_en']} এর ট্রান্সপোর্ট ফি ৳" . number_format($pay_amount, 2) . " গৃহীত হয়েছে। ধন্যবাদ - {$school_name}";
+                $sms_msg = sms_template_render($pdo, 'transport_fee', ['NAME' => $inv['name_en'], 'AMOUNT' => number_format($pay_amount, 2), 'SCHOOL_NAME' => $school_name]);
+                if (!sms_template_enabled($pdo, 'transport_fee')) { $sms_to = null; }
             }
         } catch (RuntimeException $e) {
             if ($pdo->inTransaction()) { $pdo->rollBack(); }

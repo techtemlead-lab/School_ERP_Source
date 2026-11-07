@@ -10,6 +10,7 @@ $sms_err = $_SESSION['sms_err'] ?? '';
 unset($_SESSION['sms_msg'], $_SESSION['sms_err']);
 
 // কোন সেকশন দেখানো হবে — সাবমেনু থেকে ?tab=home / sms_toggle / content / api আসবে
+require_once __DIR__ . '/../config/sms.php'; // sms_template_registry() ইত্যাদি
 $allowed_tabs = ['home', 'sms_toggle', 'content', 'api'];
 $active_tab = $_GET['tab'] ?? 'home';
 if (!in_array($active_tab, $allowed_tabs, true)) {
@@ -122,7 +123,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit();
     }
     if (isset($_POST['save_sms_content_settings'])) {
+        // প্রতিটা ইভেন্টের আলাদা টেমপ্লেট (tpl[event_key]) — আগের ৮টা sms_settings.content_* কলামে, নতুনগুলো sms_templates টেবিলে
+        $tpl_post = is_array($_POST['tpl'] ?? null) ? $_POST['tpl'] : [];
+        $en_post  = is_array($_POST['tpl_enabled'] ?? null) ? $_POST['tpl_enabled'] : [];
+        foreach (sms_template_registry() as $tk => $tdef) {
+            if ($tdef['legacy'] !== null) {
+                // ফাঁকা সেভ করলে ডিফল্ট টেক্সটই ব্যবহার হবে (sms_template_get()) — তাই এখানে যা এলো তাই রাখা
+                $_POST[$tdef['legacy']] = (string) ($tpl_post[$tk] ?? '');
+            }
+        }
         save_sms_section($pdo, [], $content_fields, false, 'SMS Template Settings');
+        if (csrf_verify($_POST['csrf_token'] ?? null)) {
+            foreach (sms_template_registry() as $tk => $tdef) {
+                if ($tdef['legacy'] === null && array_key_exists($tk, $tpl_post)) {
+                    sms_template_save_new($pdo, $tk, (string) $tpl_post[$tk], isset($en_post[$tk]));
+                }
+            }
+        }
         header('Location: index.php?page=sms_settings&tab=content');
         exit();
     }
@@ -374,58 +391,91 @@ function render_toggle(string $name, string $label, $checked): void
 
 <?php if ($active_tab === 'content'): ?>
 <!-- ============================================================ -->
-<!-- 3) SMS Template Settings                                       -->
+<!-- 3) SMS Template Settings — যেখান থেকে SMS যায় প্রতিটার আলাদা টেমপ্লেট -->
 <!-- ============================================================ -->
+<?php
+$tpl_all = sms_templates_load_all($pdo);
+$tpl_groups = [];
+foreach (sms_template_registry() as $tk => $tdef) { $tpl_groups[$tdef['group']][$tk] = $tdef; }
+?>
+<style>
+    .tpl-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; background: #fff; }
+    .tpl-card .tpl-where { font-size: 12px; color: #64748b; margin-bottom: 8px; }
+    .tpl-chip { display: inline-block; font-family: monospace; font-size: 12px; background: #eef2ff; color: #1e3a8a; border: 1px solid #c7d2fe; border-radius: 4px; padding: 1px 7px; margin: 0 4px 4px 0; cursor: pointer; }
+    .tpl-chip:hover { background: #dbe4ff; }
+    .tpl-count { font-size: 12px; color: #64748b; }
+</style>
 <div class="card-custom mb-4" id="contentTab">
-    <h4 class="fw-bold mb-4 text-dark"><i class="fa-solid fa-file-lines"></i> SMS Template Settings</h4>
+    <h4 class="fw-bold mb-2 text-dark"><i class="fa-solid fa-file-lines"></i> SMS Template Settings</h4>
+    <p class="text-muted small mb-3">
+        সিস্টেমের যে যে জায়গা থেকে SMS যায় — প্রতিটার জন্য আলাদা টেমপ্লেট। প্লেসহোল্ডারে (নীল ট্যাগ) ক্লিক করলে কার্সরের জায়গায় বসে যাবে।
+        টেমপ্লেট ফাঁকা রেখে সেভ করলে ডিফল্ট টেক্সট ব্যবহার হয়।
+    </p>
     <form method="POST" action="index.php?page=sms_settings&tab=content">
         <?php echo csrf_field(); ?>
-        <div class="row mb-2">
-            <div class="col-md-6 mb-3">
-                <label class="fw-bold small mb-1">Student Admission SMS Content</label>
-                <textarea name="content_admission" class="form-control" rows="4"><?php echo sv($settings['content_admission']); ?></textarea>
+        <?php foreach ($tpl_groups as $group_label => $items): ?>
+            <h6 class="fw-bold mt-4 mb-2 text-primary"><?php echo sv($group_label); ?></h6>
+            <?php foreach ($items as $tk => $tdef): $cur = $tpl_all[$tk]; ?>
+            <div class="tpl-card">
+                <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                    <label class="fw-bold small mb-1" for="tpl_<?php echo sv($tk); ?>"><?php echo sv($tdef['title']); ?></label>
+                    <?php if ($tdef['legacy'] === null): ?>
+                        <div class="form-check form-switch m-0">
+                            <input class="form-check-input" type="checkbox" role="switch" name="tpl_enabled[<?php echo sv($tk); ?>]" id="tplen_<?php echo sv($tk); ?>" <?php echo $cur['enabled'] ? 'checked' : ''; ?>>
+                            <label class="form-check-label small" for="tplen_<?php echo sv($tk); ?>">এই SMS চালু</label>
+                        </div>
+                    <?php else: ?>
+                        <span class="small text-muted">On/Off: <a href="index.php?page=sms_settings&tab=sms_toggle">SMS Settings (On/Off)</a> ট্যাবে</span>
+                    <?php endif; ?>
+                </div>
+                <div class="tpl-where"><i class="fa-solid fa-location-dot"></i> <?php echo sv($tdef['where']); ?></div>
+                <textarea name="tpl[<?php echo sv($tk); ?>]" id="tpl_<?php echo sv($tk); ?>" class="form-control tpl-text" rows="3" data-default="<?php echo sv($tdef['default']); ?>" placeholder="<?php echo sv($tdef['default']); ?>"><?php echo $cur['is_default'] ? '' : sv($cur['content']); ?></textarea>
+                <div class="d-flex justify-content-between align-items-center mt-1 flex-wrap gap-2">
+                    <div>
+                        <?php foreach ($tdef['placeholders'] as $ph => $ph_desc): ?>
+                            <span class="tpl-chip" data-target="tpl_<?php echo sv($tk); ?>" data-ph="{<?php echo sv($ph); ?>}" title="<?php echo sv($ph_desc); ?>">{<?php echo sv($ph); ?>}</span>
+                        <?php endforeach; ?>
+                    </div>
+                    <div class="tpl-count"><span class="tpl-len">0</span> অক্ষর · <button type="button" class="btn btn-link btn-sm p-0 tpl-reset" data-target="tpl_<?php echo sv($tk); ?>">ডিফল্ট দিন</button></div>
+                </div>
+                <?php if ($cur['is_default']): ?><small class="text-muted">এখন ডিফল্ট টেক্সট ব্যবহার হচ্ছে (ওপরের ঘরে ধূসর লেখা)।</small><?php endif; ?>
             </div>
-            <div class="col-md-6 mb-3">
-                <label class="fw-bold small mb-1">Students Congratulation SMS Content</label>
-                <textarea name="content_congratulation" class="form-control" rows="4"><?php echo sv($settings['content_congratulation']); ?></textarea>
-            </div>
-            <div class="col-md-6 mb-3">
-                <label class="fw-bold small mb-1">Teacher Add SMS Content</label>
-                <textarea name="content_teacher_add" class="form-control" rows="4"><?php echo sv($settings['content_teacher_add']); ?></textarea>
-            </div>
-            <div class="col-md-6 mb-3">
-                <label class="fw-bold small mb-1">Students Punch Out SMS Content</label>
-                <textarea name="content_punch_out" class="form-control" rows="4"><?php echo sv($settings['content_punch_out']); ?></textarea>
-            </div>
-            <div class="col-md-6 mb-3">
-                <label class="fw-bold small mb-1">Students Punch In SMS Content</label>
-                <textarea name="content_punch_in" class="form-control" rows="4"><?php echo sv($settings['content_punch_in']); ?></textarea>
-            </div>
-            <div class="col-md-6 mb-3">
-                <label class="fw-bold small mb-1">Students Absent SMS Content</label>
-                <textarea name="content_absent" class="form-control" rows="4"><?php echo sv($settings['content_absent']); ?></textarea>
-            </div>
-            <div class="col-md-6 mb-3">
-                <label class="fw-bold small mb-1">Due SMS Content</label>
-                <textarea name="content_due" class="form-control" rows="4"><?php echo sv($settings['content_due']); ?></textarea>
-            </div>
-            <div class="col-md-6 mb-3">
-                <label class="fw-bold small mb-1">Students Fee Collection SMS Content</label>
-                <textarea name="content_fee_collection" class="form-control" rows="4"><?php echo sv($settings['content_fee_collection']); ?></textarea>
-                <small class="text-muted d-block mt-1">
-                    <code>{FIRST_NAME}</code>, <code>{LAST_NAME}</code>, <code>{SCHOOL_NAME}</code>,
-                    <code>{AMOUNT}</code>, <code>{FEES_TYPE}</code>, <code>{FOLIO_NO}</code>,
-                    <code>{RECEIPT_LINK}</code> — এই প্লেসহোল্ডারগুলো ব্যবহার করা যাবে।
-                    <code>{RECEIPT_LINK}</code> ক্লিক করলে অভিভাবক লগইন ছাড়াই Money Receipt
-                    (Student Copy) দেখতে পাবেন — টেমপ্লেটে না বসালেও মেসেজের শেষে এটা অটো যোগ হয়ে যাবে।
-                </small>
-            </div>
-        </div>
+            <?php endforeach; ?>
+        <?php endforeach; ?>
+        <small class="text-muted d-block mb-3">
+            <code>{RECEIPT_LINK}</code> (Fee Collection) টেমপ্লেটে না বসালেও মেসেজের শেষে অটো যোগ হয়ে যায় — অভিভাবক ক্লিক করলে লগইন ছাড়াই Money Receipt দেখতে পান।
+            Promo/Bulk SMS ও Students/Employees SMS পেজে মেসেজ ওই পেজেই লেখা হয়, তাই এখানে আলাদা টেমপ্লেট নেই।
+        </small>
         <div class="text-end">
             <button type="submit" name="save_sms_content_settings" class="btn btn-primary px-4 fw-bold" style="background-color:#1e3a8a;">Update</button>
         </div>
     </form>
 </div>
+<script>
+(function () {
+    function updLen(t) {
+        var card = t.closest('.tpl-card'); if (!card) return;
+        var txt = t.value !== '' ? t.value : (t.getAttribute('data-default') || '');
+        card.querySelector('.tpl-len').textContent = txt.length;
+    }
+    document.querySelectorAll('.tpl-text').forEach(function (t) { updLen(t); t.addEventListener('input', function () { updLen(t); }); });
+    document.querySelectorAll('.tpl-chip').forEach(function (c) {
+        c.addEventListener('click', function () {
+            var t = document.getElementById(c.getAttribute('data-target')); if (!t) return;
+            var ph = c.getAttribute('data-ph');
+            var s = t.selectionStart == null ? t.value.length : t.selectionStart, e = t.selectionEnd == null ? s : t.selectionEnd;
+            t.value = t.value.slice(0, s) + ph + t.value.slice(e);
+            t.focus(); t.selectionStart = t.selectionEnd = s + ph.length; updLen(t);
+        });
+    });
+    document.querySelectorAll('.tpl-reset').forEach(function (b) {
+        b.addEventListener('click', function () {
+            var t = document.getElementById(b.getAttribute('data-target')); if (!t) return;
+            t.value = t.getAttribute('data-default') || ''; updLen(t);
+        });
+    });
+})();
+</script>
 <?php endif; ?>
 
 <?php if ($active_tab === 'api'): ?>

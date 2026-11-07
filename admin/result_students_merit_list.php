@@ -95,8 +95,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_result_sms'])) {
             foreach ($target_students as $stu) {
                 if (empty($stu['guardian_phone'])) { $failed++; continue; }
                 $r = $result_map[$stu['id']] ?? null;
-                $message = 'Dear guardian, ' . $stu['name_en'] . "'s exam result from " . $school . ': ';
-                $message .= $r ? ('Total: ' . $r['total'] . ', GPA: ' . $r['gp'] . ', Grade: ' . $r['gl'] . ($r['merit'] !== '-' ? ', Merit: ' . $r['merit'] : '')) : 'Result published.';
+                $summary = $r ? ('Total: ' . $r['total'] . ', GPA: ' . $r['gp'] . ', Grade: ' . $r['gl'] . ($r['merit'] !== '-' ? ', Merit: ' . $r['merit'] : '')) : 'Result published.';
+                // SMS Settings > SMS Template Settings > "Exam Result SMS" টেমপ্লেট থেকে
+                $message = sms_template_render($pdo, 'result', [
+                    'NAME' => $stu['name_en'], 'SCHOOL_NAME' => $school, 'RESULT_SUMMARY' => $summary,
+                    'TOTAL' => $r['total'] ?? '', 'GPA' => $r['gp'] ?? '', 'GRADE' => $r['gl'] ?? '', 'MERIT' => ($r && $r['merit'] !== '-') ? $r['merit'] : '',
+                ]);
                 $result_data = send_sms($pdo, $stu['guardian_phone'], $message);
                 $log_stmt->execute([$stu['id'], $stu['guardian_phone'], $message, $result_data['success'] ? 'Sent' : 'Failed', $result_data['response'], $sent_by]);
                 $result_data['success'] ? $sent++ : $failed++;

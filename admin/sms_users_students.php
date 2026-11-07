@@ -48,12 +48,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (isset($_POST['reset_password'])) {
         $id = (int) ($_POST['id'] ?? 0);
-        $reset_stu_name = $pdo->prepare("SELECT name_en FROM students WHERE id = ?");
+        $reset_stu_name = $pdo->prepare("SELECT name_en, student_id, guardian_phone FROM students WHERE id = ?");
         $reset_stu_name->execute([$id]);
-        $reset_stu_name_val = $reset_stu_name->fetchColumn();
+        $reset_stu = $reset_stu_name->fetch() ?: [];
+        $reset_stu_name_val = $reset_stu['name_en'] ?? '';
         require_once __DIR__ . '/../config/default_password.php';
         $pdo->prepare("UPDATE students SET password = NULL, must_change_password = 1 WHERE id = ?")->execute([$id]);
         $_SESSION['ss_msg'] = 'পাসওয়ার্ড ডিফল্টে (' . erp_default_password() . ') রিসেট করা হয়েছে। এখন এই পাসওয়ার্ড দিয়ে লগইন করা যাবে; লগইনের পর পাসওয়ার্ড বদলাতে হবে।';
+        // Password Reset SMS (SMS Template Settings-এ "Student Password Reset SMS" চালু থাকলে অভিভাবকের নম্বরে)
+        if ($reset_stu && !empty($reset_stu['guardian_phone']) && sms_template_enabled($pdo, 'student_password_reset')) {
+            $rs_inst = $pdo->query("SELECT institute_name FROM institute_settings WHERE id = 1")->fetch();
+            $rs_msg = sms_template_render($pdo, 'student_password_reset', [
+                'NAME' => $reset_stu['name_en'], 'STUDENT_ID' => $reset_stu['student_id'], 'PASSWORD' => erp_default_password(),
+                'SCHOOL_NAME' => $rs_inst['institute_name'] ?? ($GLOBALS['tenant']['school_name'] ?? 'School'), 'LOGIN_URL' => sms_portal_login_url('student'),
+            ]);
+            $rs_res = send_sms($pdo, $reset_stu['guardian_phone'], $rs_msg);
+            $_SESSION['ss_msg'] .= $rs_res['success'] ? ' অভিভাবকের নম্বরে Password Reset SMS পাঠানো হয়েছে।' : ' (Password Reset SMS পাঠানো যায়নি — গেটওয়ে সমস্যা।)';
+        }
         sec_log_activity($pdo, 'SMS', 'Update', "Student পাসওয়ার্ড রিসেট করা হয়েছে: " . ($reset_stu_name_val ?: "#$id"));
     } elseif (isset($_POST['send_sms']) || isset($_POST['send_sms_all'])) {
         if (isset($_POST['send_sms_all'])) {
@@ -94,6 +105,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             require_once __DIR__ . '/../config/default_password.php';
             $sent = 0; $failed = 0; $skipped = 0;
+            // SMS Template Settings-এ "Student Login Info SMS" বন্ধ করা থাকলে কিছু পাঠানো/পাসওয়ার্ড বদলানো হবে না
+            $li_off = !sms_template_enabled($pdo, 'student_login_info');
+            if ($li_off) { $students = []; }
             foreach ($students as $s) {
                 if (empty($s['guardian_phone'])) { $failed++; continue; }
                 // যে ইউজার নিজে পাসওয়ার্ড বদলে ফেলেছে তার পাসওয়ার্ড বদলানো হবে না (Reset বাটন ব্যবহার করুন)
@@ -101,11 +115,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // নিজের পাসওয়ার্ড সেট না করা ইউজার (বা আগে অস্থায়ী পাসওয়ার্ড পাওয়া) → ডিফল্টে ফিরিয়ে SMS
                 $pdo->prepare("UPDATE students SET password = NULL, must_change_password = 1 WHERE id = ?")->execute([(int) $s['id']]);
                 $temp_pw = erp_default_password();
-                $message = "{$inst_name}: প্রিয় অভিভাবক, {$s['name_en']} (ID: {$s['student_id']})-এর লগইন তথ্য — Student ID: {$s['student_id']}, Password: {$temp_pw}। প্রথমবার লগইন করে পাসওয়ার্ড বদলে নিন।";
+                // SMS Template Settings > "Student Login Info SMS" থেকে
+                $message = sms_template_render($pdo, 'student_login_info', [
+                    'NAME' => $s['name_en'], 'STUDENT_ID' => $s['student_id'], 'PASSWORD' => $temp_pw,
+                    'SCHOOL_NAME' => $inst_name, 'LOGIN_URL' => sms_portal_login_url('student'),
+                ]);
                 $res = send_sms($pdo, $s['guardian_phone'], $message);
                 if ($res['success']) { $sent++; } else { $failed++; }
             }
             $_SESSION['ss_msg'] = "{$sent} জনকে SMS পাঠানো হয়েছে।" . ($failed > 0 ? " {$failed} জনের ক্ষেত্রে ব্যর্থ হয়েছে (নম্বর নাই বা গেটওয়ে সমস্যা)।" : '') . ($skipped > 0 ? " {$skipped} জন নিজের পাসওয়ার্ড সেট করে ফেলেছেন, তাই বাদ গেছে।" : '');
+            if ($li_off) { unset($_SESSION['ss_msg']); $_SESSION['ss_err'] = 'Student Login Info SMS বন্ধ আছে — SMS Settings > SMS Template Settings থেকে চালু করুন।'; }
             sec_log_activity($pdo, 'SMS', 'Send', "{$sent} জন Student এর অভিভাবককে Login SMS পাঠানো হয়েছে" . ($failed > 0 ? ", {$failed} জন ব্যর্থ" : ''));
         }
     }

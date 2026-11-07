@@ -99,8 +99,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $gst = $pdo->prepare("SELECT guardian_phone FROM students WHERE id = ?");
                             $gst->execute([$student_pk]);
                             $guardian_phone = $gst->fetchColumn();
-                            if ($guardian_phone) {
-                                $sms_msg = "প্রিয় অভিভাবক, {$final_customer_name} এর জন্য স্টোর থেকে পণ্য ক্রয় করা হয়েছে। মোট: ৳" . number_format($total, 2) . ", জমা: ৳" . number_format($paid_amount, 2) . ", বাকি: ৳" . number_format($due, 2) . "। ইনভয়েস: $invoice_no";
+                            if ($guardian_phone && sms_template_enabled($pdo, 'inventory_sale')) {
+                                $inv_school = $pdo->query("SELECT institute_name FROM institute_settings WHERE id = 1")->fetch()['institute_name'] ?? '';
+                                $sms_msg = sms_template_render($pdo, 'inventory_sale', [
+                                    'CUSTOMER_NAME' => $final_customer_name, 'TOTAL' => number_format($total, 2), 'PAID' => number_format($paid_amount, 2),
+                                    'DUE' => number_format($due, 2), 'INVOICE_NO' => $invoice_no, 'SCHOOL_NAME' => $inv_school,
+                                ]);
                                 send_sms($pdo, $guardian_phone, $sms_msg);
                             }
                         } catch (\Throwable $e) {

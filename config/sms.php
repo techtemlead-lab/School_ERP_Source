@@ -343,3 +343,6 @@ function sms_check_balance(PDO $pdo): array
 
     return ['success' => true, 'balance' => $sms_count, 'response' => $summary];
 }
+
+// প্রতিটা SMS ইভেন্টের আলাদা টেমপ্লেট (SMS Settings > SMS Template Settings)
+require_once __DIR__ . '/sms_templates.php';

@@ -272,7 +272,7 @@ try {
     // ---- Admission SMS (sms_settings.sms_admission অন থাকলে) ----
     $sms_settings = $pdo->query("SELECT sms_admission, content_admission FROM sms_settings WHERE id = 1")->fetch();
     if ($sms_settings && (int) ($sms_settings['sms_admission'] ?? 0) === 1) {
-        $template = $sms_settings['content_admission'] ?: 'Dear guardian, {FIRST_NAME} {LAST_NAME} has been admitted to {SCHOOL_NAME} with Student ID {STUDENT_ID}. Roll: {ROLL}, Class: {CLASS}.';
+        $template = sms_template_get($pdo, 'admission'); // SMS Template Settings (ফাঁকা হলে ডিফল্ট)
         $school = $pdo->query("SELECT institute_name FROM institute_settings WHERE id = 1")->fetch()['institute_name'] ?? '';
         $class_name_row = $pdo->prepare("SELECT class_name FROM academic_classes WHERE id = ?");
         $class_name_row->execute([$class_id]);

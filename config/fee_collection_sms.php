@@ -82,10 +82,7 @@ if (!function_exists('fc_send_receipt_sms')) {
             // পাঠানো হয় — দেখুন finance_fees_collection.php / finance_quick_collection.php
             $fee_type_label = $fee_head_names ? implode(', ', array_unique($fee_head_names)) : 'Fees';
 
-            $template = trim((string) ($s['content_fee_collection'] ?? ''));
-            if ($template === '') {
-                $template = 'Dear Parent, Tk {AMOUNT} collected for {FIRST_NAME} {LAST_NAME} ({FEES_TYPE}). Receipt: {RECEIPT_LINK}';
-            }
+            $template = sms_template_get($pdo, 'fee_collection'); // SMS Template Settings (ফাঁকা হলে ডিফল্ট)
             $has_link_placeholder = strpos($template, '{RECEIPT_LINK}') !== false;
 
             $name_parts = explode(' ', trim((string) $stu['name_en']), 2);

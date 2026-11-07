@@ -70,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_due_sms'])) {
         $target_students = $stmt->fetchAll();
 
         $tpl_row = $pdo->query("SELECT content_due FROM sms_settings WHERE id = 1")->fetch();
-        $template = $tpl_row['content_due'] ?? 'Dear guardian, {FIRST_NAME} {LAST_NAME} (Class: {CLASS}, Roll: {ROLL}) has a due amount of {DUE_AMOUNT} at {SCHOOL_NAME}. Please clear the dues soon.';
+        $template = sms_template_get($pdo, 'due'); // SMS Template Settings (ফাঁকা হলে ডিফল্ট)
         $school = $pdo->query("SELECT institute_name FROM institute_settings WHERE id = 1")->fetch()['institute_name'] ?? '';
 
         $log_stmt = $pdo->prepare(
