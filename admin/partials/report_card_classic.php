@@ -120,6 +120,9 @@
                 <tr>
                     <th style="width:26px;">Sl.</th>
                     <th style="text-align:left;">Subject</th>
+                    <?php if (!empty($rc_comp_r)): foreach ($rc_comp_r['order'] as $rc_k): ?>
+                    <th><?php echo rcv($rc_comp_r['labels'][$rc_k]); ?> <small>(<?php echo rcv(rtrim(rtrim(number_format((float) ($rc_comp_w[$rc_k] ?? 0), 2), '0'), '.')); ?>)</small></th>
+                    <?php endforeach; endif; ?>
                     <th>Marks Obtained</th>
                     <?php if ($RC_SUBJ_GL): ?><th>Grade</th><?php endif; ?>
                     <?php if ($RC_SUBJ_GP): ?><th>GP</th><?php endif; ?>
@@ -130,6 +133,9 @@
                     <tr>
                         <td><?php echo (int) $sr['sl']; ?></td>
                         <td class="sc-subj"><?php echo rcv($sr['name']); ?></td>
+                        <?php if (!empty($rc_comp_r)): foreach ($rc_comp_r['order'] as $rc_k): $rc_v = $rc_cm[$sr['subject_id']][$rc_k] ?? null; ?>
+                        <td><?php echo $rc_v === null ? '-' : rcv(rtrim(rtrim(number_format((float) $rc_v, 2), '0'), '.')); ?></td>
+                        <?php endforeach; endif; ?>
                         <td><?php echo rcv(rtrim(rtrim(number_format($sr['obtained'], 2), '0'), '.')); ?> / <?php echo rcv(rtrim(rtrim(number_format($sr['full'], 2), '0'), '.')); ?></td>
                         <?php if ($RC_SUBJ_GL): ?>
                         <td><span class="sc-grade-pill<?php echo $sr['fail'] ? ' sc-fail' : ''; ?>"><?php echo $sr['fail'] ? 'F' : rcv($sr['gl']); ?></span></td>

@@ -216,6 +216,17 @@ if ($searched && $f_class_id && $f_shift_id && $f_section_id && $f_term_id) {
             if ($f_part_id) { $at_sql .= " AND part_id = ?"; $at_params[] = $f_part_id; }
             $at = $pdo->prepare($at_sql); $at->execute($at_params);
             foreach ($at->fetchAll() as $row) { $att_all[$row['student_id']][$row['subject_id']][$row['part_id']] = $row['status']; }
+
+            // Monthly + Term + Formative ভাগ (Exam Terms-এ ওয়েট দেওয়া থাকলে) — Report Card-এর সাথে একই হিসাব
+            $rc_comp = ($f_part_id === 0) ? rc_term_composition($pdo, (int) $f_term_id, (int) $f_class_id) : null;
+            if ($rc_comp) {
+                [$defs, $marks_all, $att_all] = rc_compose_term($pdo, $rc_comp, (int) $f_class_id, $defs, $marks_all, $att_all, array_map('intval', $stu_ids));
+                foreach ($subject_cols as $sc_k => $sc_c) {
+                    $sc_f = 0.0;
+                    foreach (($defs[$sc_c['subject_id']]['parts'] ?? []) as $sc_p) { $sc_f += (float) $sc_p['full_mark_exam']; }
+                    $subject_cols[$sc_k]['full_mark_exam'] = $sc_f;
+                }
+            }
         }
 
         foreach ($raw_students as $stu) {

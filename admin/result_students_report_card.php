@@ -238,6 +238,11 @@ if ($searched && $f_class_id && $f_term_id) {
             $att_all = [];
             foreach ($at->fetchAll() as $row) { $att_all[$row['student_id']][$row['subject_id']][$row['part_id']] = $row['status']; }
 
+            // Monthly + Term + Formative আলাদা ভাগ (Exam Terms-এ Sub টার্ম ওয়েট / Formative ওয়েট দেওয়া থাকলে; Part ফিল্টার না থাকলে)
+            $defs_orig = $defs;
+            $rc_comp = ($f_part_id === 0) ? rc_term_composition($pdo, (int) $f_term_id, (int) $f_class_id) : null;
+            if ($rc_comp) { [$defs, $marks_all, $att_all] = rc_compose_term($pdo, $rc_comp, (int) $f_class_id, $defs_orig, $marks_all, $att_all, $target_student_ids); }
+
             $stu_info_stmt = $pdo->prepare(
                 "SELECT s.*, ac.class_name, ash.shift_name, asec.section_name, ag.group_name, am.medium_name
                  FROM students s
@@ -309,6 +314,8 @@ if ($searched && $f_class_id && $f_term_id) {
                         $att_cls = [];
                         foreach ($at_cls->fetchAll() as $row) { $att_cls[$row['student_id']][$row['subject_id']][$row['part_id']] = $row['status']; }
 
+                        if ($rc_comp) { [, $marks_cls, $att_cls] = rc_compose_term($pdo, $rc_comp, (int) $f_class_id, $defs_orig, $marks_cls, $att_cls, $cls_stu_ids); }
+
                         $totals = [];
                         foreach ($cls_stu_ids as $csid) {
                             $cres = rc_student_result_mode($defs, $marks_cls[$csid] ?? [], $att_cls[$csid] ?? [], $grade_bands, $arabic_mode, rc_excluded_subjects($pdo, $defs, (int) $f_term_id, (int) $csid));
@@ -350,6 +357,7 @@ if ($searched && $f_class_id && $f_term_id) {
                     'student' => $stu_row,
                     'present_days' => $present_days, 'absent_days' => $absent_days, 'working_days' => $working_days,
                     'arabic_position' => $arabic_position,
+                    'comp' => $rc_comp, 'comp_marks' => $marks_all[$sid_target] ?? [],
                     'class_position' => $class_position, 'class_total_count' => $class_total_count,
                     'class_pass_count' => $class_pass_count, 'class_fail_count' => $class_fail_count,
                 ]);
@@ -644,6 +652,9 @@ if ($searched) {
         <?php
             $student = $rep['student'];
             $subject_rows = $rep['subject_rows'];
+            $rc_comp_r = $rep['comp'] ?? null; $rc_cm = $rep['comp_marks'] ?? [];
+            $rc_comp_w = [];
+            if ($rc_comp_r) { foreach ($rc_comp_r['subs'] as $rc_s) { $rc_comp_w[-(1000 + $rc_s['id'])] = $rc_s['weight']; } $rc_comp_w[-1] = $rc_comp_r['own_w']; $rc_comp_w[-2] = $rc_comp_r['formative_w']; }
             $overall_gpa = $rep['overall_gpa'];
             $overall_gl = $rep['overall_gl'];
             $overall_fail = $rep['overall_fail'];
@@ -731,6 +742,9 @@ if ($searched) {
                     <tr>
                         <th style="width:50px;">Sl.</th>
                         <th>Name of Subjects</th>
+                        <?php if ($rc_comp_r): foreach ($rc_comp_r['order'] as $rc_k): ?>
+                        <th style="width:90px;"><?php echo rcv($rc_comp_r['labels'][$rc_k]); ?><br><small>(<?php echo rcv(rtrim(rtrim(number_format((float) ($rc_comp_w[$rc_k] ?? 0), 2), '0'), '.')); ?>)</small></th>
+                        <?php endforeach; endif; ?>
                         <th style="width:120px;">Marks Obtained</th>
                         <?php if ($RC_SUBJ_GL): ?><th style="width:110px;">Letter Grade</th><?php endif; ?>
                         <?php if ($RC_SUBJ_GP): ?><th style="width:100px;">Grade Point (GP)</th><?php endif; ?>
@@ -745,6 +759,9 @@ if ($searched) {
                         <tr>
                             <td><?php echo (int) $sr['sl']; ?></td>
                             <td><?php echo rcv($sr['name']); ?></td>
+                            <?php if ($rc_comp_r): foreach ($rc_comp_r['order'] as $rc_k): $rc_v = $rc_cm[$sr['subject_id']][$rc_k] ?? null; ?>
+                            <td><?php echo $rc_v === null ? '-' : rcv(rtrim(rtrim(number_format((float) $rc_v, 2), '0'), '.')); ?></td>
+                            <?php endforeach; endif; ?>
                             <td><?php echo rcv(rtrim(rtrim(number_format($sr['obtained'], 2), '0'), '.')); ?> / <?php echo rcv(rtrim(rtrim(number_format($sr['full'], 2), '0'), '.')); ?></td>
                             <?php if ($RC_SUBJ_GL): ?>
                             <td class="<?php echo $sr['fail'] ? 'rc-subj-fail' : 'rc-subj-pass'; ?>"><?php echo $sr['fail'] ? 'F' : rcv($sr['gl']); ?></td>

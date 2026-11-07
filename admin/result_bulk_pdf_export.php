@@ -208,6 +208,7 @@ if ($do_export && $f_session_id && $f_class_id && $f_term_id) {
     $zip->open($zip_path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
 
     $used_names = [];
+    $rc_comp_b = ($f_part_id === 0) ? rc_term_composition($pdo, (int) $f_term_id, (int) $f_class_id) : null;
     foreach ($students as $student) {
         $sid = (int) $student['id'];
 
@@ -225,8 +226,13 @@ if ($do_export && $f_session_id && $f_class_id && $f_term_id) {
         $att_map = [];
         foreach ($at->fetchAll() as $r) { $att_map[$r['subject_id']][$r['part_id']] = $r['status']; }
 
+        $defs_use = $defs;
+        if ($rc_comp_b) {
+            [$defs_use, $cm_b, $ca_b] = rc_compose_term($pdo, $rc_comp_b, (int) $f_class_id, $defs, [$sid => $marks_map], [$sid => $att_map], [$sid]);
+            $marks_map = $cm_b[$sid] ?? []; $att_map = $ca_b[$sid] ?? [];
+        }
         // শাখা অনুযায়ী সাবজেক্ট বাদ; আরবি আলাদা ব্লকে
-        $result = rc_student_result_mode($defs, $marks_map, $att_map, $grade_bands, 'separate', rc_excluded_subjects($pdo, $defs, (int) $f_term_id, (int) $sid));
+        $result = rc_student_result_mode($defs_use, $marks_map, $att_map, $grade_bands, 'separate', rc_excluded_subjects($pdo, $defs_use, (int) $f_term_id, (int) $sid));
         $html = bpe_build_html($student, $result, $inst_name, $inst_addr, $term_name, $session_name, $class_name);
 
         $mpdf = new \Mpdf\Mpdf([

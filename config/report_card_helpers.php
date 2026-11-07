@@ -356,6 +356,170 @@ function rc_student_result_mode(array $defs, array $marks_map, array $att_map, a
 }
 
 // =========================================================================
+// টার্ম-ভিত্তিক Monthly + Term + Formative ভাগ (যেমন Monthly 10 + Term 80 + Formative 10 = 100)
+// - Monthly = ঐ Main টার্মের Sub টার্ম (Exam Terms-এ দেওয়া ওয়েট %), একাধিক Monthly থাকলে সবগুলো মিলিয়ে তাদের ওয়েটের যোগফল
+// - Formative = Exam Terms-এ "Formative ওয়েট %", Formative Settings-এ যে Part-এ মার্ক সেভ হয় সেই Part
+// - Term = বাকি ওয়েট (১০০ − Monthly − Formative)
+// কোনো Monthly ওয়েট বা Formative ওয়েট না থাকলে আগের মতোই (এই ফাংশনগুলো null ফেরত দেয়)।
+// টার্ম একত্র করার নিয়ম (Percentage/Average Model) আগের মতোই মাস্টার সেটিং থেকে চলে — এখানে বদলায়নি।
+// =========================================================================
+if (!function_exists('rc_ensure_formative_weight_column')) {
+function rc_ensure_formative_weight_column(PDO $pdo): void
+{
+    static $done = false;
+    if ($done) { return; }
+    $done = true;
+    try {
+        rc_pct_ensure_term_columns($pdo);
+        $cols = $pdo->query("SHOW COLUMNS FROM exam_terms")->fetchAll(PDO::FETCH_COLUMN);
+        if (!in_array('formative_weight_pct', $cols, true)) {
+            $pdo->exec("ALTER TABLE exam_terms ADD COLUMN formative_weight_pct DECIMAL(6,2) NULL DEFAULT NULL");
+        }
+    } catch (Throwable $e) { $done = false; }
+}
+}
+
+if (!function_exists('rc_term_composition')) {
+/** ফেরত: null (ভাগ নেই) অথবা ['term_id','subs'=>[[id,name,weight]],'formative_w','own_w','fpart'=>[subject_id=>part_id, 0=>ডিফল্ট],'labels'=>[partKey=>নাম],'order'=>[partKey..]] */
+function rc_term_composition(PDO $pdo, int $term_id, int $class_id): ?array
+{
+    if ($term_id <= 0) { return null; }
+    rc_ensure_formative_weight_column($pdo);
+    try {
+        $q = $pdo->prepare("SELECT id, session_id, term_name, parent_term_id, formative_weight_pct FROM exam_terms WHERE id = ? AND status = 'Active'");
+        $q->execute([$term_id]);
+        $t = $q->fetch();
+        if (!$t || (int) ($t['parent_term_id'] ?? 0) > 0) { return null; } // Sub টার্মে ভাগ হয় না
+        $sq = $pdo->prepare("SELECT id, term_name, weight_pct FROM exam_terms WHERE parent_term_id = ? AND status = 'Active' AND weight_pct > 0 ORDER BY rank ASC, id ASC");
+        $sq->execute([$term_id]);
+        $subs = [];
+        foreach ($sq->fetchAll() as $s) { $subs[] = ['id' => (int) $s['id'], 'name' => $s['term_name'], 'weight' => (float) $s['weight_pct']]; }
+        $fw = (float) ($t['formative_weight_pct'] ?? 0);
+        if (!$subs && $fw <= 0) { return null; }
+        $sub_sum = array_sum(array_column($subs, 'weight'));
+        $own = round(100 - $sub_sum - $fw, 2);
+        if ($own < 0) { return null; } // ওয়েটের যোগফল ১০০-র বেশি — ভুল সেটিং, আগের মতো চলবে
+
+        // Formative যে Part-এ সেভ হয়: Subject+Term > Subject+সব Term > সব Subject+Term > সব Subject+সব Term
+        $fpart = [];
+        if ($fw > 0) {
+            $fs = $pdo->prepare("SELECT subject_id, term_id, part_id FROM formative_settings WHERE class_id = ? AND term_id IN (?, 0) AND part_id > 0 AND status = 'Active'");
+            $fs->execute([$class_id, $term_id]);
+            $rows = $fs->fetchAll();
+            foreach ($rows as $r) { // কম অগ্রাধিকার আগে বসাই, পরে বেশি অগ্রাধিকার ওভাররাইট করে
+                if ((int) $r['subject_id'] === 0 && (int) $r['term_id'] === 0) { $fpart[0] = (int) $r['part_id']; }
+            }
+            foreach ($rows as $r) { if ((int) $r['subject_id'] === 0 && (int) $r['term_id'] === $term_id) { $fpart[0] = (int) $r['part_id']; } }
+            foreach ($rows as $r) { if ((int) $r['subject_id'] > 0 && (int) $r['term_id'] === 0) { $fpart[(int) $r['subject_id']] = (int) $r['part_id']; } }
+            foreach ($rows as $r) { if ((int) $r['subject_id'] > 0 && (int) $r['term_id'] === $term_id) { $fpart[(int) $r['subject_id']] = (int) $r['part_id']; } }
+            if (!$fpart) { $fw = 0.0; $own = round(100 - $sub_sum, 2); if (!$subs) { return null; } }
+        }
+        $labels = []; $order = [];
+        foreach ($subs as $s) { $labels[-(1000 + $s['id'])] = $s['name']; $order[] = -(1000 + $s['id']); }
+        $labels[-1] = 'Term'; $order[] = -1;
+        if ($fw > 0) { $labels[-2] = 'Formative'; $order[] = -2; }
+        return ['term_id' => $term_id, 'subs' => $subs, 'formative_w' => $fw, 'own_w' => $own, 'fpart' => $fpart, 'labels' => $labels, 'order' => $order];
+    } catch (Throwable $e) { return null; }
+}
+}
+
+if (!function_exists('rc_compose_term')) {
+/**
+ * $defs/$marks_all[student][subject][part]/$att_all-কে Monthly+Term+Formative কৃত্রিম Part-এ (নেগেটিভ id) ভেঙে দেয়।
+ * ফেরত: [$defs, $marks_all, $att_all]। rc_student_result ও rc_calc_subject_totals এগুলো সরাসরি ব্যবহার করে — মোট ১০০ হয়ে যায়।
+ */
+function rc_compose_term(PDO $pdo, array $comp, int $class_id, array $defs, array $marks_all, array $att_all, array $student_ids): array
+{
+    // Monthly (Sub টার্ম): subject => sub => পূর্ণমান; student => subject => sub => প্রাপ্ত
+    $sub_full = []; $sub_obt = [];
+    foreach ($comp['subs'] as $s) {
+        foreach (rc_get_subject_defs($pdo, $class_id, $s['id'], 0, 0) as $sid => $d) {
+            $f = 0.0; foreach ($d['parts'] as $p) { $f += (float) $p['full_mark_exam']; }
+            if ($f > 0) { $sub_full[$sid][$s['id']] = $f; }
+        }
+    }
+    if ($comp['subs'] && $student_ids) {
+        $ti = implode(',', array_fill(0, count($comp['subs']), '?'));
+        $si = implode(',', array_fill(0, count($student_ids), '?'));
+        $st = $pdo->prepare("SELECT student_id, subject_id, term_id, SUM(marks_obtained) AS m FROM exam_marks WHERE term_id IN ($ti) AND student_id IN ($si) GROUP BY student_id, subject_id, term_id");
+        $st->execute(array_merge(array_column($comp['subs'], 'id'), $student_ids));
+        foreach ($st->fetchAll() as $r) { $sub_obt[$r['student_id']][$r['subject_id']][$r['term_id']] = (float) $r['m']; }
+    }
+
+    $new_defs = []; $new_marks = []; $new_att = [];
+    foreach ($defs as $sid => $def) {
+        $fpid = $comp['fpart'][$sid] ?? ($comp['fpart'][0] ?? 0);
+        $t_parts = []; $f_parts = [];
+        foreach ($def['parts'] as $pid => $p) {
+            if ((float) $p['full_mark_exam'] <= 0) { continue; }
+            if ($comp['formative_w'] > 0 && $fpid && (int) $pid === (int) $fpid) { $f_parts[$pid] = $p; } else { $t_parts[$pid] = $p; }
+        }
+        $missing_w = 0.0; $parts = [];
+        $month_keys = [];
+        foreach ($comp['subs'] as $s) {
+            if (isset($sub_full[$sid][$s['id']])) { $month_keys[] = $s; } else { $missing_w += $s['weight']; }
+        }
+        $has_f = (bool) $f_parts;
+        if (!$has_f) { $missing_w += $comp['formative_w']; }
+        $own_w = $comp['own_w'] + $missing_w;
+
+        $mk = function (array $row, float $full, float $pass, int $pass_ind, int $foa) {
+            return array_merge($row, ['full_mark_exam' => $full, 'pass_mark_exam' => $pass, 'pass_individual' => $pass_ind, 'fail_on_absent' => $foa]);
+        };
+        $base = $def['parts'] ? reset($def['parts']) : [];
+        foreach ($month_keys as $s) { $parts[-(1000 + $s['id'])] = $mk($base, $s['weight'], 0.0, 0, 0); }
+        if ($t_parts && $own_w > 0) {
+            $pf = 0.0; $pp = 0.0; $foa = 0; $pind = 0;
+            foreach ($t_parts as $p) {
+                $pf += (float) $p['full_mark_exam'];
+                if ((int) $p['pass_individual'] === 1) { $pind = 1; $pp += (float) $p['pass_mark_exam']; }
+                if ((int) $p['fail_on_absent'] === 1) { $foa = 1; }
+            }
+            $parts[-1] = $mk($base, $own_w, $pind && $pf > 0 ? $pp / $pf * $own_w : 0.0, $pind, $foa);
+        }
+        if ($has_f && $comp['formative_w'] > 0) {
+            $parts[-2] = $mk($base, $comp['formative_w'], 0.0, 0, 0);
+        }
+        $order = array_values(array_intersect($comp['order'], array_keys($parts)));
+        $sorted = []; foreach ($order as $k) { $sorted[$k] = $parts[$k]; }
+        $new_defs[$sid] = array_merge($def, ['parts' => $sorted]);
+
+        foreach ($student_ids as $stu) {
+            $mm = $marks_all[$stu][$sid] ?? []; $aa = $att_all[$stu][$sid] ?? [];
+            $out = []; $oat = [];
+            foreach ($month_keys as $s) {
+                $o = $sub_obt[$stu][$sid][$s['id']] ?? 0.0;
+                $out[-(1000 + $s['id'])] = round($o / $sub_full[$sid][$s['id']] * $s['weight'], 2);
+            }
+            if ($t_parts && $own_w > 0) {
+                $o = 0.0; $f = 0.0; $null = false; $abs = false;
+                foreach ($t_parts as $pid => $p) {
+                    $f += (float) $p['full_mark_exam'];
+                    $isabs = (($aa[$pid] ?? 'Present') === 'Absent');
+                    if ($isabs) { if ((int) $p['fail_on_absent'] === 1) { $abs = true; } continue; }
+                    $v = $mm[$pid] ?? null;
+                    if ($v === null) { $null = true; } else { $o += (float) $v; }
+                }
+                $out[-1] = $null ? null : round($o / $f * $own_w, 2);
+                $oat[-1] = $abs ? 'Absent' : 'Present';
+            }
+            if ($has_f && $comp['formative_w'] > 0) {
+                $o = 0.0; $f = 0.0; $null = false;
+                foreach ($f_parts as $pid => $p) {
+                    $f += (float) $p['full_mark_exam'];
+                    $v = $mm[$pid] ?? null;
+                    if ($v === null) { $null = true; } else { $o += (float) $v; }
+                }
+                $out[-2] = $null ? null : round($o / $f * $comp['formative_w'], 2);
+            }
+            $new_marks[$stu][$sid] = $out; $new_att[$stu][$sid] = $oat;
+        }
+    }
+    return [$new_defs, $new_marks, $new_att];
+}
+}
+
+// =========================================================================
 // Merit Tie-Breaker — Total মার্ক সমান হলে (যেমন ৩ জন প্রথম) কাকে আগে বসানো
 // হবে তা ঠিক করার জন্য Admin-এর নিজের সাজানো ক্রাইটেরিয়া (Result Module >
 // Exam Settings > Merit Tie-Breaker পেজ থেকে কনফিগার করা হয়)। Tabulation

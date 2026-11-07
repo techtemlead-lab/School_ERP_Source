@@ -39,6 +39,7 @@ ef_ensure_columns($pdo);
 // Main/Sub টার্ম ও ওয়েট (শতকরা/গড় মডেলের জন্য) — Master Settings-এ যে মডেল চালু, সেই অনুযায়ী ফিল্ড দেখায়
 require_once __DIR__ . '/../config/report_card_helpers.php';
 rc_pct_ensure_term_columns($pdo);
+rc_ensure_formative_weight_column($pdo);
 $et_active_model = '';
 try { $et_active_model = (string) $pdo->query("SELECT aggregate_result_type FROM exam_result_settings WHERE id = 1")->fetchColumn(); } catch (Throwable $e) { $et_active_model = ''; }
 $et_model_on   = rc_pct_is_model($et_active_model);
@@ -112,13 +113,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare($sql)->execute($args);
                 sec_log_activity($pdo, 'Result', 'Update', "Exam Term আপডেট করা হয়েছে: {$term_name}");
                 $_SESSION['et_msg'] = 'Exam Term আপডেট করা হয়েছে।';
+                if (array_key_exists('formative_weight_pct', $_POST)) {
+                    $fw_raw = trim((string) $_POST['formative_weight_pct']);
+                    $fw = ($fw_raw === '' || $parent_id !== null) ? null : max(0.0, min(100.0, round((float) $fw_raw, 2)));
+                    if ($fw !== null && $fw <= 0) { $fw = null; }
+                    $fid = $id;
+                    $pdo->prepare("UPDATE exam_terms SET formative_weight_pct = ? WHERE id = ?")->execute([$fw, $fid]);
+                }
             } else {
                 $sql = "INSERT INTO exam_terms (session_id, term_name, rank, is_final_term, is_aggregated_result, status, fee_month, exam_fee_head_id" . ($has_struct ? ", parent_term_id, weight_pct" : "") . ") VALUES (?, ?, ?, ?, ?, ?, ?, ?" . ($has_struct ? ", ?, ?" : "") . ")";
                 $args = [$session_id, $term_name, $rank, $is_final, $is_agg, $status, $fee_month ?: null, $fee_head_id ?: null];
                 if ($has_struct) { $args[] = $parent_id; $args[] = $weight; }
                 $pdo->prepare($sql)->execute($args);
+                $new_term_id = (int) $pdo->lastInsertId();
                 sec_log_activity($pdo, 'Result', 'Create', "নতুন Exam Term তৈরি করা হয়েছে: {$term_name}");
                 $_SESSION['et_msg'] = 'নতুন Exam Term যোগ করা হয়েছে।';
+                if (array_key_exists('formative_weight_pct', $_POST)) {
+                    $fw_raw = trim((string) $_POST['formative_weight_pct']);
+                    $fw = ($fw_raw === '' || $parent_id !== null) ? null : max(0.0, min(100.0, round((float) $fw_raw, 2)));
+                    if ($fw !== null && $fw <= 0) { $fw = null; }
+                    $fid = $new_term_id;
+                    $pdo->prepare("UPDATE exam_terms SET formative_weight_pct = ? WHERE id = ?")->execute([$fw, $fid]);
+                }
             }
         }
     } elseif (isset($_POST['delete_term'])) {
@@ -242,6 +258,13 @@ $view = $_GET['view'] ?? 'list';
                     </div>
                     <div class="col-sm-6 small text-muted" id="etWeightHelp"></div>
                 </div>
+                <div class="row mt-3 mb-1 align-items-center" id="etFormRow" style="<?php echo $d_is_sub ? 'display:none;' : ''; ?>">
+                    <label class="col-sm-3 col-form-label fw-bold text-end">Formative ওয়েট (%)</label>
+                    <div class="col-sm-3">
+                        <div class="input-group"><input type="number" step="0.01" min="0" max="100" name="formative_weight_pct" class="form-control" value="<?php echo etv($d['formative_weight_pct'] ?? ''); ?>"><span class="input-group-text">%</span></div>
+                    </div>
+                    <div class="col-sm-6 small text-muted">রিপোর্ট কার্ডে Formative আলাদা কলাম হবে (যেমন ১০)। Monthly = এই টার্মের Sub টার্মগুলোর ওয়েটের যোগফল, Term = ১০০ − Monthly − Formative। ফাঁকা = আগের মতো।</div>
+                </div>
             </div>
             <script>
             (function () {
@@ -251,6 +274,7 @@ $view = $_GET['view'] ?? 'list';
                 function sync() {
                     var sub = document.getElementById('tkSub') && document.getElementById('tkSub').checked;
                     document.getElementById('etParentRow').style.display = sub ? '' : 'none';
+                    var fr = document.getElementById('etFormRow'); if (fr) { fr.style.display = sub ? 'none' : ''; }
                     var wRow = document.getElementById('etWeightRow'), lbl = document.getElementById('etWeightLabel'), help = document.getElementById('etWeightHelp');
                     var show = false, text = '', hl = '';
                     if (sub && (type === 'nested' || type === 'standalone')) {
