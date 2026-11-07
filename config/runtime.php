@@ -3,7 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/env.php';
 date_default_timezone_set('Asia/Dhaka');
 function erp_host(): string { return strtolower(preg_replace('/:\d+$/', '', (string) ($_SERVER['HTTP_HOST'] ?? ''))); }
-function erp_primary_host(): string { return strtolower(erp_env('ERP_PRIMARY_HOST','schoolmng.techteamlead.com')); }
+function erp_primary_host(): string { return strtolower(erp_env('ERP_PRIMARY_HOST','www.schoolmng.com')); }
 function erp_demo_host(): string { return strtolower(erp_env('ERP_DEMO_HOST','demo.schoolmng.techteamlead.com')); }
 function erp_is_demo(): bool { return PHP_SAPI !== 'cli' && erp_host() === erp_demo_host(); }
 function erp_primary_url(): string { return rtrim(erp_env('ERP_PRIMARY_URL','https://' . erp_primary_host()),'/'); }

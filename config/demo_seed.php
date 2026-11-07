@@ -131,7 +131,7 @@ function demo_seed_database(PDO $pdo,?int $anchor=null): void {
   demo_insert($pdo,'website_albums',['title'=>'School memories '.$n.' (fictional)','cover_image'=>'assets/demo-school.svg','description'=>'Fictional public demo album','sort_order'=>$n]);
   demo_insert($pdo,'gallery_items',['caption'=>'Fictional school activity '.$n,'image_path'=>'assets/demo-school.svg','sort_order'=>$n+4]);
  }
- demo_insert($pdo,'website_useful_links',['title'=>'School ERP demo guide','url'=>'https://schoolmng.techteamlead.com/demo/']);
+ demo_insert($pdo,'website_useful_links',['title'=>'School ERP demo guide','url'=>'https://www.schoolmng.com/demo/']);
  for($n=1;$n<=12;$n++) {
   $state=$n%4===0?'Rejected':'Pending';
   demo_insert($pdo,'scholarship_applications',['student_id'=>$n,'session_id'=>1,'class_id'=>($n-1)%5+1,'applicant_name'=>'Fictional guardian '.$n,'applicant_relation'=>'Guardian','occupation'=>'Fictional shopkeeper','monthly_income'=>9000+$n*250,'family_members'=>5,'earning_members'=>1,'children_json'=>json_encode([['gender'=>'Male','age'=>'12','inst'=>'Fictional Shapla Model School','class'=>'Demo class']]),'present_address'=>'Fictional ward '.$n.', Rangpur, Bangladesh','permanent_address'=>'Fictional village, Rangpur, Bangladesh','mobile'=>'0170000'.sprintf('%04d',$n),'reason'=>'Fictional education support application for exploring this demo.','status'=>$state,'admin_remarks'=>$state==='Rejected'?'Provide more information and submit a new fictional application.':null]);
