@@ -694,7 +694,7 @@ function sb_mod_ok(PDO $pdo, array $tree, string $modkey): bool
                 <li><a href="index.php?page=sms_users_students">SMS User (Students)</a></li>
                 <li><a href="index.php?page=sms_users_employees">SMS User (Employees)</a></li>
                 <!-- User Permission: শুধু Super Admin দেখবে/ব্যবহার করবে, 'Admin' টাইপ system_user না -->
-                <?php if ($um_is_super): ?>
+                <?php if ($um_is_super || $um_is_admin): ?>
                 <li><a href="index.php?page=user_permissions">User Permission</a></li>
                 <li><a href="index.php?page=user_permissions&mode=role">Role Permission</a></li>
                 <?php endif; ?>

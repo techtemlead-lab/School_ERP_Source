@@ -9,10 +9,13 @@
 // module-level এ perm_module_allowed() দিয়ে হোল মডিউল hide করা হয়।
 
 $is_super_admin = $_SESSION['is_super_admin'] ?? true; // পুরনো সেশন ব্যাকওয়ার্ড-কম্প্যাটিবিলিটি
-if (!$is_super_admin) {
-    echo '<div class="card-custom"><div class="alert alert-danger mb-0"><i class="fa-solid fa-lock me-2"></i>শুধুমাত্র <b>Super Admin</b> User Permission অ্যাক্সেস করতে পারবেন।</div></div>';
+$is_admin_type  = !$is_super_admin && ($_SESSION['user_role'] ?? '') === 'Admin';
+if (!$is_super_admin && !$is_admin_type) {
+    echo '<div class="card-custom"><div class="alert alert-danger mb-0"><i class="fa-solid fa-lock me-2"></i>শুধুমাত্র <b>Super Admin</b> বা <b>Admin</b> User Permission অ্যাক্সেস করতে পারবে।</div></div>';
     return;
 }
+// Admin টাইপ ইউজার অন্য ইউজার/Role-এর পারমিশন সেট করতে পারে, কিন্তু 'Admin' টাইপ ইউজার/Role-এর নয়
+// (নিজেকে বা অন্য Admin-কে আটকানো/ক্ষমতা বাড়ানো শুধু Super Admin পারবে)।
 
 perm_ensure_tables($pdo);
 
@@ -35,9 +38,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_permissions'])) 
     }
 
     $uid = (int) ($_POST['uid'] ?? 0);
-    $chk = $pdo->prepare("SELECT id FROM system_users WHERE id = ?");
+    $chk = $pdo->prepare("SELECT id, user_type FROM system_users WHERE id = ?");
     $chk->execute([$uid]);
-    if (!$chk->fetch()) {
+    $chk_row = $chk->fetch();
+    if ($chk_row && $is_admin_type && $chk_row['user_type'] === 'Admin') {
+        $_SESSION['up_err'] = 'Admin টাইপ ইউজারের পারমিশন শুধু Super Admin বদলাতে পারে।';
+        header('Location: index.php?page=user_permissions');
+        exit();
+    }
+    if (!$chk_row) {
         $_SESSION['up_err'] = 'ইউজার খুঁজে পাওয়া যায়নি।';
         header('Location: index.php?page=user_permissions');
         exit();
@@ -86,6 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_permissions'])) 
 // Role অনুযায়ী সেভ (POST) — একটা Role-এর সব ইউজারের জন্য ডিফল্ট পারমিশন
 // -----------------------------------------------------------
 $perm_roles = ['Accountant', 'Admin', 'Canteen Staff', 'Data Entry Operator', 'Demo', 'Human Resource', 'Teacher'];
+if ($is_admin_type) { $perm_roles = array_values(array_diff($perm_roles, ['Admin'])); }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_role_permissions'])) {
     if (!csrf_verify($_POST['csrf_token'] ?? null)) {
         $_SESSION['up_err'] = 'ফর্মের মেয়াদ শেষ হয়ে গেছে, পেজ রিলোড করে আবার চেষ্টা করুন।';
@@ -132,7 +142,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_role_permissions
 // ইউজার লিস্ট + সিলেক্টেড ইউজার
 // -----------------------------------------------------------
 $users = $pdo->query(
-    "SELECT id, username, user_type, status FROM system_users ORDER BY user_type ASC, username ASC"
+    "SELECT id, username, user_type, status FROM system_users" . ($is_admin_type ? " WHERE user_type <> 'Admin'" : "") . " ORDER BY user_type ASC, username ASC"
 )->fetchAll();
 
 $selected_uid = (int) ($_GET['uid'] ?? 0);
