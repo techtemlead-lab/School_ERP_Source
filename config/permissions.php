@@ -14,6 +14,9 @@
 // - permissions_restricted = 1 হলে ঐ ইউজার শুধু user_menu_permissions টেবিলে
 //   তার জন্য যে page_key গুলো সেভ করা আছে, শুধু সেগুলোতেই ঢুকতে পারবে। কোনো
 //   key সেভ করা না থাকলে (restricted কিন্তু ০টা পেজ) সে শুধু Dashboard দেখবে।
+// - Role অনুযায়ী পারমিশন (role_menu_permissions + role_permission_settings):
+//   Super Admin একটা Role (যেমন Accountant) এর জন্য একবার মেনু/পেজ সিলেক্ট করলে ঐ Role-এর
+//   সব ইউজার সেটা পাবে। ইউজারের নিজস্ব Restrict চালু থাকলে সেটাই অগ্রাধিকার পায় (User > Role > ডিফল্ট সব)।
 // - এই পুরো সিস্টেম "মডিউল/পেজ" লেভেলে কাজ করে — User Management, System &
 //   Security, Database Reset এই তিনটা মডিউলের জন্য প্রযোজ্য না, ওগুলো আগে থেকেই
 //   role-based (is_super_admin / user_role==='Admin') ভাবে গার্ড করা আছে।
@@ -32,6 +35,24 @@ function perm_ensure_tables(PDO $pdo): void
             page_key VARCHAR(100) NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY uniq_user_page (system_user_id, page_key)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+
+    // Role অনুযায়ী পারমিশন (user_type ভিত্তিক)
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS role_menu_permissions (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_type VARCHAR(30) NOT NULL,
+            page_key VARCHAR(100) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_role_page (user_type, page_key)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS role_permission_settings (
+            user_type VARCHAR(30) NOT NULL PRIMARY KEY,
+            restricted TINYINT(1) NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
 
@@ -57,6 +78,18 @@ function perm_is_super_admin(): bool
     return !empty($_SESSION['is_super_admin']);
 }
 
+// একটা Role (user_type) এর পারমিশন: restricted না হলে null (মানে Role-এ কোনো সীমা নেই), হলে allowed page_key-এর তালিকা
+function perm_role_allowed_keys(PDO $pdo, string $user_type): ?array
+{
+    perm_ensure_tables($pdo);
+    $st = $pdo->prepare("SELECT restricted FROM role_permission_settings WHERE user_type = ?");
+    $st->execute([$user_type]);
+    if (!(int) $st->fetchColumn()) { return null; }
+    $st2 = $pdo->prepare("SELECT page_key FROM role_menu_permissions WHERE user_type = ?");
+    $st2->execute([$user_type]);
+    return $st2->fetchAll(PDO::FETCH_COLUMN);
+}
+
 // একজন নির্দিষ্ট system_user-এর জন্য restricted mode চালু আছে কিনা, আর থাকলে
 // কোন কোন page_key allowed — একবার কুয়েরি করে রিকোয়েস্ট জুড়ে static ক্যাশ রাখা হয়
 function perm_load(PDO $pdo, int $system_user_id): array
@@ -66,18 +99,24 @@ function perm_load(PDO $pdo, int $system_user_id): array
 
     perm_ensure_tables($pdo);
 
-    $stmt = $pdo->prepare("SELECT permissions_restricted FROM system_users WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT permissions_restricted, user_type FROM system_users WHERE id = ?");
     $stmt->execute([$system_user_id]);
-    $restricted = (bool) $stmt->fetchColumn();
+    $urow = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    $restricted = !empty($urow['permissions_restricted']);
+    $source = $restricted ? 'user' : 'none';
 
     $allowed = [];
     if ($restricted) {
         $stmt2 = $pdo->prepare("SELECT page_key FROM user_menu_permissions WHERE system_user_id = ?");
         $stmt2->execute([$system_user_id]);
         $allowed = $stmt2->fetchAll(PDO::FETCH_COLUMN);
+    } elseif (!empty($urow['user_type'])) {
+        // ইউজারের নিজস্ব Restrict নেই — তার Role-এর পারমিশন থাকলে সেটা প্রযোজ্য
+        $allowed = perm_role_allowed_keys($pdo, (string) $urow['user_type']);
+        if ($allowed !== null) { $restricted = true; $source = 'role'; } else { $allowed = []; }
     }
 
-    return $cache[$system_user_id] = ['restricted' => $restricted, 'allowed' => $allowed];
+    return $cache[$system_user_id] = ['restricted' => $restricted, 'allowed' => $allowed, 'source' => $source];
 }
 
 // একটা নির্দিষ্ট পেজ (page_map এর key) এ বর্তমান লগইন করা ইউজারের এক্সেস আছে কিনা

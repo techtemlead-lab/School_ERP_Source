@@ -80,6 +80,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_permissions'])) 
 }
 
 // -----------------------------------------------------------
+// Role অনুযায়ী সেভ (POST) — একটা Role-এর সব ইউজারের জন্য ডিফল্ট পারমিশন
+// -----------------------------------------------------------
+$perm_roles = ['Accountant', 'Admin', 'Canteen Staff', 'Data Entry Operator', 'Demo', 'Human Resource', 'Teacher'];
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_role_permissions'])) {
+    if (!csrf_verify($_POST['csrf_token'] ?? null)) {
+        $_SESSION['up_err'] = 'ফর্মের মেয়াদ শেষ হয়ে গেছে, পেজ রিলোড করে আবার চেষ্টা করুন।';
+        header('Location: index.php?page=user_permissions&mode=role');
+        exit();
+    }
+    $role = (string) ($_POST['role_type'] ?? '');
+    if (!in_array($role, $perm_roles, true)) {
+        $_SESSION['up_err'] = 'Role খুঁজে পাওয়া যায়নি।';
+        header('Location: index.php?page=user_permissions&mode=role');
+        exit();
+    }
+    $restricted = isset($_POST['restricted']) ? 1 : 0;
+    $keys = $_POST['perm_keys'] ?? [];
+    if (!is_array($keys)) $keys = [];
+    $valid_keys = [];
+    foreach ($menu_tree as $module) {
+        foreach ($module['children'] as $child) {
+            if ($child['type'] === 'leaf') { $valid_keys[$child['key']] = true; }
+            else { foreach ($child['children'] as $leaf) { $valid_keys[$leaf['key']] = true; } }
+        }
+    }
+    $keys = array_values(array_intersect($keys, array_keys($valid_keys)));
+
+    $pdo->beginTransaction();
+    $pdo->prepare("INSERT INTO role_permission_settings (user_type, restricted) VALUES (?, ?) ON DUPLICATE KEY UPDATE restricted = VALUES(restricted)")->execute([$role, $restricted]);
+    $pdo->prepare("DELETE FROM role_menu_permissions WHERE user_type = ?")->execute([$role]);
+    if ($restricted && $keys) {
+        $ins = $pdo->prepare("INSERT INTO role_menu_permissions (user_type, page_key) VALUES (?, ?)");
+        foreach ($keys as $k) { $ins->execute([$role, $k]); }
+    }
+    $pdo->commit();
+    if (function_exists('sec_log_activity')) { sec_log_activity($pdo, 'User Management', 'Update', "Role পারমিশন আপডেট: {$role}"); }
+
+    $_SESSION['up_msg'] = $role . ' Role-এর পারমিশন সেভ হয়েছে।';
+    header('Location: index.php?page=user_permissions&mode=role&role=' . urlencode($role));
+    exit();
+}
+
+// -----------------------------------------------------------
 // ইউজার লিস্ট + সিলেক্টেড ইউজার
 // -----------------------------------------------------------
 $users = $pdo->query(
@@ -105,12 +148,51 @@ if ($selected_user) {
     $stmt2->execute([$selected_uid]);
     $allowed_keys = $stmt2->fetchAll(PDO::FETCH_COLUMN);
 }
+$mode = (($_GET['mode'] ?? '') === 'role') ? 'role' : 'user';
+$selected_role = (string) ($_GET['role'] ?? '');
+if (!in_array($selected_role, $perm_roles, true)) { $selected_role = ''; }
+$role_users_count = [];
+foreach ($pdo->query("SELECT user_type, COUNT(*) c FROM system_users GROUP BY user_type")->fetchAll() as $rc) { $role_users_count[$rc['user_type']] = (int) $rc['c']; }
+$user_role_default = null; // ইউজার মোডে: তার Role-এ পারমিশন চালু থাকলে সেই তালিকা
+if ($mode === 'role' && $selected_role !== '') {
+    $role_keys_now = perm_role_allowed_keys($pdo, $selected_role);
+    $is_restricted = $role_keys_now !== null;
+    $allowed_keys = $role_keys_now ?? [];
+} elseif ($mode === 'user' && $selected_user) {
+    $user_role_default = perm_role_allowed_keys($pdo, (string) $selected_user['user_type']);
+}
 $allowed_lookup = array_flip($allowed_keys);
+$show_form = ($mode === 'role') ? ($selected_role !== '') : (bool) $selected_user;
 ?>
 <div class="card-custom">
     <?php if ($up_msg): ?><div class="alert alert-success py-2"><?php echo upv($up_msg); ?></div><?php endif; ?>
     <?php if ($up_err): ?><div class="alert alert-danger py-2"><?php echo upv($up_err); ?></div><?php endif; ?>
 
+    <ul class="nav nav-pills mb-3">
+        <li class="nav-item"><a class="nav-link <?php echo $mode === 'user' ? 'active' : ''; ?>" href="index.php?page=user_permissions"><i class="fa-solid fa-user me-1"></i> ইউজার অনুযায়ী</a></li>
+        <li class="nav-item"><a class="nav-link <?php echo $mode === 'role' ? 'active' : ''; ?>" href="index.php?page=user_permissions&mode=role"><i class="fa-solid fa-user-shield me-1"></i> Role অনুযায়ী</a></li>
+    </ul>
+
+    <?php if ($mode === 'role'): ?>
+    <div class="row g-3 mb-3">
+        <div class="col-md-5 col-lg-4">
+            <label class="form-label fw-bold" style="font-size:13px;">Role সিলেক্ট করুন</label>
+            <form method="GET" action="index.php">
+                <input type="hidden" name="page" value="user_permissions">
+                <input type="hidden" name="mode" value="role">
+                <select name="role" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="">-- Role সিলেক্ট করুন --</option>
+                    <?php foreach ($perm_roles as $pr): ?>
+                        <option value="<?php echo upv($pr); ?>" <?php echo $selected_role === $pr ? 'selected' : ''; ?>><?php echo upv($pr); ?> (<?php echo (int) ($role_users_count[$pr] ?? 0); ?> জন ইউজার)</option>
+                    <?php endforeach; ?>
+                </select>
+            </form>
+            <div class="text-muted small mt-2">Role-এর পারমিশন ঐ Role-এর সব ইউজারে প্রযোজ্য হবে। কোনো ইউজারের নিজস্ব Restrict (ইউজার অনুযায়ী ট্যাব) চালু থাকলে সেটাই আগে ধরা হবে।</div>
+        </div>
+    </div>
+    <?php endif; ?>
+
+    <?php if ($mode === 'user'): ?>
     <div class="row g-3 mb-3">
         <div class="col-md-5 col-lg-4">
             <label class="form-label fw-bold" style="font-size:13px;">ইউজার সিলেক্ট করুন</label>
@@ -130,19 +212,34 @@ $allowed_lookup = array_flip($allowed_keys);
             <?php endif; ?>
         </div>
     </div>
+    <?php endif; ?>
 
-    <?php if ($selected_user): ?>
-        <form method="POST" action="index.php?page=user_permissions">
+    <?php if ($show_form): ?>
+        <form method="POST" action="index.php?page=user_permissions<?php echo $mode === 'role' ? '&mode=role&role=' . urlencode($selected_role) : ''; ?>">
             <?php echo csrf_field(); ?>
-            <input type="hidden" name="save_permissions" value="1">
-            <input type="hidden" name="uid" value="<?php echo (int) $selected_uid; ?>">
+            <?php if ($mode === 'role'): ?>
+                <input type="hidden" name="save_role_permissions" value="1">
+                <input type="hidden" name="role_type" value="<?php echo upv($selected_role); ?>">
+            <?php else: ?>
+                <input type="hidden" name="save_permissions" value="1">
+                <input type="hidden" name="uid" value="<?php echo (int) $selected_uid; ?>">
+                <?php if ($user_role_default !== null): ?>
+                    <div class="alert alert-info py-2 small">
+                        এই ইউজারের Role (<b><?php echo upv($selected_user['user_type']); ?></b>)-এ পারমিশন সেট করা আছে — নিচের Restrict <b>অফ</b> থাকলে সেই Role-এর পারমিশনই প্রযোজ্য। শুধু এই ইউজারের জন্য আলাদা করতে Restrict অন করুন।
+                        <button type="button" class="btn btn-sm btn-outline-primary ms-2" onclick="upCopyRole()">Role-এর পারমিশন এখানে কপি করুন</button>
+                    </div>
+                    <script>var UP_ROLE_KEYS = <?php echo json_encode(array_values($user_role_default)); ?>;
+                    function upCopyRole(){ document.getElementById('upRestrictedToggle').checked = true; document.getElementById('upTreeWrap').classList.remove('opacity-50');
+                        document.querySelectorAll('.up-leaf').forEach(function(cb){ cb.checked = UP_ROLE_KEYS.indexOf(cb.value) !== -1; }); upUpdateCounts(); }</script>
+                <?php endif; ?>
+            <?php endif; ?>
 
             <div class="form-check form-switch mb-3">
                 <input class="form-check-input" type="checkbox" role="switch" id="upRestrictedToggle" name="restricted" value="1" <?php echo $is_restricted ? 'checked' : ''; ?> onchange="document.getElementById('upTreeWrap').classList.toggle('opacity-50', !this.checked)">
                 <label class="form-check-label fw-bold" for="upRestrictedToggle">
-                    এই ইউজারের জন্য Menu Permission সীমাবদ্ধ করুন (Restrict)
+                    <?php echo $mode === 'role' ? 'এই Role-এর জন্য Menu Permission সীমাবদ্ধ করুন (Restrict)' : 'এই ইউজারের জন্য Menu Permission সীমাবদ্ধ করুন (Restrict)'; ?>
                 </label>
-                <div class="text-muted small">অফ থাকলে এই ইউজার আগের মতোই তার Role অনুযায়ী সব মেনু/পেজ দেখতে ও ব্যবহার করতে পারবে। অন করলে নিচে টিক দেওয়া পেজগুলো ছাড়া বাকি সব মেনু sidebar থেকে লুকানো থাকবে এবং সরাসরি লিংক দিয়েও ঢোকা যাবে না।</div>
+                <div class="text-muted small"><?php echo $mode === 'role' ? 'অফ থাকলে এই Role-এর ইউজারদের কোনো সীমা থাকবে না (আগের মতো সব পেজ)। অন করলে নিচে টিক দেওয়া পেজ ছাড়া বাকি সব মেনু এই Role-এর সব ইউজারের জন্য লুকানো থাকবে। ইউজারের নিজস্ব Restrict থাকলে সেটা আগে প্রযোজ্য।' : ''; ?><?php echo $mode === 'user' ? 'অফ থাকলে এই ইউজার আগের মতোই তার Role অনুযায়ী সব মেনু/পেজ দেখতে ও ব্যবহার করতে পারবে। অন করলে নিচে টিক দেওয়া পেজগুলো ছাড়া বাকি সব মেনু sidebar থেকে লুকানো থাকবে এবং সরাসরি লিংক দিয়েও ঢোকা যাবে না।' : ''; ?></div>
             </div>
 
             <div id="upTreeWrap" class="<?php echo $is_restricted ? '' : 'opacity-50'; ?>">
@@ -244,6 +341,8 @@ $allowed_lookup = array_flip($allowed_keys);
             document.querySelectorAll('.up-leaf').forEach(cb => cb.addEventListener('change', upUpdateCounts));
             upUpdateCounts();
         </script>
+    <?php elseif ($mode === 'role'): ?>
+        <div class="text-muted">উপরে থেকে একটা Role সিলেক্ট করুন।</div>
     <?php elseif ($users): ?>
         <div class="text-muted">উপরে থেকে একজন ইউজার সিলেক্ট করুন।</div>
     <?php endif; ?>
