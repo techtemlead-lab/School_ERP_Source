@@ -1350,6 +1350,16 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                 $target_file = 'access_denied.php';
             }
 
+            // Add/Edit/Delete লেভেল — পেজে ঢোকার অনুমতি থাকলেও কাজের (সেভ/এডিট/ডিলিট) অনুমতি না থাকলে ব্লক
+            $perm_denied_kind = null;
+            if ($target_file !== 'access_denied.php' && $page !== 'dashboard') {
+                $perm_kind_now = perm_classify_request();
+                if ($perm_kind_now !== null && !perm_action_allowed($pdo, $page, $perm_kind_now)) {
+                    $perm_denied_kind = $perm_kind_now;
+                    $target_file = 'access_denied_action.php';
+                }
+            }
+
             // কোনো পেজ ফাইলে (যেমন পুরনো ডাটাবেসের স্কিমা-মিসম্যাচ) Exception/Fatal হলে আগে কনটেন্ট এরিয়া ফাঁকা সাদা
             // থাকত — এখন এরর মেসেজটা পেজেই দেখাবে, যাতে কারণ সাথে সাথে ধরা যায়
             try {
@@ -1360,6 +1370,7 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                     . '<code style="white-space:pre-wrap">' . htmlspecialchars($page_ex->getMessage()) . '</code><br>'
                     . '<small class="text-muted">' . htmlspecialchars(basename($page_ex->getFile()) . ':' . $page_ex->getLine()) . '</small></div>';
             }
+            include __DIR__ . '/inc/perm_ui.php'; // Restrict ইউজারের sidebar/বোতাম পরিষ্কার
             ?>
         </div>
     </div>

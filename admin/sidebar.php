@@ -696,6 +696,7 @@ function sb_mod_ok(PDO $pdo, array $tree, string $modkey): bool
                 <!-- User Permission: শুধু Super Admin দেখবে/ব্যবহার করবে, 'Admin' টাইপ system_user না -->
                 <?php if ($um_is_super): ?>
                 <li><a href="index.php?page=user_permissions">User Permission</a></li>
+                <li><a href="index.php?page=user_permissions&mode=role">Role Permission</a></li>
                 <?php endif; ?>
             </ul>
         </li>

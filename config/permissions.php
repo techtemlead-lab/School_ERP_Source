@@ -56,6 +56,16 @@ function perm_ensure_tables(PDO $pdo): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     );
 
+    // Add/Edit/Delete লেভেল (View = page_key থাকা)। পুরনো রো-গুলো ডিফল্ট ১ — আগের মতোই সব কাজ করতে পারবে
+    foreach (['user_menu_permissions', 'role_menu_permissions'] as $pt) {
+        try {
+            $have = $pdo->query("SHOW COLUMNS FROM {$pt}")->fetchAll(PDO::FETCH_COLUMN);
+            foreach (['can_add', 'can_edit', 'can_delete'] as $ac) {
+                if (!in_array($ac, $have, true)) { $pdo->exec("ALTER TABLE {$pt} ADD COLUMN {$ac} TINYINT(1) NOT NULL DEFAULT 1"); }
+            }
+        } catch (Throwable $e) { /* পরের রিকোয়েস্টে আবার চেষ্টা */ }
+    }
+
     // system_users.permissions_restricted কলাম না থাকলে যোগ করা (পুরনো ডাটাবেজ)
     $chk = $pdo->prepare(
         "SELECT COLUMN_NAME FROM information_schema.COLUMNS
@@ -79,15 +89,25 @@ function perm_is_super_admin(): bool
 }
 
 // একটা Role (user_type) এর পারমিশন: restricted না হলে null (মানে Role-এ কোনো সীমা নেই), হলে allowed page_key-এর তালিকা
-function perm_role_allowed_keys(PDO $pdo, string $user_type): ?array
+function perm_role_allowed_rows(PDO $pdo, string $user_type): ?array
 {
     perm_ensure_tables($pdo);
     $st = $pdo->prepare("SELECT restricted FROM role_permission_settings WHERE user_type = ?");
     $st->execute([$user_type]);
     if (!(int) $st->fetchColumn()) { return null; }
-    $st2 = $pdo->prepare("SELECT page_key FROM role_menu_permissions WHERE user_type = ?");
+    $st2 = $pdo->prepare("SELECT page_key, can_add, can_edit, can_delete FROM role_menu_permissions WHERE user_type = ?");
     $st2->execute([$user_type]);
-    return $st2->fetchAll(PDO::FETCH_COLUMN);
+    $rows = [];
+    foreach ($st2->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $rows[$r['page_key']] = ['add' => (bool) $r['can_add'], 'edit' => (bool) $r['can_edit'], 'delete' => (bool) $r['can_delete']];
+    }
+    return $rows;
+}
+
+function perm_role_allowed_keys(PDO $pdo, string $user_type): ?array
+{
+    $rows = perm_role_allowed_rows($pdo, $user_type);
+    return $rows === null ? null : array_keys($rows);
 }
 
 // একজন নির্দিষ্ট system_user-এর জন্য restricted mode চালু আছে কিনা, আর থাকলে
@@ -105,18 +125,21 @@ function perm_load(PDO $pdo, int $system_user_id): array
     $restricted = !empty($urow['permissions_restricted']);
     $source = $restricted ? 'user' : 'none';
 
-    $allowed = [];
+    $allowed = []; $actions = [];
     if ($restricted) {
-        $stmt2 = $pdo->prepare("SELECT page_key FROM user_menu_permissions WHERE system_user_id = ?");
+        $stmt2 = $pdo->prepare("SELECT page_key, can_add, can_edit, can_delete FROM user_menu_permissions WHERE system_user_id = ?");
         $stmt2->execute([$system_user_id]);
-        $allowed = $stmt2->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($stmt2->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $allowed[] = $r['page_key'];
+            $actions[$r['page_key']] = ['add' => (bool) $r['can_add'], 'edit' => (bool) $r['can_edit'], 'delete' => (bool) $r['can_delete']];
+        }
     } elseif (!empty($urow['user_type'])) {
         // ইউজারের নিজস্ব Restrict নেই — তার Role-এর পারমিশন থাকলে সেটা প্রযোজ্য
-        $allowed = perm_role_allowed_keys($pdo, (string) $urow['user_type']);
-        if ($allowed !== null) { $restricted = true; $source = 'role'; } else { $allowed = []; }
+        $rows = perm_role_allowed_rows($pdo, (string) $urow['user_type']);
+        if ($rows !== null) { $allowed = array_keys($rows); $actions = $rows; $restricted = true; $source = 'role'; }
     }
 
-    return $cache[$system_user_id] = ['restricted' => $restricted, 'allowed' => $allowed, 'source' => $source];
+    return $cache[$system_user_id] = ['restricted' => $restricted, 'allowed' => $allowed, 'actions' => $actions, 'source' => $source];
 }
 
 // একটা নির্দিষ্ট পেজ (page_map এর key) এ বর্তমান লগইন করা ইউজারের এক্সেস আছে কিনা
@@ -165,6 +188,66 @@ function perm_flatten_module_keys(array $module): array
         }
     }
     return $keys;
+}
+
+// একটা পেজে একটা কাজ (add/edit/delete) করার অনুমতি। View না থাকলে কোনো কাজই না।
+function perm_action_allowed(PDO $pdo, string $page_key, string $action): bool
+{
+    if (perm_is_super_admin()) return true;
+    $uid = perm_current_system_user_id();
+    if (!$uid) return true;
+    $p = perm_load($pdo, $uid);
+    if (!$p['restricted']) return true;
+    if (!in_array($page_key, $p['allowed'], true)) return false;
+    $a = $p['actions'][$page_key] ?? ['add' => true, 'edit' => true, 'delete' => true];
+    return !empty($a[$action]);
+}
+
+// বর্তমান রিকোয়েস্ট কোন ধরনের কাজ: 'delete' | 'edit' | 'add' | null (দেখা/সার্চ/রিপোর্ট ইত্যাদি — আটকানো হয় না)।
+// পেজগুলোর ফর্মের নামের সাধারণ রীতি (delete_x, update_x, save_x + id>0 ইত্যাদি) দেখে আন্দাজ করা হয়।
+function perm_classify_request(): ?string
+{
+    $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+    $names = array_map('strtolower', array_keys($method === 'POST' ? $_POST : []));
+    $vals  = [];
+    foreach (['action', 'do', 'op', 'mode', 'type'] as $k) {
+        if ($method === 'POST' && isset($_POST[$k]) && is_scalar($_POST[$k])) { $vals[] = strtolower((string) $_POST[$k]); }
+    }
+    $has = function (array $list, string $re) { foreach ($list as $n) { if (preg_match($re, $n)) return true; } return false; };
+
+    $del_re  = '/(^|_)(delete|del|remove|destroy|trash)(_|$)/';
+    $edit_re = '/(^|_)(update|edit|modify|toggle|change|approve|reject|activate|deactivate)(_|$)/';
+    $add_re  = '/(^|_)(save|add|create|insert|store|new|submit|publish)(_|$)/';
+    $skip_re = '/(^|_)(search|filter|show|view|load|export|print|download|report|login|logout|csrf|token)(_|$)/';
+
+    // GET-এ ডিলিট লিংক (?delete=ID / ?action=delete)
+    if ($method !== 'POST') {
+        foreach (array_keys($_GET) as $g) { if (preg_match($del_re, strtolower($g)) && $g !== 'page') return 'delete'; }
+        if (isset($_GET['action']) && is_scalar($_GET['action']) && preg_match($del_re, strtolower((string) $_GET['action']))) return 'delete';
+        return null;
+    }
+    if (isset($_POST['change_password'])) return null; // নিজের পাসওয়ার্ড বদল সব পেজেই (মডালে) থাকে — আটকানো হয় না
+    if ($has($names, $del_re) || $has($vals, $del_re)) return 'delete';
+    $id_posted = false;
+    foreach (['id', 'edit_id', 'update_id', 'record_id'] as $k) { if (!empty($_POST[$k]) && (int) $_POST[$k] > 0) { $id_posted = true; } }
+    $explicit_add = $has($names, $add_re) || $has($vals, $add_re);
+    if ($has($names, $edit_re) || $has($vals, $edit_re)) return 'edit';
+    if ($explicit_add) return $id_posted ? 'edit' : 'add';
+    if ($id_posted && !$has($names, $skip_re)) return 'edit';
+    return null;
+}
+
+// বর্তমান রিকোয়েস্টের জন্য এই পেজে কাজটা করার অনুমতি আছে কিনা (পেজ রাউটার ও AJAX গার্ড দুটোই এটা ব্যবহার করে)
+function perm_can_write(PDO $pdo, string $page_key): bool
+{
+    $kind = perm_classify_request();
+    if ($kind === null) return true;
+    return perm_action_allowed($pdo, $page_key, $kind);
+}
+
+function perm_action_label(string $kind): string
+{
+    return ['add' => 'নতুন যোগ (Add)', 'edit' => 'এডিট (Edit)', 'delete' => 'ডিলিট (Delete)'][$kind] ?? $kind;
 }
 
 /**

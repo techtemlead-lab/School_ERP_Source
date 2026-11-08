@@ -62,14 +62,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_permissions'])) 
         }
     }
     $keys = array_values(array_intersect($keys, array_keys($valid_keys)));
+    $p_add  = array_map('strval', (array) ($_POST['perm_add'] ?? []));
+    $p_edit = array_map('strval', (array) ($_POST['perm_edit'] ?? []));
+    $p_del  = array_map('strval', (array) ($_POST['perm_del'] ?? []));
 
     $pdo->beginTransaction();
     $pdo->prepare("UPDATE system_users SET permissions_restricted = ? WHERE id = ?")->execute([$restricted, $uid]);
     $pdo->prepare("DELETE FROM user_menu_permissions WHERE system_user_id = ?")->execute([$uid]);
     if ($restricted && $keys) {
-        $ins = $pdo->prepare("INSERT INTO user_menu_permissions (system_user_id, page_key) VALUES (?, ?)");
+        $ins = $pdo->prepare("INSERT INTO user_menu_permissions (system_user_id, page_key, can_add, can_edit, can_delete) VALUES (?, ?, ?, ?, ?)");
         foreach ($keys as $k) {
-            $ins->execute([$uid, $k]);
+            $ins->execute([$uid, $k, in_array($k, $p_add, true) ? 1 : 0, in_array($k, $p_edit, true) ? 1 : 0, in_array($k, $p_del, true) ? 1 : 0]);
         }
     }
     $pdo->commit();
@@ -106,13 +109,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_role_permissions
         }
     }
     $keys = array_values(array_intersect($keys, array_keys($valid_keys)));
+    $p_add  = array_map('strval', (array) ($_POST['perm_add'] ?? []));
+    $p_edit = array_map('strval', (array) ($_POST['perm_edit'] ?? []));
+    $p_del  = array_map('strval', (array) ($_POST['perm_del'] ?? []));
 
     $pdo->beginTransaction();
     $pdo->prepare("INSERT INTO role_permission_settings (user_type, restricted) VALUES (?, ?) ON DUPLICATE KEY UPDATE restricted = VALUES(restricted)")->execute([$role, $restricted]);
     $pdo->prepare("DELETE FROM role_menu_permissions WHERE user_type = ?")->execute([$role]);
     if ($restricted && $keys) {
-        $ins = $pdo->prepare("INSERT INTO role_menu_permissions (user_type, page_key) VALUES (?, ?)");
-        foreach ($keys as $k) { $ins->execute([$role, $k]); }
+        $ins = $pdo->prepare("INSERT INTO role_menu_permissions (user_type, page_key, can_add, can_edit, can_delete) VALUES (?, ?, ?, ?, ?)");
+        foreach ($keys as $k) { $ins->execute([$role, $k, in_array($k, $p_add, true) ? 1 : 0, in_array($k, $p_edit, true) ? 1 : 0, in_array($k, $p_del, true) ? 1 : 0]); }
     }
     $pdo->commit();
     if (function_exists('sec_log_activity')) { sec_log_activity($pdo, 'User Management', 'Update', "Role পারমিশন আপডেট: {$role}"); }
@@ -159,9 +165,17 @@ if ($mode === 'role' && $selected_role !== '') {
     $is_restricted = $role_keys_now !== null;
     $allowed_keys = $role_keys_now ?? [];
 } elseif ($mode === 'user' && $selected_user) {
-    $user_role_default = perm_role_allowed_keys($pdo, (string) $selected_user['user_type']);
+    $user_role_default = perm_role_allowed_rows($pdo, (string) $selected_user['user_type']);
 }
 $allowed_lookup = array_flip($allowed_keys);
+$action_lookup = [];
+if ($mode === 'role' && $selected_role !== '') {
+    $action_lookup = perm_role_allowed_rows($pdo, $selected_role) ?? [];
+} elseif ($mode === 'user' && $selected_user) {
+    $al = $pdo->prepare("SELECT page_key, can_add, can_edit, can_delete FROM user_menu_permissions WHERE system_user_id = ?");
+    $al->execute([$selected_uid]);
+    foreach ($al->fetchAll() as $r) { $action_lookup[$r['page_key']] = ['add' => (bool) $r['can_add'], 'edit' => (bool) $r['can_edit'], 'delete' => (bool) $r['can_delete']]; }
+}
 $show_form = ($mode === 'role') ? ($selected_role !== '') : (bool) $selected_user;
 ?>
 <div class="card-custom">
@@ -228,9 +242,11 @@ $show_form = ($mode === 'role') ? ($selected_role !== '') : (bool) $selected_use
                         এই ইউজারের Role (<b><?php echo upv($selected_user['user_type']); ?></b>)-এ পারমিশন সেট করা আছে — নিচের Restrict <b>অফ</b> থাকলে সেই Role-এর পারমিশনই প্রযোজ্য। শুধু এই ইউজারের জন্য আলাদা করতে Restrict অন করুন।
                         <button type="button" class="btn btn-sm btn-outline-primary ms-2" onclick="upCopyRole()">Role-এর পারমিশন এখানে কপি করুন</button>
                     </div>
-                    <script>var UP_ROLE_KEYS = <?php echo json_encode(array_values($user_role_default)); ?>;
+                    <script>var UP_ROLE_ROWS = <?php echo json_encode($user_role_default ? $user_role_default : new stdClass(), JSON_HEX_TAG | JSON_HEX_AMP); ?>;
                     function upCopyRole(){ document.getElementById('upRestrictedToggle').checked = true; document.getElementById('upTreeWrap').classList.remove('opacity-50');
-                        document.querySelectorAll('.up-leaf').forEach(function(cb){ cb.checked = UP_ROLE_KEYS.indexOf(cb.value) !== -1; }); upUpdateCounts(); }</script>
+                        document.querySelectorAll('.up-leaf').forEach(function(cb){ var r = UP_ROLE_ROWS[cb.value]; cb.checked = !!r;
+                            document.querySelectorAll('input.up-act[value="' + cb.value + '"]').forEach(function(a){ var n = a.name; a.checked = r ? (n === 'perm_add[]' ? r.add : n === 'perm_edit[]' ? r.edit : r['delete']) : true; }); });
+                        upUpdateCounts(); }</script>
                 <?php endif; ?>
             <?php endif; ?>
 
@@ -246,12 +262,23 @@ $show_form = ($mode === 'role') ? ($selected_role !== '') : (bool) $selected_use
                 <div class="mb-2">
                     <button type="button" class="btn btn-sm btn-outline-secondary" onclick="upToggleAll(true)">সব সিলেক্ট</button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" onclick="upToggleAll(false)">সব আনসিলেক্ট</button>
+                    <span class="ms-3 small text-muted">বাঁদিকের টিক = পেজ দেখা (View)। পাশের <b>A</b> = নতুন যোগ (Add), <b>E</b> = এডিট (Edit), <b>D</b> = ডিলিট (Delete)।</span>
                 </div>
 
                 <?php
                     // মডিউল রেন্ডার করার ফাংশন — এখন প্রতিটা কলাম আলাদা ভাবে রেন্ডার হবে,
                     // যাতে একটার height অন্যটাকে প্রভাবিত না করে (আগের row/col-md-6 পদ্ধতিতে
                     // দুইটা বক্স একই flex-line-এ থাকায় লম্বাটার সাথে সাথে ছোটটার পাশেও ফাঁকা জায়গা তৈরি হতো)
+                    // প্রতিটি পেজের পাশে Add/Edit/Delete টিকবক্স (View = বাঁদিকের মূল টিক)
+                    function up_act_boxes($key) {
+                        global $action_lookup;
+                        $act = $action_lookup[$key] ?? ['add' => true, 'edit' => true, 'delete' => true];
+                        $out = '<span class="up-acts ms-2 small" data-key="' . upv($key) . '">';
+                        foreach (['add' => ['perm_add[]', 'A', 'Add'], 'edit' => ['perm_edit[]', 'E', 'Edit'], 'delete' => ['perm_del[]', 'D', 'Delete']] as $k => $d) {
+                            $out .= '<label class="me-1 text-nowrap" title="' . $d[2] . '"><input type="checkbox" class="up-act" name="' . $d[0] . '" value="' . upv($key) . '"' . (!empty($act[$k]) ? ' checked' : '') . '> ' . $d[1] . '</label>';
+                        }
+                        return $out . '</span>';
+                    }
                     function up_render_module($mi, $module) {
                         ?>
                         <div class="accordion-item mb-2">
@@ -273,7 +300,7 @@ $show_form = ($mode === 'role') ? ($selected_role !== '') : (bool) $selected_use
                                                 <div class="col-6 mb-1">
                                                     <div class="form-check">
                                                         <input class="form-check-input up-leaf up-mod-<?php echo $mi; ?>" type="checkbox" name="perm_keys[]" value="<?php echo upv($child['key']); ?>" id="upk_<?php echo upv($child['key']); ?>" <?php echo isset($allowed_lookup[$child['key']]) ? 'checked' : ''; ?>>
-                                                        <label class="form-check-label" for="upk_<?php echo upv($child['key']); ?>"><?php echo upv($child['label']); ?></label>
+                                                        <label class="form-check-label" for="upk_<?php echo upv($child['key']); ?>"><?php echo upv($child['label']); ?></label><?php echo up_act_boxes($child['key']); ?>
                                                     </div>
                                                 </div>
                                             <?php else: ?>
@@ -284,7 +311,7 @@ $show_form = ($mode === 'role') ? ($selected_role !== '') : (bool) $selected_use
                                                     <div class="col-6 mb-1">
                                                         <div class="form-check">
                                                             <input class="form-check-input up-leaf up-mod-<?php echo $mi; ?>" type="checkbox" name="perm_keys[]" value="<?php echo upv($leaf['key']); ?>" id="upk_<?php echo upv($leaf['key']); ?>" <?php echo isset($allowed_lookup[$leaf['key']]) ? 'checked' : ''; ?>>
-                                                            <label class="form-check-label" for="upk_<?php echo upv($leaf['key']); ?>"><?php echo upv($leaf['label']); ?></label>
+                                                            <label class="form-check-label" for="upk_<?php echo upv($leaf['key']); ?>"><?php echo upv($leaf['label']); ?></label><?php echo up_act_boxes($leaf['key']); ?>
                                                         </div>
                                                     </div>
                                                 <?php endforeach; ?>
@@ -338,8 +365,14 @@ $show_form = ($mode === 'role') ? ($selected_role !== '') : (bool) $selected_use
                     if (allToggle) allToggle.checked = (checked === boxes.length && boxes.length > 0);
                 });
             }
-            document.querySelectorAll('.up-leaf').forEach(cb => cb.addEventListener('change', upUpdateCounts));
-            upUpdateCounts();
+            function upSyncActs() {
+                document.querySelectorAll('.up-leaf').forEach(function (cb) {
+                    document.querySelectorAll('input.up-act[value="' + cb.value + '"]').forEach(function (a) { a.disabled = !cb.checked; a.parentElement.style.opacity = cb.checked ? '1' : '.35'; });
+                });
+            }
+            document.querySelectorAll('.up-leaf').forEach(cb => cb.addEventListener('change', function () { upUpdateCounts(); upSyncActs(); }));
+            document.querySelectorAll('.up-mod-toggle, .btn-outline-secondary').forEach(el => el.addEventListener('click', function () { setTimeout(upSyncActs, 0); }));
+            upUpdateCounts(); upSyncActs();
         </script>
     <?php elseif ($mode === 'role'): ?>
         <div class="text-muted">উপরে থেকে একটা Role সিলেক্ট করুন।</div>
