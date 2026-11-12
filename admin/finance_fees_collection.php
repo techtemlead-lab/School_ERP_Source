@@ -389,7 +389,10 @@ if ($student && $periods) {
                     <div class="row mb-3 align-items-center">
                         <label class="col-sm-4 col-form-label fw-bold text-end">Folio No</label>
                         <div class="col-sm-7">
-                            <input type="text" name="folio_no" class="form-control" placeholder="You can left this blank for auto generation" value="<?php echo sfcv($folio_no_v); ?>">
+                            <div class="input-group">
+                                <input type="text" name="folio_no" class="form-control" placeholder="You can left this blank for auto generation" value="<?php echo sfcv($folio_no_v); ?>">
+                                <button type="button" class="btn btn-danger fw-bold" id="sfcDueBtn" onclick="sfcOpenDue()" title="সিলেক্ট করা মাস সহ পূর্ববর্তী সব মাসের মোট ডিউ দেখুন ও প্রিন্ট করুন"><i class="fa-solid fa-file-invoice-dollar me-1"></i> Due</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -615,6 +618,28 @@ if ($student && $periods) {
     <div class="alert alert-info">Student এবং Admission/Monthly Period সিলেক্ট করে আবার Search করুন।</div>
 <?php endif; ?>
 
+<?php
+$sfc_inst_name = '';
+try { $sfc_inst_name = (string) ($pdo->query("SELECT institute_name FROM institute_settings WHERE id = 1")->fetchColumn() ?: ''); } catch (Throwable $e) { $sfc_inst_name = ''; }
+?>
+<!-- Due Statement — সিলেক্ট করা মাস সহ পূর্ববর্তী সব মাসের মোট ডিউ (Summary / Details) + প্রিন্ট -->
+<div class="modal fade" id="sfcDueModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white py-2">
+                <h6 class="modal-title"><i class="fa-solid fa-file-invoice-dollar me-2"></i> Due Statement</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="sfcDueBody"></div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-outline-primary btn-sm" id="sfcDueToggle" onclick="sfcDueToggleView()">Details</button>
+                <button type="button" class="btn btn-success btn-sm" id="sfcDuePrint" onclick="sfcDuePrint()"><i class="fa-solid fa-print me-1"></i> Print</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
     // ---- Multi-select Period toggle (2-column Yes/No বাটন) — ক্লিক করলে শুধু টগল হবে,
     // সাথে সাথে ফর্ম সাবমিট হবে না; সব সিলেক্ট শেষে ইউজার "Search" চাপবে ----
@@ -692,6 +717,89 @@ if ($student && $periods) {
             totals: { dues: sfcFmt(t.dues), waived: sfcFmt(t.waived), paid: sfcFmt(t.paid), payable: sfcFmt(t.payable) },
             student: data.student
         };
+    }
+
+    // ---- Due Statement: সিলেক্ট করা মাস সহ পূর্ববর্তী সব Period (Admission সহ) এর মোট বকেয়া ----
+    var SFC_INST_NAME = <?php echo json_encode($sfc_inst_name, JSON_UNESCAPED_UNICODE); ?>;
+    var sfcDueState = { view: 'summary', summaryHtml: '', detailsHtml: '', ok: false };
+
+    function sfcSelText(sel) { var el = document.querySelector(sel); return el && el.selectedIndex >= 0 ? el.options[el.selectedIndex].text : ''; }
+
+    function sfcBuildDue(data) {
+        var nums = window.sfcSelectedPeriods.map(Number);
+        var maxP = Math.max.apply(null, nums);
+        var perRows = [], detRows = [], total = 0;
+        for (var p = 0; p <= maxP; p++) {
+            var sum = 0;
+            (data.by_period[p] || []).forEach(function (r) {
+                var due = Number(r.payable) || 0;
+                if (due > 0.0001) { sum += due; detRows.push({ period: SFC_PERIOD_NAMES[p], name: r.name, due: due }); }
+            });
+            if (sum > 0.0001) { perRows.push({ period: SFC_PERIOD_NAMES[p], due: sum }); total += sum; }
+        }
+        var sh = '<table class="table table-bordered table-sm align-middle"><thead class="table-light"><tr><th style="width:50px">#</th><th>Period</th><th class="text-end">Due Amount</th></tr></thead><tbody>';
+        perRows.forEach(function (r, i) { sh += '<tr><td>' + (i + 1) + '</td><td>' + sfcEsc(r.period) + '</td><td class="text-end">' + sfcFmt(r.due) + '</td></tr>'; });
+        if (!perRows.length) { sh += '<tr><td colspan="3" class="text-center text-success fw-bold">কোনো বকেয়া নেই</td></tr>'; }
+        sh += '</tbody><tfoot><tr class="fw-bold"><td colspan="2" class="text-end">Total Due :</td><td class="text-end text-danger">' + sfcFmt(total) + '</td></tr></tfoot></table>';
+        var dh = '<table class="table table-bordered table-sm align-middle"><thead class="table-light"><tr><th style="width:50px">#</th><th>Period</th><th>Fees Type</th><th class="text-end">Due Amount</th></tr></thead><tbody>';
+        detRows.forEach(function (r, i) { dh += '<tr><td>' + (i + 1) + '</td><td>' + sfcEsc(r.period) + '</td><td>' + sfcEsc(r.name) + '</td><td class="text-end">' + sfcFmt(r.due) + '</td></tr>'; });
+        if (!detRows.length) { dh += '<tr><td colspan="4" class="text-center text-success fw-bold">কোনো বকেয়া নেই</td></tr>'; }
+        dh += '</tbody><tfoot><tr class="fw-bold"><td colspan="3" class="text-end">Total Due :</td><td class="text-end text-danger">' + sfcFmt(total) + '</td></tr></tfoot></table>';
+        return { summary: sh, details: dh, uptoName: SFC_PERIOD_NAMES[maxP], total: total };
+    }
+
+    function sfcDueHeaderHtml(uptoName) {
+        var ids = sfcCurrentIds();
+        var stu = (document.getElementById('sfcStudentSearch') || {}).value || '';
+        var h = '<div class="text-center mb-2"><div class="fw-bold fs-5">' + sfcEsc(SFC_INST_NAME) + '</div><div class="fw-bold text-danger">Due Statement</div></div>';
+        h += '<table class="table table-borderless table-sm mb-2" style="font-size:13px"><tbody>'
+           + '<tr><td style="width:15%" class="fw-bold">Student</td><td>' + sfcEsc(stu) + '</td><td style="width:12%" class="fw-bold">Session</td><td>' + sfcEsc(sfcSelText('#sfcFilterForm select[name="session_id"]')) + '</td></tr>'
+           + '<tr><td class="fw-bold">Class</td><td>' + sfcEsc(sfcSelText('#sfcFilterForm select[name="class_id"]')) + '</td><td class="fw-bold">Up to</td><td>' + sfcEsc(uptoName) + ' (পূর্ববর্তী সব সহ)</td></tr>'
+           + '<tr><td class="fw-bold">Date</td><td colspan="3">' + new Date().toLocaleDateString('en-GB') + '</td></tr></tbody></table>';
+        return h;
+    }
+
+    function sfcDueRender() {
+        var body = document.getElementById('sfcDueBody');
+        var btn = document.getElementById('sfcDueToggle');
+        if (!sfcDueState.ok) { return; }
+        body.innerHTML = sfcDueState.header + (sfcDueState.view === 'details' ? sfcDueState.detailsHtml : sfcDueState.summaryHtml);
+        btn.textContent = sfcDueState.view === 'details' ? 'Summary' : 'Details';
+    }
+    function sfcDueToggleView() { sfcDueState.view = sfcDueState.view === 'details' ? 'summary' : 'details'; sfcDueRender(); }
+
+    function sfcOpenDue() {
+        var body = document.getElementById('sfcDueBody');
+        var modalEl = document.getElementById('sfcDueModal');
+        var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        var ids = sfcCurrentIds();
+        sfcDueState.ok = false; sfcDueState.view = 'summary';
+        document.getElementById('sfcDueToggle').style.display = 'none';
+        document.getElementById('sfcDuePrint').style.display = 'none';
+        if (!ids.studentId) { body.innerHTML = '<div class="alert alert-info mb-0">আগে একটা Student সিলেক্ট করুন।</div>'; modal.show(); return; }
+        if (!window.sfcSelectedPeriods.length) { body.innerHTML = '<div class="alert alert-info mb-0">উপরে থেকে একটা বা একাধিক Admission/Month সিলেক্ট করুন — সেই মাস সহ পূর্ববর্তী সব মাসের ডিউ দেখানো হবে।</div>'; modal.show(); return; }
+        body.innerHTML = '<div class="text-muted small py-2"><i class="fa-solid fa-spinner fa-spin me-1"></i> Due হিসাব হচ্ছে...</div>';
+        modal.show();
+        sfcFetchAll(ids.studentId, ids.sessionId).then(function (data) {
+            var r = sfcBuildDue(data);
+            sfcDueState.summaryHtml = r.summary; sfcDueState.detailsHtml = r.details; sfcDueState.header = sfcDueHeaderHtml(r.uptoName); sfcDueState.ok = true;
+            document.getElementById('sfcDueToggle').style.display = '';
+            document.getElementById('sfcDuePrint').style.display = '';
+            sfcDueRender();
+        }).catch(function (err) { body.innerHTML = '<div class="alert alert-warning mb-0">' + sfcEsc(err.message || 'Due আনা যায়নি — আবার চেষ্টা করুন।') + '</div>'; });
+    }
+
+    // বর্তমান ভিউ (Summary বা Details) প্রিন্ট
+    function sfcDuePrint() {
+        if (!sfcDueState.ok) { return; }
+        var w = window.open('', '_blank', 'width=800,height=900');
+        if (!w) { alert('পপআপ ব্লক করা আছে — অনুমতি দিন।'); return; }
+        var css = 'body{font-family:Arial,Helvetica,sans-serif;font-size:13px;margin:24px;color:#000}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:5px 8px}table.table-borderless td,table.table-borderless th{border:0;padding:2px 6px}th{background:#f0f0f0}.text-end{text-align:right}.text-center{text-align:center}.fw-bold{font-weight:bold}.text-danger{color:#c00}.text-success{color:#070}.fs-5{font-size:18px}.sig{margin-top:50px;display:flex;justify-content:space-between}.sig div{border-top:1px solid #000;padding-top:4px;width:30%;text-align:center}';
+        w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Due Statement</title><style>' + css + '</style></head><body>'
+            + sfcDueState.header + (sfcDueState.view === 'details' ? sfcDueState.detailsHtml : sfcDueState.summaryHtml)
+            + '<div class="sig"><div>Guardian</div><div>Accounts</div><div>Principal</div></div></body></html>');
+        w.document.close(); w.focus();
+        setTimeout(function () { w.print(); }, 300);
     }
 
     function sfcRenderPreview(d) {
