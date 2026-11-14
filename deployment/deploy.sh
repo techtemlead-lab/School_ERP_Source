@@ -49,7 +49,7 @@ healthy=0
 for attempt in $(seq 1 45); do
   if curl -fsS --max-time 5 -H 'Host: www.schoolmng.com' http://127.0.0.1:18083/health.php >/dev/null &&
      curl -fsS --max-time 5 -H 'Host: demo.schoolmng.techteamlead.com' http://127.0.0.1:18083/health.php >/dev/null &&
-     curl -fsS --max-time 5 -H 'Host: tawhaa.schoolmng.com' http://127.0.0.1:18083/ >/dev/null; then healthy=1; break; fi
+     curl -fsS --max-time 5 -H 'Host: tawhaaschool.com' http://127.0.0.1:18083/ >/dev/null; then healthy=1; break; fi
   sleep 2
 done
 [[ "$healthy" == 1 ]] || { echo 'Candidate health failed' >&2; exit 6; }
