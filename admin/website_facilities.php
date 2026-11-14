@@ -14,34 +14,7 @@ $view = $_GET['view'] ?? 'list';
 
 function wfa_handle_upload(string $field): array
 {
-    if (!isset($_FILES[$field]) || $_FILES[$field]['error'] === UPLOAD_ERR_NO_FILE) {
-        return ['ok' => true, 'path' => null, 'error' => null];
-    }
-    $file = $_FILES[$field];
-    if ($file['error'] !== UPLOAD_ERR_OK) {
-        return ['ok' => false, 'path' => null, 'error' => 'ছবি আপলোডে সমস্যা হয়েছে।'];
-    }
-    if ($file['size'] > 3 * 1024 * 1024) {
-        return ['ok' => false, 'path' => null, 'error' => 'ছবির সাইজ 3MB এর বেশি হওয়া যাবে না।'];
-    }
-    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-    $allowed_mimes = ['jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'webp' => 'image/webp'];
-    if (!isset($allowed_mimes[$ext])) {
-        return ['ok' => false, 'path' => null, 'error' => 'শুধু jpg/png/webp ছবি আপলোড করা যাবে।'];
-    }
-    $finfo = finfo_open(FILEINFO_MIME_TYPE);
-    $mime = finfo_file($finfo, $file['tmp_name']);
-    finfo_close($finfo);
-    if ($mime !== $allowed_mimes[$ext]) {
-        return ['ok' => false, 'path' => null, 'error' => 'ফাইলের প্রকৃত কনটেন্ট এক্সটেনশনের সাথে মিলছে না।'];
-    }
-    $upload_dir = tenant_upload_abs(__DIR__ . '/..', 'website');
-    if (!is_dir($upload_dir)) { mkdir($upload_dir, 0755, true); }
-    $random_name = bin2hex(random_bytes(16)) . '.' . $ext;
-    if (!move_uploaded_file($file['tmp_name'], $upload_dir . $random_name)) {
-        return ['ok' => false, 'path' => null, 'error' => 'ছবি সেভ করা যায়নি।'];
-    }
-    return ['ok' => true, 'path' => tenant_upload_rel('website') . '/' . $random_name, 'error' => null];
+    return erp_image_upload($field, false, 'website');
 }
 
 // শুধু নিজেদের আপলোড করা লোকাল ফাইল মুছবে (ডিফল্ট ছবির http লিংক নয়)
