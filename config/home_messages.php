@@ -154,7 +154,7 @@ function hm_ensure_schema(PDO $pdo): void
     try {
         if (hm_table_exists($pdo, 'sms_settings')) {
             $cols = $pdo->query("SHOW COLUMNS FROM sms_settings")->fetchAll(PDO::FETCH_COLUMN, 0);
-            foreach (['show_notices_home', 'show_events_home'] as $c) {
+            foreach (['show_notices_home', 'show_events_home', 'show_edu_links_home'] as $c) {
                 if (!in_array($c, $cols, true)) {
                     $pdo->exec("ALTER TABLE sms_settings ADD COLUMN $c TINYINT(1) NOT NULL DEFAULT 1");
                 }

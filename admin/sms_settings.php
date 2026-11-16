@@ -21,7 +21,7 @@ if (!in_array($active_tab, $allowed_tabs, true)) {
 // ফিল্ড গ্রুপ — প্রতিটা সেকশন আলাদা ফর্ম, আলাদা Update বাটন,
 // শুধু নিজের কলামগুলোই আপডেট করে — বাকি ডেটা টাচ হয় না
 // -----------------------------------------------------------
-$home_toggle_fields = ['show_teachers_home', 'show_teachers_mobile', 'show_teachers_address', 'show_teachers_email', 'show_count_home', 'show_video_home', 'show_gallery_home', 'show_notices_home', 'show_events_home', 'show_section_filter'];
+$home_toggle_fields = ['show_teachers_home', 'show_teachers_mobile', 'show_teachers_address', 'show_teachers_email', 'show_count_home', 'show_video_home', 'show_gallery_home', 'show_notices_home', 'show_events_home', 'show_edu_links_home', 'show_section_filter'];
 $sms_toggle_fields  = ['sms_admission', 'sms_congratulation', 'sms_punch_in', 'sms_punch_out', 'sms_add_employee', 'sms_absent', 'sms_due', 'sms_fee_collection'];
 $content_fields     = ['content_admission', 'content_congratulation', 'content_teacher_add', 'content_punch_in', 'content_punch_out', 'content_absent', 'content_due', 'content_fee_collection'];
 $api_fields         = ['api_provider', 'api_method', 'api_url', 'api_token', 'api_user', 'api_sender_id', 'balance_api_url', 'sms_buy'];
@@ -240,6 +240,7 @@ function render_toggle(string $name, string $label, $checked): void
                 render_toggle('show_teachers_email', 'Show Teachers Email', $settings['show_teachers_email']);
                 render_toggle('show_gallery_home', 'Show Photo Gallery On Home Page', $settings['show_gallery_home'] ?? 1);
                 render_toggle('show_events_home', 'Show Event On Home Page', $settings['show_events_home'] ?? 1);
+                render_toggle('show_edu_links_home', 'Show Education Support Links On Home Page', $settings['show_edu_links_home'] ?? 1);
                 ?>
             </div>
         </div>

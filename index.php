@@ -126,9 +126,9 @@ if (!$inst) {
 }
 
 // SMS Settings (On/Off) — "Show Teachers On Home Page" ইত্যাদি টগলগুলো এখান থেকে রিড হয়
-$sms_settings = $pdo->query("SELECT show_teachers_home, show_section_filter, show_teachers_mobile, show_teachers_address, show_teachers_email, show_count_home, show_video_home, show_gallery_home, show_notices_home, show_events_home FROM sms_settings WHERE id = 1")->fetch();
+$sms_settings = $pdo->query("SELECT show_teachers_home, show_section_filter, show_teachers_mobile, show_teachers_address, show_teachers_email, show_count_home, show_video_home, show_gallery_home, show_notices_home, show_events_home, show_edu_links_home FROM sms_settings WHERE id = 1")->fetch();
 if (!$sms_settings) {
-    $sms_settings = ['show_teachers_home' => 1, 'show_section_filter' => 0, 'show_teachers_mobile' => 1, 'show_teachers_address' => 1, 'show_teachers_email' => 1, 'show_count_home' => 1, 'show_video_home' => 1, 'show_gallery_home' => 1, 'show_notices_home' => 1, 'show_events_home' => 1];
+    $sms_settings = ['show_teachers_home' => 1, 'show_section_filter' => 0, 'show_teachers_mobile' => 1, 'show_teachers_address' => 1, 'show_teachers_email' => 1, 'show_count_home' => 1, 'show_video_home' => 1, 'show_gallery_home' => 1, 'show_notices_home' => 1, 'show_events_home' => 1, 'show_edu_links_home' => 1];
 }
 $show_teachers_home    = (bool) $sms_settings['show_teachers_home'];
 $show_section_filter   = (bool) ($sms_settings['show_section_filter'] ?? 0);
@@ -140,6 +140,7 @@ $show_video_home        = (bool) $sms_settings['show_video_home'];
 $show_gallery_home      = (bool) $sms_settings['show_gallery_home'];
 $show_notices_home      = (bool) $sms_settings['show_notices_home'];
 $show_events_home       = (bool) $sms_settings['show_events_home'];
+$show_edu_links_home    = (bool) ($sms_settings['show_edu_links_home'] ?? 1);
 
 // Teachers & Staffs — "Show Teachers On Home Page" চালু থাকলেই শুধু ডাটাবেজ থেকে রিয়েল Employee লিস্ট আনা হয়
 // নোট: employees/designations টেবিল admin > HR মডিউল প্রথমবার ভিজিট করলে তৈরি হয় (lazy migration)।
@@ -1494,6 +1495,7 @@ function site_bn_day_month(string $ymd): array
     <?php endif; ?>
 
     <!-- EDUCATION SUPPORT LINKS SECTION -->
+    <?php if ($show_edu_links_home): ?>
     <section class="education-support-section">
         <div class="support-container">
             <div class="support-text">
@@ -1529,6 +1531,7 @@ function site_bn_day_month(string $ymd): array
             </div>
         </div>
     </section>
+    <?php endif; ?>
 
     <!-- STATS COUNTER SECTION -->
     <?php if ($show_count_home): ?>
