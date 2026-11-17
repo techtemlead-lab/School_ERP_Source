@@ -36,6 +36,7 @@ $searched   = true;
 $date_from  = trim($_GET['date_from'] ?? date('Y-m-d'));
 $date_to    = trim($_GET['date_to'] ?? date('Y-m-d'));
 $f_received = trim($_GET['received_by'] ?? '');
+$f_head     = (int) ($_GET['ac_head'] ?? 0);
 
 // From > To হলে অদল-বদল করে নেওয়া
 if ($date_from !== '' && $date_to !== '' && strtotime($date_from) > strtotime($date_to)) {
@@ -46,12 +47,23 @@ $received_by_options = $pdo->query(
     "SELECT DISTINCT collected_by FROM finance_fee_collections WHERE collected_by IS NOT NULL AND collected_by <> '' ORDER BY collected_by ASC"
 )->fetchAll(PDO::FETCH_COLUMN);
 
+// Account Head ড্রপডাউন — finance_account_heads টেবিল (না থাকলে খালি তালিকা)
+$head_options = [];
+try {
+    $head_options = $pdo->query(
+        "SELECT id, ac_code, ac_head FROM finance_account_heads WHERE status = 'Active' AND ac_category = 'Receipts' ORDER BY ac_code ASC, ac_head ASC"
+    )->fetchAll();
+} catch (Throwable $e) { $head_options = []; }
+$head_name_sel = '';
+foreach ($head_options as $ho) { if ((int) $ho['id'] === $f_head) { $head_name_sel = $ho['ac_head']; break; } }
+
 $rows = [];
 $grand_total = 0.0;
 
 if ($searched && $date_from !== '' && $date_to !== '') {
     $where = ["fc.folio_no IS NOT NULL", "fc.folio_no <> ''", "DATE(fc.collected_at) BETWEEN ? AND ?"];
     $params = [$date_from, $date_to];
+    if ($f_head > 0) { $where[] = 'fc.ac_head_id = ?'; $params[] = $f_head; }
     if ($f_received !== '') { $where[] = 'fc.collected_by = ?'; $params[] = $f_received; }
     branch_apply_filter($where, $params, 's.branch_id');
     $where_sql = implode(' AND ', $where);
@@ -142,6 +154,15 @@ if ($fr_bid2 !== null) {
                 <input type="date" name="date_to" class="form-control" required value="<?php echo dcv($date_to); ?>">
             </div>
             <div class="col-sm-3">
+                <label class="form-label fw-bold">Account Head</label>
+                <select name="ac_head" class="form-select">
+                    <option value="0">All Account Heads</option>
+                    <?php foreach ($head_options as $ho): ?>
+                        <option value="<?php echo (int) $ho['id']; ?>" <?php echo $f_head === (int) $ho['id'] ? 'selected' : ''; ?>><?php echo dcv($ho['ac_code'] . ' - ' . $ho['ac_head']); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-sm-3">
                 <label class="form-label fw-bold">Received By</label>
                 <select name="received_by" class="form-select">
                     <option value="">Select Received By</option>
@@ -176,6 +197,7 @@ if ($fr_bid2 !== null) {
             <div class="fw-bold small">
                 Transaction Date :
                 <?php echo $date_from === $date_to ? dcv(date('d M Y', strtotime($date_from))) : dcv(date('d M Y', strtotime($date_from)) . ' to ' . date('d M Y', strtotime($date_to))); ?>
+                <?php if ($head_name_sel !== ''): ?> &middot; Account Head : <?php echo dcv($head_name_sel); ?><?php endif; ?>
                 <?php if ($f_received !== ''): ?> &middot; Received By : <?php echo dcv($f_received); ?><?php endif; ?>
             </div>
         </div>

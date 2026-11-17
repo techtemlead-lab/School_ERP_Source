@@ -34,42 +34,128 @@ $classes  = $pdo->query("SELECT id, class_name FROM academic_classes WHERE statu
 $current_session = $pdo->query("SELECT id FROM academic_sessions WHERE is_current_session = 1 LIMIT 1")->fetch();
 
 // -----------------------------------------------------------
-// ফিল্টার — Session (আবশ্যক) + Class (ঐচ্ছিক) + Start/End Date (আবশ্যক)
+// ফিল্টার ক্রম: Report Type (Monthly Summary / Date Wise) → তারিখ → Account Head → Transaction → User
 // -----------------------------------------------------------
 $searched   = isset($_GET['search']);
 $f_session  = (int) ($_GET['f_session'] ?? ($current_session['id'] ?? 0));
 $f_class    = (int) ($_GET['f_class'] ?? 0);
+$f_mode     = ($_GET['f_mode'] ?? 'date') === 'monthly' ? 'monthly' : 'date';
+$f_month    = trim($_GET['f_month'] ?? date('Y-m'));
 $f_start    = trim($_GET['f_start'] ?? date('Y-m-d'));
 $f_end      = trim($_GET['f_end'] ?? date('Y-m-d'));
+$f_head     = (int) ($_GET['f_head'] ?? 0);
+$f_txn      = in_array($_GET['f_txn'] ?? '', ['received', 'payment', 'both'], true) ? $_GET['f_txn'] : 'received';
+$f_user     = trim($_GET['f_user'] ?? '');
 
+if (!preg_match('/^\d{4}-\d{2}$/', $f_month)) { $f_month = date('Y-m'); }
+if ($f_mode === 'monthly') {
+    $f_start = $f_month . '-01';
+    $f_end   = date('Y-m-t', strtotime($f_start));
+}
 // Start > End হলে অদল-বদল করে নেওয়া, যাতে উল্টো দিলেও রিপোর্ট না ভাঙে
 if ($f_start !== '' && $f_end !== '' && strtotime($f_start) > strtotime($f_end)) {
     [$f_start, $f_end] = [$f_end, $f_start];
 }
 
-$rows = [];
+// Account Head ও User ড্রপডাউন
+$head_options = [];
+try {
+    $head_options = $pdo->query("SELECT id, ac_code, ac_head, ac_category FROM finance_account_heads WHERE status = 'Active' ORDER BY ac_category ASC, ac_code ASC")->fetchAll();
+} catch (Throwable $e) { $head_options = []; }
+$head_names = [];
+foreach ($head_options as $ho) { $head_names[(int) $ho['id']] = $ho['ac_head']; }
+
+$user_options = [];
+try {
+    $user_options = $pdo->query(
+        "SELECT collected_by AS u FROM finance_fee_collections WHERE collected_by IS NOT NULL AND collected_by <> ''
+         UNION SELECT created_by FROM finance_vouchers WHERE created_by IS NOT NULL AND created_by <> ''
+         ORDER BY u ASC"
+    )->fetchAll(PDO::FETCH_COLUMN);
+} catch (Throwable $e) {
+    $user_options = $pdo->query("SELECT DISTINCT collected_by FROM finance_fee_collections WHERE collected_by IS NOT NULL AND collected_by <> '' ORDER BY collected_by ASC")->fetchAll(PDO::FETCH_COLUMN);
+}
+
+$rows = [];            // Class-wise (ফি কালেকশন)
 $grand_total = 0.0;
+$head_rows = [];       // Account Head-wise (Received / Payment)
+$tot_recv = 0.0; $tot_pay = 0.0;
 $session_name = '';
+$want_recv = in_array($f_txn, ['received', 'both'], true);
+$want_pay  = in_array($f_txn, ['payment', 'both'], true);
 
-if ($searched && $f_session > 0 && $f_start !== '' && $f_end !== '') {
-    $where = ['fc.session_id = ?', 'DATE(fc.collected_at) BETWEEN ? AND ?'];
-    $params = [$f_session, $f_start, $f_end];
-    if ($f_class > 0) { $where[] = 's.class_id = ?'; $params[] = $f_class; }
-    branch_apply_filter($where, $params, 's.branch_id');
-    $where_sql = implode(' AND ', $where);
+if ($searched && $f_start !== '' && $f_end !== '') {
+    $acc = []; // key => ['date'=>, 'head'=>, 'recv'=>, 'pay'=>]
+    $add = function (string $date, int $hid, string $kind, float $amt) use (&$acc, $f_mode, $head_names) {
+        $d = $f_mode === 'date' ? $date : '';
+        $key = $d . '|' . $hid;
+        if (!isset($acc[$key])) { $acc[$key] = ['date' => $d, 'head' => $hid > 0 ? ($head_names[$hid] ?? ('#' . $hid)) : 'অনির্ধারিত (Unassigned)', 'recv' => 0.0, 'pay' => 0.0]; }
+        $acc[$key][$kind] += $amt;
+    };
 
-    $sql = "SELECT c.id AS class_id, c.class_name, SUM(fc.amount) AS total_amount
-            FROM finance_fee_collections fc
-            LEFT JOIN students s ON s.id = fc.student_id
-            LEFT JOIN academic_classes c ON c.id = s.class_id
-            WHERE $where_sql
-            GROUP BY c.id, c.class_name
-            ORDER BY c.rank ASC, c.class_name ASC";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $rows = $stmt->fetchAll();
+    if ($want_recv) {
+        $where = ['DATE(fc.collected_at) BETWEEN ? AND ?'];
+        $params = [$f_start, $f_end];
+        if ($f_session > 0) { $where[] = 'fc.session_id = ?'; $params[] = $f_session; }
+        if ($f_class > 0) { $where[] = 's.class_id = ?'; $params[] = $f_class; }
+        if ($f_head > 0) { $where[] = 'fc.ac_head_id = ?'; $params[] = $f_head; }
+        if ($f_user !== '') { $where[] = 'fc.collected_by = ?'; $params[] = $f_user; }
+        branch_apply_filter($where, $params, 's.branch_id');
+        $where_sql = implode(' AND ', $where);
 
-    foreach ($rows as $r) { $grand_total += (float) $r['total_amount']; }
+        $stmt = $pdo->prepare(
+            "SELECT c.id AS class_id, c.class_name, SUM(fc.amount) AS total_amount
+             FROM finance_fee_collections fc
+             LEFT JOIN students s ON s.id = fc.student_id
+             LEFT JOIN academic_classes c ON c.id = s.class_id
+             WHERE $where_sql
+             GROUP BY c.id, c.class_name
+             ORDER BY c.rank ASC, c.class_name ASC"
+        );
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+        foreach ($rows as $r) { $grand_total += (float) $r['total_amount']; }
+
+        $stmt = $pdo->prepare(
+            "SELECT DATE(fc.collected_at) AS d, COALESCE(fc.ac_head_id, 0) AS hid, SUM(fc.amount) AS amt
+             FROM finance_fee_collections fc
+             LEFT JOIN students s ON s.id = fc.student_id
+             WHERE $where_sql
+             GROUP BY DATE(fc.collected_at), COALESCE(fc.ac_head_id, 0)"
+        );
+        $stmt->execute($params);
+        foreach ($stmt->fetchAll() as $r) { $add($r['d'], (int) $r['hid'], 'recv', (float) $r['amt']); }
+    }
+
+    // ভাউচার — Receive Voucher (আয়) Received-এ, Payment Voucher (ব্যয়) Payment-এ
+    $vtypes = [];
+    if ($want_recv) { $vtypes[] = 'Receive'; }
+    if ($want_pay)  { $vtypes[] = 'Payment'; }
+    if ($vtypes) {
+        try {
+            // পুরনো ডাটাবেজে branch_id কলাম না থাকলে (ভাউচার পেজ এখনো না খোলা) যোগ করে নেওয়া
+            $has_bid = $pdo->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'finance_vouchers' AND COLUMN_NAME = 'branch_id'")->fetchColumn();
+            if (!$has_bid) { $pdo->exec("ALTER TABLE finance_vouchers ADD COLUMN branch_id INT NULL"); }
+            $vw = ['v.transaction_date BETWEEN ? AND ?', 'v.voucher_type IN (' . implode(',', array_fill(0, count($vtypes), '?')) . ')'];
+            $vp = array_merge([$f_start, $f_end], $vtypes);
+            if ($f_head > 0) { $vw[] = 'd.ac_head_id = ?'; $vp[] = $f_head; }
+            if ($f_user !== '') { $vw[] = 'v.created_by = ?'; $vp[] = $f_user; }
+            branch_apply_filter($vw, $vp, 'v.branch_id');
+            $stmt = $pdo->prepare(
+                "SELECT v.transaction_date AS d, v.voucher_type AS vt, d.ac_head_id AS hid, SUM(d.amount) AS amt
+                 FROM finance_vouchers v
+                 JOIN finance_voucher_details d ON d.voucher_id = v.id
+                 WHERE " . implode(' AND ', $vw) . "
+                 GROUP BY v.transaction_date, v.voucher_type, d.ac_head_id"
+            );
+            $stmt->execute($vp);
+            foreach ($stmt->fetchAll() as $r) { $add($r['d'], (int) $r['hid'], $r['vt'] === 'Payment' ? 'pay' : 'recv', (float) $r['amt']); }
+        } catch (Throwable $e) { error_log('fees_collection_report vouchers: ' . $e->getMessage()); }
+    }
+
+    uasort($acc, fn($a, $b) => [$a['date'], $a['head']] <=> [$b['date'], $b['head']]);
+    $head_rows = array_values($acc);
+    foreach ($head_rows as $hr) { $tot_recv += $hr['recv']; $tot_pay += $hr['pay']; }
 
     foreach ($sessions as $s) { if ((int) $s['id'] === $f_session) { $session_name = $s['session_name']; break; } }
 }
@@ -114,19 +200,19 @@ if ($fr_bid2 !== null) {
     </div>
 
     <div id="fcFilterBody" class="collapse show">
-        <form method="GET" action="index.php" class="row g-3">
+        <form method="GET" action="index.php" class="row g-3" id="fcForm">
             <input type="hidden" name="page" value="finance_report_fees_collection">
             <input type="hidden" name="search" value="1">
-            <div class="col-sm-4">
-                <label class="form-label fw-bold">Session <span class="text-danger">*</span></label>
-                <select name="f_session" class="form-select" required>
-                    <option value="">Select Session</option>
+            <div class="col-sm-6">
+                <label class="form-label fw-bold">Session</label>
+                <select name="f_session" class="form-select">
+                    <option value="0">All Sessions</option>
                     <?php foreach ($sessions as $s): ?>
                         <option value="<?php echo (int) $s['id']; ?>" <?php echo $f_session === (int) $s['id'] ? 'selected' : ''; ?>><?php echo fcv($s['session_name']); ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div class="col-sm-4">
+            <div class="col-sm-6">
                 <label class="form-label fw-bold">Class</label>
                 <select name="f_class" class="form-select">
                     <option value="0">Select Class</option>
@@ -135,18 +221,79 @@ if ($fr_bid2 !== null) {
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div class="col-sm-2">
-                <label class="form-label fw-bold">Start Date <span class="text-danger">*</span></label>
-                <input type="date" name="f_start" class="form-control" required value="<?php echo fcv($f_start); ?>">
+
+            <div class="col-12">
+                <label class="form-label fw-bold">Report Type <span class="text-danger">*</span></label>
+                <div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="f_mode" id="fcModeMonthly" value="monthly" <?php echo $f_mode === 'monthly' ? 'checked' : ''; ?>>
+                        <label class="form-check-label" for="fcModeMonthly">Monthly (Summary)</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="f_mode" id="fcModeDate" value="date" <?php echo $f_mode === 'date' ? 'checked' : ''; ?>>
+                        <label class="form-check-label" for="fcModeDate">Date Wise</label>
+                    </div>
+                </div>
             </div>
-            <div class="col-sm-2">
+            <div class="col-sm-6 fc-mode-monthly">
+                <label class="form-label fw-bold">Month <span class="text-danger">*</span></label>
+                <input type="month" name="f_month" class="form-control" value="<?php echo fcv($f_month); ?>">
+            </div>
+            <div class="col-sm-3 fc-mode-date">
+                <label class="form-label fw-bold">Start Date <span class="text-danger">*</span></label>
+                <input type="date" name="f_start" class="form-control" value="<?php echo fcv($f_start); ?>">
+            </div>
+            <div class="col-sm-3 fc-mode-date">
                 <label class="form-label fw-bold">End Date <span class="text-danger">*</span></label>
-                <input type="date" name="f_end" class="form-control" required value="<?php echo fcv($f_end); ?>">
+                <input type="date" name="f_end" class="form-control" value="<?php echo fcv($f_end); ?>">
+            </div>
+
+            <div class="col-sm-4">
+                <label class="form-label fw-bold">Account Head</label>
+                <select name="f_head" class="form-select">
+                    <option value="0">All Account Heads</option>
+                    <?php $lastcat = null; foreach ($head_options as $ho):
+                        if ($lastcat !== $ho['ac_category']) { if ($lastcat !== null) echo '</optgroup>'; echo '<optgroup label="' . fcv($ho['ac_category']) . '">'; $lastcat = $ho['ac_category']; } ?>
+                        <option value="<?php echo (int) $ho['id']; ?>" <?php echo $f_head === (int) $ho['id'] ? 'selected' : ''; ?>><?php echo fcv($ho['ac_code'] . ' - ' . $ho['ac_head']); ?></option>
+                    <?php endforeach; if ($lastcat !== null) echo '</optgroup>'; ?>
+                </select>
+            </div>
+            <div class="col-sm-4">
+                <label class="form-label fw-bold">Transaction</label>
+                <select name="f_txn" class="form-select">
+                    <option value="received" <?php echo $f_txn === 'received' ? 'selected' : ''; ?>>Received</option>
+                    <option value="payment" <?php echo $f_txn === 'payment' ? 'selected' : ''; ?>>Payment</option>
+                    <option value="both" <?php echo $f_txn === 'both' ? 'selected' : ''; ?>>Both (Received &amp; Payment)</option>
+                </select>
+            </div>
+            <div class="col-sm-4">
+                <label class="form-label fw-bold">User</label>
+                <select name="f_user" class="form-select">
+                    <option value="">All Users</option>
+                    <?php foreach ($user_options as $uo): ?>
+                        <option value="<?php echo fcv($uo); ?>" <?php echo $f_user === $uo ? 'selected' : ''; ?>><?php echo fcv($uo); ?></option>
+                    <?php endforeach; ?>
+                </select>
             </div>
             <div class="col-12 text-end">
                 <button type="submit" class="btn btn-primary px-4"><i class="fa-solid fa-magnifying-glass"></i> Search</button>
             </div>
         </form>
+        <script>
+        (function () {
+            var f = document.getElementById('fcForm');
+            function sync() {
+                var m = f.querySelector('input[name=f_mode]:checked').value;
+                f.querySelectorAll('.fc-mode-monthly').forEach(function (e) { e.style.display = m === 'monthly' ? '' : 'none'; });
+                f.querySelectorAll('.fc-mode-date').forEach(function (e) { e.style.display = m === 'date' ? '' : 'none'; });
+                f.querySelector('input[name=f_month]').required = (m === 'monthly');
+                f.querySelector('input[name=f_start]').required = (m === 'date');
+                f.querySelector('input[name=f_end]').required = (m === 'date');
+            }
+            f.querySelectorAll('input[name=f_mode]').forEach(function (r) { r.addEventListener('change', sync); });
+            sync();
+        })();
+        </script>
     </div>
 </div>
 
@@ -171,11 +318,20 @@ if ($fr_bid2 !== null) {
             <?php endif; ?>
             <h5 class="text-secondary mt-3 mb-1">Fee Collection Report<?php echo $session_name !== '' ? ' - ' . fcv($session_name) : ''; ?></h5>
             <div class="fw-bold small">
-                Date From <?php echo fcv(date('d M Y', strtotime($f_start))); ?> To <?php echo fcv(date('d M Y', strtotime($f_end))); ?>
+                <?php if ($f_mode === 'monthly'): ?>
+                    Monthly Summary : <?php echo fcv(date('F Y', strtotime($f_start))); ?>
+                <?php else: ?>
+                    Date From <?php echo fcv(date('d M Y', strtotime($f_start))); ?> To <?php echo fcv(date('d M Y', strtotime($f_end))); ?>
+                <?php endif; ?>
+                &middot; <?php echo $f_txn === 'both' ? 'Received &amp; Payment' : ($f_txn === 'payment' ? 'Payment' : 'Received'); ?>
+                <?php if ($f_head > 0 && isset($head_names[$f_head])): ?> &middot; Head : <?php echo fcv($head_names[$f_head]); ?><?php endif; ?>
+                <?php if ($f_user !== ''): ?> &middot; User : <?php echo fcv($f_user); ?><?php endif; ?>
             </div>
         </div>
 
-        <div class="table-responsive">
+        <?php if ($want_recv): ?>
+        <h6 class="fw-bold text-secondary">Class Wise Fee Collection</h6>
+        <div class="table-responsive mb-4">
             <table class="table table-bordered align-middle">
                 <thead class="table-light">
                     <tr>
@@ -192,7 +348,7 @@ if ($fr_bid2 !== null) {
                             <td class="text-end"><?php echo fc_money($r['total_amount']); ?></td>
                         </tr>
                     <?php endforeach; else: ?>
-                        <tr><td colspan="3" class="text-center text-muted py-3">এই তারিখের মধ্যে কোনো ফি কালেকশন পাওয়া যায়নি।</td></tr>
+                        <tr><td colspan="3" class="text-center text-muted py-3">এই সময়ের মধ্যে কোনো ফি কালেকশন পাওয়া যায়নি।</td></tr>
                     <?php endif; ?>
                 </tbody>
                 <?php if ($rows): ?>
@@ -204,6 +360,48 @@ if ($fr_bid2 !== null) {
                     </tfoot>
                 <?php endif; ?>
             </table>
+        </div>
+        <?php endif; ?>
+
+        <h6 class="fw-bold text-secondary">Account Head Wise <?php echo $f_mode === 'monthly' ? 'Summary' : '(Date Wise)'; ?></h6>
+        <div class="table-responsive">
+            <table class="table table-bordered align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width:60px;">Srl.</th>
+                        <?php if ($f_mode === 'date'): ?><th style="width:120px;">Date</th><?php endif; ?>
+                        <th>Account Head</th>
+                        <?php if ($want_recv): ?><th style="width:130px;" class="text-end">Received</th><?php endif; ?>
+                        <?php if ($want_pay): ?><th style="width:130px;" class="text-end">Payment</th><?php endif; ?>
+                        <?php if ($f_txn === 'both'): ?><th style="width:130px;" class="text-end">Balance</th><?php endif; ?>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ($head_rows): $srl = 1; foreach ($head_rows as $hr): ?>
+                        <tr>
+                            <td class="text-primary fw-bold"><?php echo $srl++; ?></td>
+                            <?php if ($f_mode === 'date'): ?><td><?php echo fcv(date('d M Y', strtotime($hr['date']))); ?></td><?php endif; ?>
+                            <td><?php echo fcv($hr['head']); ?></td>
+                            <?php if ($want_recv): ?><td class="text-end"><?php echo fc_money($hr['recv']); ?></td><?php endif; ?>
+                            <?php if ($want_pay): ?><td class="text-end"><?php echo fc_money($hr['pay']); ?></td><?php endif; ?>
+                            <?php if ($f_txn === 'both'): ?><td class="text-end"><?php echo fc_money($hr['recv'] - $hr['pay']); ?></td><?php endif; ?>
+                        </tr>
+                    <?php endforeach; else: ?>
+                        <tr><td colspan="6" class="text-center text-muted py-3">এই সময়ের মধ্যে কোনো লেনদেন পাওয়া যায়নি।</td></tr>
+                    <?php endif; ?>
+                </tbody>
+                <?php if ($head_rows): ?>
+                    <tfoot>
+                        <tr>
+                            <td colspan="<?php echo $f_mode === 'date' ? 3 : 2; ?>" class="text-end fw-bold">Total</td>
+                            <?php if ($want_recv): ?><td class="text-end fw-bold"><?php echo fc_money($tot_recv); ?></td><?php endif; ?>
+                            <?php if ($want_pay): ?><td class="text-end fw-bold"><?php echo fc_money($tot_pay); ?></td><?php endif; ?>
+                            <?php if ($f_txn === 'both'): ?><td class="text-end fw-bold"><?php echo fc_money($tot_recv - $tot_pay); ?></td><?php endif; ?>
+                        </tr>
+                    </tfoot>
+                <?php endif; ?>
+            </table>
+        </div>
         </div>
     </div>
 </div>
