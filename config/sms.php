@@ -34,6 +34,8 @@ function sms_ensure_schema(PDO $pdo): void
         'show_notices_home' => "TINYINT(1) NOT NULL DEFAULT 1",
         'show_events_home'  => "TINYINT(1) NOT NULL DEFAULT 1",
         'show_edu_links_home' => "TINYINT(1) NOT NULL DEFAULT 1",
+        // Fees Collection Report-এ Class Wise অংশের ডিফল্ট On/Off
+        'fcr_show_class_wise' => "TINYINT(1) NOT NULL DEFAULT 1",
         // ওয়েবসাইটে Teacher/Staff School/College সেকশন অনুযায়ী আলাদা দেখাবে কি না (ডিফল্ট OFF = All/Teacher/Staff)
         'show_section_filter' => "TINYINT(1) NOT NULL DEFAULT 0",
         // ব্রেকিং নিউজ বার হোমপেজের হিরো/স্লাইডার সেকশনের উপরে না নিচে দেখাবে

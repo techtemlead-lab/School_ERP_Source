@@ -47,6 +47,16 @@ $f_head     = (int) ($_GET['f_head'] ?? 0);
 $f_txn      = in_array($_GET['f_txn'] ?? '', ['received', 'payment', 'both'], true) ? $_GET['f_txn'] : 'received';
 $f_user     = trim($_GET['f_user'] ?? '');
 
+// Class Wise অংশের On/Off — প্রথমে স্থায়ী সেটিং (sms_settings.fcr_show_class_wise, ডিফল্ট On), সার্চ করলে ফর্মের সুইচ প্রাধান্য পায়
+$cw_default = true;
+try {
+    $has_cw = $pdo->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sms_settings' AND COLUMN_NAME = 'fcr_show_class_wise'")->fetchColumn();
+    if (!$has_cw) { $pdo->exec("ALTER TABLE sms_settings ADD COLUMN fcr_show_class_wise TINYINT(1) NOT NULL DEFAULT 1"); }
+    $cwv = $pdo->query("SELECT fcr_show_class_wise FROM sms_settings WHERE id = 1")->fetchColumn();
+    if ($cwv !== false && $cwv !== null) { $cw_default = (bool) $cwv; }
+} catch (Throwable $e) { $cw_default = true; }
+$f_cw = $searched ? (($_GET['f_cw'] ?? '0') === '1') : $cw_default;
+
 if (!preg_match('/^\d{4}-\d{2}$/', $f_month)) { $f_month = date('Y-m'); }
 if ($f_mode === 'monthly') {
     $f_start = $f_month . '-01';
@@ -275,7 +285,14 @@ if ($fr_bid2 !== null) {
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div class="col-12 text-end">
+            <div class="col-sm-6 d-flex align-items-center">
+                <input type="hidden" name="f_cw" value="0">
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" role="switch" name="f_cw" value="1" id="fcCwSwitch" <?php echo $f_cw ? 'checked' : ''; ?>>
+                    <label class="form-check-label fw-bold" for="fcCwSwitch">Class Wise Fee Collection দেখান</label>
+                </div>
+            </div>
+            <div class="col-sm-6 text-end">
                 <button type="submit" class="btn btn-primary px-4"><i class="fa-solid fa-magnifying-glass"></i> Search</button>
             </div>
         </form>
@@ -299,7 +316,13 @@ if ($fr_bid2 !== null) {
 
 <?php if ($searched): ?>
 <div class="card-custom">
-    <div class="d-flex justify-content-end mb-3 no-print">
+    <div class="d-flex justify-content-end align-items-center gap-3 mb-3 no-print">
+        <?php if ($want_recv): ?>
+        <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" role="switch" id="fcCwLive" <?php echo $f_cw ? 'checked' : ''; ?> onchange="document.getElementById('fcClassWise').style.display = this.checked ? '' : 'none';">
+            <label class="form-check-label small fw-bold" for="fcCwLive">Class Wise</label>
+        </div>
+        <?php endif; ?>
         <button type="button" class="btn btn-primary fw-bold" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
     </div>
 
@@ -330,6 +353,7 @@ if ($fr_bid2 !== null) {
         </div>
 
         <?php if ($want_recv): ?>
+        <div id="fcClassWise" style="<?php echo $f_cw ? '' : 'display:none;'; ?>">
         <h6 class="fw-bold text-secondary">Class Wise Fee Collection</h6>
         <div class="table-responsive mb-4">
             <table class="table table-bordered align-middle">
@@ -360,6 +384,7 @@ if ($fr_bid2 !== null) {
                     </tfoot>
                 <?php endif; ?>
             </table>
+        </div>
         </div>
         <?php endif; ?>
 
