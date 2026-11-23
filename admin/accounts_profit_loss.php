@@ -1,6 +1,7 @@
 <?php
 // admin/accounts_profit_loss.php - Accounts Module > Profit & Loss (Income Statement)
 require_once __DIR__ . '/../config/accounts_helpers.php';
+require_once __DIR__ . '/../config/table_print.php';
 ac_ensure_tables($pdo);
 
 function pl(string $val): string { return htmlspecialchars($val, ENT_QUOTES, 'UTF-8'); }
@@ -46,12 +47,23 @@ foreach ($expense_accounts as $a) {
 
 $net_profit = $total_income - $total_expense;
 ?>
+<?php echo tprint_page_css('landscape', 11); ?>
+<style>
+@media print {
+    .pl-row { display: flex !important; flex-wrap: nowrap !important; }
+    .pl-row > .col-md-6 { width: 50% !important; flex: 0 0 50% !important; }
+}
+</style>
 
 <div class="card-custom">
-    <h4 class="fw-bold mb-2 text-dark"><i class="fa-solid fa-chart-line"></i> Profit &amp; Loss (আয়-ব্যয় হিসাব)</h4>
-    <p class="text-muted small mb-4"><i class="fa-solid fa-circle-info me-1"></i> নির্দিষ্ট সময়সীমার মোট আয় বনাম মোট ব্যয় — Journal-এ পোস্ট হওয়া Income/Expense লেনদেন থেকে সরাসরি হিসাব করা।</p>
+    <?php echo tprint_header_html($pdo, 'Profit & Loss Statement', 'Period: ' . $from_date . ' to ' . $to_date); ?>
+    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <h4 class="fw-bold mb-0 text-dark d-print-none"><i class="fa-solid fa-chart-line"></i> Profit &amp; Loss (আয়-ব্যয় হিসাব)</h4>
+        <?php echo tprint_controls(['orient' => 'landscape', 'wrap' => false]); ?>
+    </div>
+    <p class="text-muted small mb-4 no-print"><i class="fa-solid fa-circle-info me-1"></i> নির্দিষ্ট সময়সীমার মোট আয় বনাম মোট ব্যয় — Journal-এ পোস্ট হওয়া Income/Expense লেনদেন থেকে সরাসরি হিসাব করা।</p>
 
-    <form method="GET" action="index.php" class="row g-2 mb-4">
+    <form method="GET" action="index.php" class="row g-2 mb-4 no-print">
         <input type="hidden" name="page" value="accounts_profit_loss">
         <div class="col-md-3">
             <label class="fw-bold small">শুরুর তারিখ</label>
@@ -66,7 +78,7 @@ $net_profit = $total_income - $total_expense;
         </div>
     </form>
 
-    <div class="row">
+    <div class="row pl-row">
         <div class="col-md-6">
             <h6 class="fw-bold text-success">আয় (Income)</h6>
             <table class="table table-bordered table-sm">
@@ -93,7 +105,7 @@ $net_profit = $total_income - $total_expense;
         </div>
     </div>
 
-    <div class="alert <?php echo $net_profit >= 0 ? 'alert-success' : 'alert-danger'; ?> fw-bold mt-3">
+    <div class="alert <?php echo $net_profit >= 0 ? 'alert-success' : 'alert-danger'; ?> fw-bold mt-3 tprint-keep-alert">
         <?php echo $net_profit >= 0 ? 'নেট প্রফিট (Net Profit)' : 'নেট লস (Net Loss)'; ?>: <?php echo pl_money(abs($net_profit)); ?>
     </div>
 </div>

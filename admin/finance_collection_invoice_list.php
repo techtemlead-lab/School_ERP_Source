@@ -4,6 +4,7 @@
 // প্রতিটা Folio (একটা কালেকশন ট্রানজেকশনের সবগুলো Fee Head একসাথে) একটা রো হিসেবে লিস্টে
 // দেখায়, ফিল্টার (Folio/Class/Roll/Date) করা যায়, প্রিন্ট-করা-যায়-এমন Invoice দেখা যায়,
 // আর দরকার হলে পুরো Folio Void (Delete) করা যায়।
+require_once __DIR__ . '/../config/table_print.php';
 
 function civ($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 function ci_money($n): string { return number_format((float) $n, 2); }
@@ -88,6 +89,7 @@ $f_class = (int) ($_GET['f_class'] ?? 0);
 $f_roll  = trim($_GET['f_roll'] ?? '');
 $f_student = trim($_GET['f_student'] ?? '');
 $f_date  = trim($_GET['f_date'] ?? '');
+$is_print_all = tprint_is_print_all();
 $page_no = max(1, (int) ($_GET['pg'] ?? 1));
 $per_page = 50;
 
@@ -114,7 +116,8 @@ $cstmt->execute($params);
 $total_items = (int) $cstmt->fetchColumn();
 $total_pages = max(1, (int) ceil($total_items / $per_page));
 $page_no = min($page_no, $total_pages);
-$offset = ($page_no - 1) * $per_page;
+$offset = $is_print_all ? 0 : (($page_no - 1) * $per_page);
+$query_limit = $is_print_all ? 5000 : $per_page;
 
 $list_sql = "SELECT fc.folio_no, MIN(fc.student_id) AS student_id, MIN(fc.collected_at) AS collection_date, SUM(fc.amount) AS total_amount
              FROM finance_fee_collections fc
@@ -122,7 +125,7 @@ $list_sql = "SELECT fc.folio_no, MIN(fc.student_id) AS student_id, MIN(fc.collec
              WHERE $where_sql
              GROUP BY fc.folio_no
              ORDER BY MAX(fc.collected_at) DESC, MAX(fc.id) DESC
-             LIMIT $per_page OFFSET $offset";
+             LIMIT $query_limit OFFSET $offset";
 $lstmt = $pdo->prepare($list_sql);
 $lstmt->execute($params);
 $folios = $lstmt->fetchAll();
@@ -139,15 +142,36 @@ if ($student_ids) {
 }
 
 $showing_from = $total_items ? $offset + 1 : 0;
-$showing_to = min($offset + $per_page, $total_items);
+$showing_to = $is_print_all ? count($folios) : min($offset + $per_page, $total_items);
+
+$ci_parts = ['Session: ' . $current_session_name];
+if ($f_folio !== '') { $ci_parts[] = 'Folio: ' . $f_folio; }
+if ($f_class > 0) {
+    foreach ($classes as $cl) { if ((int) $cl['id'] === $f_class) { $ci_parts[] = 'Class: ' . $cl['class_name']; break; } }
+}
+if ($f_student !== '') { $ci_parts[] = 'Student: ' . $f_student; }
+if ($f_roll !== '') { $ci_parts[] = 'Roll: ' . $f_roll; }
+if ($f_date !== '') { $ci_parts[] = 'Date: ' . $f_date; }
+$ci_parts[] = 'Total Receipts: ' . $total_items;
+$ci_sub = implode(' | ', $ci_parts);
 ?>
+<?php echo tprint_page_css('landscape', 10); ?>
 
 <div class="card-custom mb-3">
-    <div class="d-flex justify-content-between align-items-center mb-2">
+    <?php echo tprint_header_html($pdo, 'Money Receipt List', $ci_sub); ?>
+    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2 no-print">
         <a href="index.php?page=finance_fees_collection" class="btn btn-sm btn-success"><i class="fa-solid fa-plus"></i></a>
-        <div class="d-flex align-items-center">
-            <span class="text-info fw-bold me-3">Current Session : <?php echo civ($current_session_name); ?></span>
-            <button type="button" class="btn btn-sm btn-outline-secondary me-1" data-bs-toggle="collapse" data-bs-target="#ciFilterBody"><i class="fa-solid fa-chevron-up"></i></button>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="text-info fw-bold me-2">Current Session : <?php echo civ($current_session_name); ?></span>
+            <?php echo tprint_controls([
+                'orient'        => 'landscape',
+                'wrap'          => false,
+                'print_all_url' => tprint_all_url(),
+                'total_count'   => $total_items,
+                'shown_count'   => count($folios),
+                'is_print_all'  => $is_print_all,
+            ]); ?>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#ciFilterBody"><i class="fa-solid fa-chevron-up"></i></button>
             <button type="button" class="btn btn-sm btn-outline-danger" onclick="window.location='index.php?page=finance_collection_invoice_list'"><i class="fa-solid fa-xmark"></i></button>
         </div>
     </div>
@@ -156,7 +180,7 @@ $showing_to = min($offset + $per_page, $total_items);
     <?php if ($ci_err): ?><div class="alert alert-danger py-2"><?php echo civ($ci_err); ?></div><?php endif; ?>
 
     <div id="ciFilterBody" class="collapse show">
-        <div class="text-end text-muted small mb-2">Showing <?php echo $showing_from; ?>-<?php echo $showing_to; ?> of <?php echo $total_items; ?> items.</div>
+        <div class="text-end text-muted small mb-2 no-print">Showing <?php echo $showing_from; ?>-<?php echo $showing_to; ?> of <?php echo $total_items; ?> items.</div>
 
         <!-- Void বাটন আগে প্রতিটা রো-তে নিজের &lt;form&gt;-এ মোড়ানো ছিল, আর সেটা এই GET ফিল্টার
              ফর্মের ভেতরেই বসানো ছিল — ফর্মের ভেতরে ফর্ম, যেটা HTML-এ বৈধ না। ব্রাউজার ভেতরের
@@ -195,9 +219,9 @@ $showing_to = min($offset + $per_page, $total_items);
                             <th>Student</th>
                             <th style="width:90px;">Roll No.</th>
                             <th style="width:190px;">Collection Date &amp; Time</th>
-                            <th style="width:100px;">Actions</th>
+                            <th class="no-print" style="width:100px;">Actions</th>
                         </tr>
-                        <tr>
+                        <tr class="no-print">
                             <th></th>
                             <th><input type="text" name="f_folio" class="form-control form-control-sm" value="<?php echo civ($f_folio); ?>" onchange="document.getElementById('ciFilterForm').submit()"></th>
                             <th>
@@ -226,7 +250,7 @@ $showing_to = min($offset + $per_page, $total_items);
                                 </td>
                                 <td><?php echo civ($sinfo['roll_no'] ?? '—'); ?></td>
                                 <td><?php echo civ(date('d F Y, h:i A', strtotime($f['collection_date']))); ?></td>
-                                <td class="text-nowrap">
+                                <td class="text-nowrap no-print">
                                     <a href="print_money_receipt.php?folio_no=<?php echo urlencode($f['folio_no']); ?>&back=finance_collection_invoice_list" target="_blank" class="btn btn-sm btn-outline-primary" title="Print Money Receipt"><i class="fa-solid fa-print"></i></a>
                                     <button type="button" class="btn btn-sm btn-outline-danger" title="Delete" onclick="return ciRowAction('index.php?page=finance_collection_invoice_list', {folio_no: <?php echo civ_js($f['folio_no']); ?>, back_qs: <?php echo civ_js($qs); ?>, delete_folio: '1'}, <?php echo civ_js('এই পুরো Folio (' . $f['folio_no'] . ') Void করবেন? সব লাইন-আইটেম মুছে যাবে।'); ?>);"><i class="fa-solid fa-trash"></i></button>
                                 </td>
@@ -239,8 +263,8 @@ $showing_to = min($offset + $per_page, $total_items);
             </div>
         </form>
 
-        <?php if ($total_pages > 1): ?>
-            <nav class="mt-3">
+        <?php if (!$is_print_all && $total_pages > 1): ?>
+            <nav class="mt-3 no-print">
                 <ul class="pagination pagination-sm justify-content-end">
                     <?php for ($pgn = 1; $pgn <= $total_pages; $pgn++): ?>
                         <li class="page-item <?php echo $pgn === $page_no ? 'active' : ''; ?>">

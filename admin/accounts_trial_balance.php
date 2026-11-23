@@ -3,6 +3,7 @@
 // এটা কোনো হাতে ধরে রাখা রিপোর্ট না — সরাসরি accounts_journal_lines থেকে যোগফল
 // বের করা হয়, তাই মোট Debit = মোট Credit না হলে বুঝতে হবে ac_post_journal()-এ কোথাও সমস্যা আছে।
 require_once __DIR__ . '/../config/accounts_helpers.php';
+require_once __DIR__ . '/../config/table_print.php';
 ac_ensure_tables($pdo);
 
 function tb(string $val): string { return htmlspecialchars($val, ENT_QUOTES, 'UTF-8'); }
@@ -33,12 +34,17 @@ foreach ($accounts as $a) {
 }
 $is_balanced = abs($total_dr - $total_cr) < 0.01;
 ?>
+<?php echo tprint_page_css('portrait', 11); ?>
 
 <div class="card-custom">
-    <h4 class="fw-bold mb-2 text-dark"><i class="fa-solid fa-scale-balanced"></i> Trial Balance</h4>
-    <p class="text-muted small mb-4"><i class="fa-solid fa-circle-info me-1"></i> নির্দিষ্ট তারিখ পর্যন্ত সব Account-এর ব্যালেন্স। মোট Debit ও মোট Credit সব সময় সমান থাকবে।</p>
+    <?php echo tprint_header_html($pdo, 'Trial Balance', 'As of: ' . $as_of); ?>
+    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <h4 class="fw-bold mb-0 text-dark d-print-none"><i class="fa-solid fa-scale-balanced"></i> Trial Balance</h4>
+        <?php echo tprint_controls(['orient' => 'portrait', 'wrap' => false]); ?>
+    </div>
+    <p class="text-muted small mb-4 no-print"><i class="fa-solid fa-circle-info me-1"></i> নির্দিষ্ট তারিখ পর্যন্ত সব Account-এর ব্যালেন্স। মোট Debit ও মোট Credit সব সময় সমান থাকবে।</p>
 
-    <form method="GET" action="index.php" class="row g-2 mb-4">
+    <form method="GET" action="index.php" class="row g-2 mb-4 no-print">
         <input type="hidden" name="page" value="accounts_trial_balance">
         <div class="col-md-3">
             <label class="fw-bold small">তারিখ পর্যন্ত</label>
@@ -50,9 +56,9 @@ $is_balanced = abs($total_dr - $total_cr) < 0.01;
     </form>
 
     <?php if ($is_balanced): ?>
-        <div class="alert alert-success py-2"><i class="fa-solid fa-circle-check"></i> ব্যালেন্সড — মোট Debit = মোট Credit</div>
+        <div class="alert alert-success py-2 tprint-keep-alert"><i class="fa-solid fa-circle-check"></i> ব্যালেন্সড — মোট Debit = মোট Credit</div>
     <?php else: ?>
-        <div class="alert alert-danger py-2"><i class="fa-solid fa-triangle-exclamation"></i> ব্যালেন্সড না! পার্থক্যঃ <?php echo tb_money(abs($total_dr - $total_cr)); ?></div>
+        <div class="alert alert-danger py-2 tprint-keep-alert"><i class="fa-solid fa-triangle-exclamation"></i> ব্যালেন্সড না! পার্থক্যঃ <?php echo tb_money(abs($total_dr - $total_cr)); ?></div>
     <?php endif; ?>
 
     <div class="table-responsive">

@@ -2,6 +2,7 @@
 // admin/finance_vouchers_list.php - Finance Module > Accounts Voucher > Vouchers List (+/-)
 // Receive + Payment — দুই ধরনের ভাউচারের কম্বাইন্ড লিস্ট। উপরে প্রতিটা কলামের নিচে
 // লাইভ (client-side) ফিল্টার বক্স আছে — টাইপ করার সাথে সাথে টেবিল ফিল্টার হয়ে যায়।
+require_once __DIR__ . '/../config/table_print.php';
 
 function vlv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 
@@ -83,16 +84,21 @@ if ($rows) {
 }
 $csrf = htmlspecialchars(csrf_token());
 ?>
+<?php echo tprint_page_css('landscape', 10); ?>
 <div class="card-custom">
+    <?php echo tprint_header_html($pdo, 'Accounts Vouchers List (+/-)', 'Total: ' . $total_count); ?>
     <?php if ($vl_msg): ?><div class="alert alert-success py-2"><?php echo vlv($vl_msg); ?></div><?php endif; ?>
     <?php if ($vl_err): ?><div class="alert alert-danger py-2"><?php echo vlv($vl_err); ?></div><?php endif; ?>
 
-    <div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2 no-print">
         <div>
             <a href="index.php?page=finance_receive_voucher" class="btn btn-success btn-sm"><i class="fa-solid fa-plus"></i> Receive Voucher</a>
             <a href="index.php?page=finance_payment_voucher" class="btn btn-danger btn-sm"><i class="fa-solid fa-plus"></i> Payment Voucher</a>
         </div>
-        <span class="text-muted small" id="vlShowingText">Showing 1-<?php echo $total_count; ?> of <?php echo $total_count; ?> items.</span>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="text-muted small" id="vlShowingText">Showing 1-<?php echo $total_count; ?> of <?php echo $total_count; ?> items.</span>
+            <?php echo tprint_controls(['orient' => 'landscape', 'wrap' => false]); ?>
+        </div>
     </div>
 
     <div class="table-responsive">
@@ -108,9 +114,9 @@ $csrf = htmlspecialchars(csrf_token());
                     <th>Description</th>
                     <th>A/C Head</th>
                     <th class="text-end">Amount</th>
-                    <th style="width:90px;">Actions</th>
+                    <th class="no-print" style="width:90px;">Actions</th>
                 </tr>
-                <tr class="vl-filter-row">
+                <tr class="vl-filter-row no-print">
                     <th></th>
                     <th>
                         <select class="form-select form-select-sm vl-filter" data-col="1">
@@ -147,7 +153,7 @@ $csrf = htmlspecialchars(csrf_token());
                         <td><?php echo nl2br(vlv($row['description'])); ?></td>
                         <td><?php echo vlv(implode(', ', array_unique($fvl_heads[(int) $row['id']] ?? [])) ?: '—'); ?></td>
                         <td class="text-end fw-bold <?php echo $row['voucher_type'] === 'Receive' ? 'text-success' : 'text-danger'; ?>"><?php echo number_format((float) $row['total_amount'], 2); ?></td>
-                        <td class="text-nowrap">
+                        <td class="text-nowrap no-print">
                             <a href="index.php?page=finance_voucher_print&id=<?php echo (int) $row['id']; ?>" class="btn btn-sm btn-outline-primary" title="Print" target="_blank"><i class="fa-solid fa-print"></i></a>
                             <form method="POST" action="index.php?page=finance_vouchers_list" class="d-inline" onsubmit="return confirm('এই ভাউচারটা মুছে ফেলবেন?');">
                                 <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">

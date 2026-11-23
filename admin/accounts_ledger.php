@@ -1,6 +1,7 @@
 <?php
 // admin/accounts_ledger.php - Accounts Module > General Ledger (per Account, running balance)
 require_once __DIR__ . '/../config/accounts_helpers.php';
+require_once __DIR__ . '/../config/table_print.php';
 ac_ensure_tables($pdo);
 
 function gl(string $val): string { return htmlspecialchars($val, ENT_QUOTES, 'UTF-8'); }
@@ -55,12 +56,13 @@ if ($account_id > 0) {
     }
 }
 ?>
+<?php echo tprint_page_css('portrait', 11); ?>
 
 <div class="card-custom">
-    <h4 class="fw-bold mb-2 text-dark"><i class="fa-solid fa-book"></i> General Ledger</h4>
-    <p class="text-muted small mb-4"><i class="fa-solid fa-circle-info me-1"></i> নির্দিষ্ট একটা Account-এর সব Journal লেনদেন ও Running Balance দেখুন।</p>
+    <h4 class="fw-bold mb-2 text-dark d-print-none"><i class="fa-solid fa-book"></i> General Ledger</h4>
+    <p class="text-muted small mb-4 no-print"><i class="fa-solid fa-circle-info me-1"></i> নির্দিষ্ট একটা Account-এর সব Journal লেনদেন ও Running Balance দেখুন।</p>
 
-    <form method="GET" action="index.php" class="row g-2 mb-4">
+    <form method="GET" action="index.php" class="row g-2 mb-4 no-print">
         <input type="hidden" name="page" value="accounts_ledger">
         <div class="col-md-5">
             <label class="fw-bold small">Account</label>
@@ -85,7 +87,11 @@ if ($account_id > 0) {
     </form>
 
     <?php if ($acc): $normal = ac_normal_side($acc['account_type']); ?>
-        <h6 class="fw-bold text-secondary"><?php echo gl($acc['code'] . ' - ' . $acc['name']); ?> <span class="badge bg-info text-dark"><?php echo gl($acc['account_type']); ?></span></h6>
+        <?php echo tprint_header_html($pdo, 'General Ledger — ' . $acc['code'] . ' - ' . $acc['name'], 'Period: ' . $from_date . ' to ' . $to_date); ?>
+        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+            <h6 class="fw-bold text-secondary m-0"><?php echo gl($acc['code'] . ' - ' . $acc['name']); ?> <span class="badge bg-info text-dark"><?php echo gl($acc['account_type']); ?></span></h6>
+            <?php echo tprint_controls(['orient' => 'portrait', 'wrap' => false]); ?>
+        </div>
         <div class="table-responsive">
             <table class="table table-bordered table-sm align-middle">
                 <thead class="table-light">

@@ -3,6 +3,7 @@
 // Assets = Liabilities + Equity + Retained Earnings (এই সিস্টেমে কোনো ম্যানুয়াল "Period Close" নেই,
 // তাই Retained Earnings = শুরু থেকে as_of তারিখ পর্যন্ত মোট (Income - Expense))।
 require_once __DIR__ . '/../config/accounts_helpers.php';
+require_once __DIR__ . '/../config/table_print.php';
 ac_ensure_tables($pdo);
 
 function bs(string $val): string { return htmlspecialchars($val, ENT_QUOTES, 'UTF-8'); }
@@ -45,12 +46,23 @@ $retained_earnings = $income_total - $expense_total;
 $total_equity_side = $total_liab + $total_equity + $retained_earnings;
 $is_balanced = abs($total_assets - $total_equity_side) < 0.01;
 ?>
+<?php echo tprint_page_css('landscape', 11); ?>
+<style>
+@media print {
+    .bs-row { display: flex !important; flex-wrap: nowrap !important; }
+    .bs-row > .col-md-6 { width: 50% !important; flex: 0 0 50% !important; }
+}
+</style>
 
 <div class="card-custom">
-    <h4 class="fw-bold mb-2 text-dark"><i class="fa-solid fa-building-columns"></i> Balance Sheet</h4>
-    <p class="text-muted small mb-4"><i class="fa-solid fa-circle-info me-1"></i> নির্দিষ্ট তারিখ পর্যন্ত প্রতিষ্ঠানের সম্পদ, দায় ও ইকুইটির অবস্থা।</p>
+    <?php echo tprint_header_html($pdo, 'Balance Sheet', 'As of: ' . $as_of); ?>
+    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+        <h4 class="fw-bold mb-0 text-dark d-print-none"><i class="fa-solid fa-building-columns"></i> Balance Sheet</h4>
+        <?php echo tprint_controls(['orient' => 'landscape', 'wrap' => false]); ?>
+    </div>
+    <p class="text-muted small mb-4 no-print"><i class="fa-solid fa-circle-info me-1"></i> নির্দিষ্ট তারিখ পর্যন্ত প্রতিষ্ঠানের সম্পদ, দায় ও ইকুইটির অবস্থা।</p>
 
-    <form method="GET" action="index.php" class="row g-2 mb-4">
+    <form method="GET" action="index.php" class="row g-2 mb-4 no-print">
         <input type="hidden" name="page" value="accounts_balance_sheet">
         <div class="col-md-3">
             <label class="fw-bold small">তারিখ পর্যন্ত</label>
@@ -62,12 +74,12 @@ $is_balanced = abs($total_assets - $total_equity_side) < 0.01;
     </form>
 
     <?php if ($is_balanced): ?>
-        <div class="alert alert-success py-2"><i class="fa-solid fa-circle-check"></i> ব্যালেন্সড — Assets = Liabilities + Equity</div>
+        <div class="alert alert-success py-2 tprint-keep-alert"><i class="fa-solid fa-circle-check"></i> ব্যালেন্সড — Assets = Liabilities + Equity</div>
     <?php else: ?>
-        <div class="alert alert-danger py-2"><i class="fa-solid fa-triangle-exclamation"></i> ব্যালেন্সড না! পার্থক্যঃ <?php echo bs_money(abs($total_assets - $total_equity_side)); ?></div>
+        <div class="alert alert-danger py-2 tprint-keep-alert"><i class="fa-solid fa-triangle-exclamation"></i> ব্যালেন্সড না! পার্থক্যঃ <?php echo bs_money(abs($total_assets - $total_equity_side)); ?></div>
     <?php endif; ?>
 
-    <div class="row">
+    <div class="row bs-row">
         <div class="col-md-6">
             <h6 class="fw-bold text-primary">সম্পদ (Assets)</h6>
             <table class="table table-bordered table-sm">
