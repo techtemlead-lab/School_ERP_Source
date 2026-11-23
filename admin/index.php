@@ -1529,5 +1529,6 @@ window.addEventListener('load', function () {
 if (isset($pdo)) { include __DIR__ . '/../config/class_scope_filter.php'; }
 ?>
 <?php require_once __DIR__ . '/../config/searchable_select.php'; echo searchable_select_assets(); // বড় ড্রপডাউনে টাইপ করে সার্চ ?>
+<?php require_once __DIR__ . '/../config/table_print.php'; echo tprint_assets($pdo, $page ?? 'dashboard', 'admin'); ?>
 </body>
 </html>
