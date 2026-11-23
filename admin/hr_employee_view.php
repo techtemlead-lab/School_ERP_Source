@@ -1,5 +1,6 @@
 <?php
 // admin/hr_employee_view.php - Human Resource > Employees > View Employee (শুধু দেখার জন্য, এডিট ফর্ম না)
+require_once __DIR__ . '/../config/table_print.php';
 function hrv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 function hrv_or($val): string { $v = trim((string) ($val ?? '')); return $v !== '' ? hrv($v) : '<span class="text-muted fst-italic">(not set)</span>'; }
 function hrv_date($val): string { $v = trim((string) ($val ?? '')); return $v !== '' ? date('d M, Y', strtotime($v)) : '<span class="text-muted fst-italic">(not set)</span>'; }
@@ -34,11 +35,13 @@ if ($row) {
     $edu_rows = $estmt->fetchAll();
 }
 ?>
+<?php echo tprint_page_css('portrait', 12); ?>
 <div class="card-custom">
     <?php if (!$row): ?>
         <h5 class="text-muted text-center py-4 mb-0">Employee পাওয়া যায়নি।</h5>
         <div class="text-center"><a href="index.php?page=hr_employee_list" class="btn btn-outline-secondary">Back to List</a></div>
     <?php else: ?>
+        <?php echo tprint_header_html($pdo, 'Employee Profile', $row['name'] . ' — ID: ' . $row['employee_id']); ?>
         <div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
             <div class="d-flex align-items-center gap-3">
                 <img src="<?php echo $row['photo_path'] ? '../' . hrv($row['photo_path']) : 'data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2728%27 height=%2728%27%3E%3Crect width=%2728%27 height=%2728%27 fill=%27%23e2e8f0%27/%3E%3C/svg%3E'; ?>" style="width:70px;height:70px;border-radius:8px;object-fit:cover;border:1px solid #e2e8f0;">
@@ -48,9 +51,10 @@ if ($row) {
                     <?php echo $row['status'] === 'Active' ? '<span class="badge bg-success mt-1">Active</span>' : '<span class="badge bg-secondary mt-1">Inactive</span>'; ?>
                 </div>
             </div>
-            <div class="text-nowrap">
-                <a href="index.php?page=hr_employee_add&id=<?php echo (int) $row['id']; ?>" class="btn btn-primary fw-bold" style="background-color:#1e3a8a;"><i class="fa-solid fa-pen"></i> Edit</a>
-                <a href="index.php?page=hr_employee_list" class="btn btn-outline-secondary">Back</a>
+            <div class="text-nowrap no-print d-flex align-items-center gap-2 flex-wrap">
+                <?php echo tprint_controls(['orient' => 'portrait', 'wrap' => false]); ?>
+                <a href="index.php?page=hr_employee_add&id=<?php echo (int) $row['id']; ?>" class="btn btn-primary btn-sm fw-bold" style="background-color:#1e3a8a;"><i class="fa-solid fa-pen"></i> Edit</a>
+                <a href="index.php?page=hr_employee_list" class="btn btn-outline-secondary btn-sm">Back</a>
             </div>
         </div>
 
@@ -126,8 +130,8 @@ if ($row) {
         <div class="row mb-3"><div class="col-sm-3 fw-bold text-sm-end">Present Address</div><div class="col-sm-6" style="white-space:pre-wrap;"><?php echo hrv_or($row['present_address']); ?></div></div>
         <div class="row mb-4"><div class="col-sm-3 fw-bold text-sm-end">Permanent Address</div><div class="col-sm-6" style="white-space:pre-wrap;"><?php echo hrv_or($row['permanent_address']); ?></div></div>
 
-        <hr>
-        <div class="row">
+        <hr class="no-print">
+        <div class="row no-print">
             <div class="col-sm-6 offset-sm-3">
                 <a href="index.php?page=hr_employee_add&id=<?php echo (int) $row['id']; ?>" class="btn btn-primary px-4 fw-bold" style="background-color:#1e3a8a;"><i class="fa-solid fa-pen"></i> Edit</a>
                 <a href="index.php?page=hr_employee_list" class="btn btn-outline-secondary px-4 fw-bold ms-2">Back to List</a>

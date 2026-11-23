@@ -1,5 +1,6 @@
 <?php
 // admin/hr_employee_search.php - Human Resource > Employee Search (স্ক্রিনশট অনুযায়ী)
+require_once __DIR__ . '/../config/table_print.php';
 function esv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 
 $employee_types = $pdo->query("SELECT id, name FROM employee_types WHERE status = 'Active' ORDER BY name ASC")->fetchAll();
@@ -44,8 +45,24 @@ if ($searched) {
     $stmt->execute($params);
     $results = $stmt->fetchAll();
 }
+$es_find = function (array $list, int $id, string $col): string {
+    foreach ($list as $it) { if ((int) $it['id'] === $id) { return (string) $it[$col]; } }
+    return '';
+};
+$es_parts = [];
+if ($f_etype > 0)      { $es_parts[] = 'Type: ' . $es_find($employee_types, $f_etype, 'name'); }
+if ($f_shift > 0)      { $es_parts[] = 'Shift: ' . $es_find($shifts, $f_shift, 'name'); }
+if ($f_desig > 0)      { $es_parts[] = 'Designation: ' . $es_find($designations, $f_desig, 'title'); }
+if ($f_gender !== '')  { $es_parts[] = 'Gender: ' . $f_gender; }
+if ($f_marital !== '') { $es_parts[] = 'Marital: ' . $f_marital; }
+if ($f_blood !== '')   { $es_parts[] = 'Blood: ' . $f_blood; }
+if ($f_dob !== '')     { $es_parts[] = 'DOB: ' . $f_dob; }
+if ($f_empid !== '')   { $es_parts[] = 'ID: ' . $f_empid; }
+$es_parts[] = 'Total: ' . count($results);
+$es_sub = implode(' | ', $es_parts);
 ?>
-<div class="card-custom">
+<?php echo tprint_page_css('landscape', 10); ?>
+<div class="card-custom no-print">
     <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">Employee Search</h6>
 
     <form method="GET" action="index.php">
@@ -144,9 +161,10 @@ if ($searched) {
 
 <?php if ($searched): ?>
     <div class="card-custom">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h6 class="fw-bold text-dark m-0">Search Results</h6>
-            <span class="text-muted small">মোট <?php echo count($results); ?> জন পাওয়া গেছে</span>
+        <?php echo tprint_header_html($pdo, 'Employee Search Results', $es_sub); ?>
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2 no-print">
+            <h6 class="fw-bold text-dark m-0">Search Results <span class="text-muted small fw-normal">(মোট <?php echo count($results); ?> জন পাওয়া গেছে)</span></h6>
+            <?php echo tprint_controls(['orient' => 'landscape', 'wrap' => false]); ?>
         </div>
         <div class="table-responsive">
             <table class="table table-bordered align-middle" style="font-size:13px;">
@@ -161,7 +179,7 @@ if ($searched) {
                         <th>Mobile</th>
                         <th>Gender</th>
                         <th>Status</th>
-                        <th>Actions</th>
+                        <th class="no-print">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -179,7 +197,7 @@ if ($searched) {
                             <td><?php echo esv($row['mobile']); ?></td>
                             <td><?php echo esv($row['gender']); ?></td>
                             <td><?php echo $row['status'] === 'Active' ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>'; ?></td>
-                            <td>
+                            <td class="no-print">
                                 <a href="index.php?page=hr_employee_add&id=<?php echo (int) $row['id']; ?>" class="btn btn-sm btn-outline-secondary" title="View / Edit"><i class="fa-solid fa-eye"></i></a>
                             </td>
                         </tr>

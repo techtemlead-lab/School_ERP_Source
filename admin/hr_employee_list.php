@@ -1,5 +1,6 @@
 <?php
 // admin/hr_employee_list.php - Human Resource > Employees > Manage Employees (স্ক্রিনশট অনুযায়ী)
+require_once __DIR__ . '/../config/table_print.php';
 $el_msg = $_SESSION['el_msg'] ?? '';
 $el_err = $_SESSION['el_err'] ?? '';
 unset($_SESSION['el_msg'], $_SESSION['el_err']);
@@ -75,19 +76,39 @@ foreach ($rows as $r) {
     if ($r['gender'] === 'Male') { $total_male++; }
     elseif ($r['gender'] === 'Female') { $total_female++; }
 }
+
+$el_find = function (array $list, int $id, string $col): string {
+    foreach ($list as $it) { if ((int) $it['id'] === $id) { return (string) $it[$col]; } }
+    return '';
+};
+$el_parts = [];
+if ($f_etype > 0) { $el_parts[] = 'Type: ' . $el_find($employee_types, $f_etype, 'name'); }
+if ($f_desig > 0) { $el_parts[] = 'Designation: ' . $el_find($designations, $f_desig, 'title'); }
+if ($f_shift > 0) { $el_parts[] = 'Shift: ' . $el_find($shifts, $f_shift, 'name'); }
+if ($f_grade > 0) { $el_parts[] = 'Grade: ' . $el_find($grades, $f_grade, 'grade_name'); }
+if ($f_name !== '')   { $el_parts[] = 'Name: ' . $f_name; }
+if ($f_empid !== '')  { $el_parts[] = 'ID: ' . $f_empid; }
+if ($f_device !== '') { $el_parts[] = 'Device: ' . $f_device; }
+$el_parts[] = 'Total: ' . count($rows) . ' (Male: ' . $total_male . ', Female: ' . $total_female . ')';
+$el_sub = implode(' | ', $el_parts);
 ?>
+<?php echo tprint_page_css('landscape', 9); ?>
 <div class="card-custom">
+    <?php echo tprint_header_html($pdo, $is_transport_tab ? 'Driver & Helper List' : 'All Employee List', $el_sub); ?>
     <?php if ($el_msg): ?><div class="alert alert-success py-2"><?php echo elv($el_msg); ?></div><?php endif; ?>
     <?php if ($el_err): ?><div class="alert alert-danger py-2"><?php echo elv($el_err); ?></div><?php endif; ?>
 
     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-        <a href="index.php?page=hr_employee_add" class="btn btn-success"><i class="fa-solid fa-plus"></i></a>
+        <a href="index.php?page=hr_employee_add" class="btn btn-success no-print"><i class="fa-solid fa-plus"></i></a>
         <div class="d-flex gap-4 flex-wrap">
             <span class="text-primary fw-bold"><i class="fa-solid fa-person"></i> Total Male : <?php echo (int) $total_male; ?></span>
             <span class="text-success fw-bold"><i class="fa-solid fa-person-dress"></i> Total Female : <?php echo (int) $total_female; ?></span>
         </div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="text-muted small no-print">Showing 1-<?php echo count($rows); ?> of <?php echo count($rows); ?> item<?php echo count($rows) === 1 ? '' : 's'; ?>.</span>
+            <?php echo tprint_controls(['orient' => 'landscape', 'wrap' => false, 'font_px' => 9]); ?>
+        </div>
     </div>
-    <div class="text-end mb-2"><span class="text-muted small">Showing 1-<?php echo count($rows); ?> of <?php echo count($rows); ?> item<?php echo count($rows) === 1 ? '' : 's'; ?>.</span></div>
 
         <!-- সারিওয়ারি Delete বাটন আগে প্রতিটা নিজের ছোট্ট &lt;form&gt;-এ মোড়ানো ছিল, আর সেই ফর্মগুলো
          থাকত নিচের টেবিলটা মোড়ানো GET ফিল্টার ফর্মের ভেতরে — অর্থাৎ ফর্মের ভেতরে ফর্ম। HTML-এ
@@ -136,9 +157,9 @@ foreach ($rows as $r) {
                         <th>RFID Card</th>
                         <th>Mobile</th>
                         <th>Status</th>
-                        <th>Actions</th>
+                        <th class="no-print">Actions</th>
                     </tr>
-                    <tr>
+                    <tr class="no-print">
                         <th></th>
                         <th></th>
                         <th></th>
@@ -204,7 +225,7 @@ foreach ($rows as $r) {
                             <td class="fst-italic text-muted"><?php echo elv($row['rfid_card_no'] ?: '(not set)'); ?></td>
                             <td><?php echo elv($row['mobile']); ?></td>
                             <td><?php echo $row['status'] === 'Active' ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>'; ?></td>
-                            <td class="text-nowrap">
+                            <td class="text-nowrap no-print">
                                 <a href="index.php?page=hr_employee_view&id=<?php echo (int) $row['id']; ?>" class="btn btn-sm btn-outline-secondary" title="View"><i class="fa-solid fa-eye"></i></a>
                                 <a href="index.php?page=hr_employee_add&id=<?php echo (int) $row['id']; ?>" class="btn btn-sm btn-outline-primary" title="Edit"><i class="fa-solid fa-pen"></i></a>
                                 <button type="button" class="btn btn-sm btn-outline-danger" title="Delete" onclick="return wcRowAction('index.php?page=hr_employee_list<?php echo $tab_qs; ?>', 'delete_employee', <?php echo (int) $row['id']; ?>, 'মুছে ফেলবেন?');"><i class="fa-solid fa-trash"></i></button>

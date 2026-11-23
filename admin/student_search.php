@@ -1,5 +1,6 @@
 <?php
 // admin/student_search.php - Current + Archive Student Search (একই ফাইল, is_current দিয়ে আলাদা)
+require_once __DIR__ . '/../config/table_print.php';
 $is_archive = ($page === 'archive_student_search');
 $mode_label = $is_archive ? 'Archive' : 'Current';
 $search_page_slug = $is_archive ? 'archive_student_search' : 'current_student_search';
@@ -33,7 +34,10 @@ $f_religion = $_GET['f_religion'] ?? '';
 $f_dob      = trim($_GET['f_dob'] ?? '');
 $f_status   = $_GET['f_status'] ?? ($is_archive ? '' : 'Active');
 
+$is_print_all = tprint_is_print_all();
 $rows = [];
+$total_matched = 0;
+$ss_sub = '';
 if ($did_search) {
     $where = ['students.is_current = ?'];
     $params = [$is_archive ? 0 : 1];
@@ -51,6 +55,12 @@ if ($did_search) {
     if ($f_status !== '')   { $where[] = 'students.status = ?'; $params[] = $f_status; }
     branch_apply_filter($where, $params, 'students.branch_id'); // লগইন করা branch অনুযায়ী স্টুডেন্ট ফিল্টার
 
+    $where_sql = implode(' AND ', $where);
+    $cnt_stmt = $pdo->prepare("SELECT COUNT(*) FROM students WHERE $where_sql");
+    $cnt_stmt->execute($params);
+    $total_matched = (int) $cnt_stmt->fetchColumn();
+
+    $limit = $is_print_all ? 5000 : 100;
     $sql = "SELECT students.*, academic_sessions.session_name, academic_classes.class_name,
                    academic_shifts.shift_name, academic_sections.section_name
             FROM students
@@ -58,15 +68,35 @@ if ($did_search) {
             LEFT JOIN academic_classes ON academic_classes.id = students.class_id
             LEFT JOIN academic_shifts ON academic_shifts.id = students.shift_id
             LEFT JOIN academic_sections ON academic_sections.id = students.section_id
-            WHERE " . implode(' AND ', $where) . "
-            ORDER BY students.class_id ASC, students.section_id ASC, CAST(students.roll_no AS UNSIGNED) ASC, students.id ASC LIMIT 100";
+            WHERE $where_sql
+            ORDER BY students.class_id ASC, students.section_id ASC, CAST(students.roll_no AS UNSIGNED) ASC, students.id ASC LIMIT $limit";
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $rows = $stmt->fetchAll();
+
+    $ss_find = function (array $list, $id, string $col): string {
+        foreach ($list as $it) { if ((string) $it['id'] === (string) $id) { return (string) $it[$col]; } }
+        return '';
+    };
+    $ss_parts = [];
+    if ($f_session !== '')  { $ss_parts[] = 'Session: ' . ($ss_find($sessions, $f_session, 'session_name') ?: $f_session); }
+    if ($f_class !== '')    { $ss_parts[] = 'Class: ' . ($ss_find($classes, $f_class, 'class_name') ?: $f_class); }
+    if ($f_shift !== '')    { $ss_parts[] = 'Shift: ' . ($ss_find($shifts, $f_shift, 'shift_name') ?: $f_shift); }
+    if ($f_section !== '')  { $ss_parts[] = 'Section: ' . ($ss_find($sections, $f_section, 'section_name') ?: $f_section); }
+    if ($f_gender !== '')   { $ss_parts[] = 'Gender: ' . $f_gender; }
+    if ($f_blood !== '')    { $ss_parts[] = 'Blood: ' . $f_blood; }
+    if ($f_religion !== '') { $ss_parts[] = 'Religion: ' . $f_religion; }
+    if ($f_phone !== '')    { $ss_parts[] = 'Phone: ' . $f_phone; }
+    if ($f_sid !== '')      { $ss_parts[] = 'ID: ' . $f_sid; }
+    if ($f_dob !== '')      { $ss_parts[] = 'DOB: ' . $f_dob; }
+    if ($f_status !== '')   { $ss_parts[] = 'Status: ' . $f_status; }
+    $ss_parts[] = 'Total: ' . $total_matched;
+    $ss_sub = implode(' | ', $ss_parts);
 }
 ?>
+<?php echo tprint_page_css('portrait', 11); ?>
 
-<div class="card-custom mb-3">
+<div class="card-custom mb-3 no-print">
     <h5 class="fw-normal text-dark mb-4">Student Search (<?php echo $mode_label; ?>)</h5>
 
     <form method="GET" action="index.php">
@@ -196,10 +226,22 @@ if ($did_search) {
     <?php elseif (!$rows): ?>
         <p class="text-muted mb-0">No data exists !</p>
     <?php else: ?>
+        <?php echo tprint_header_html($pdo, 'Student Search (' . $mode_label . ')', $ss_sub); ?>
+        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2 no-print">
+            <span class="text-muted small">Showing <?php echo count($rows); ?> of <?php echo $total_matched; ?> students</span>
+            <?php echo tprint_controls([
+                'orient'        => 'portrait',
+                'wrap'          => false,
+                'print_all_url' => tprint_all_url(),
+                'total_count'   => $total_matched,
+                'shown_count'   => count($rows),
+                'is_print_all'  => $is_print_all,
+            ]); ?>
+        </div>
         <div class="table-responsive">
             <table class="table table-bordered align-middle">
                 <thead class="table-dark">
-                    <tr><th>Student ID</th><th>Name</th><th>Session</th><th>Class</th><th>Section</th><th>Shift</th><th>Guardian Phone</th><th>Status</th><th class="text-end">Action</th></tr>
+                    <tr><th>Student ID</th><th>Name</th><th>Session</th><th>Class</th><th>Section</th><th>Shift</th><th>Guardian Phone</th><th>Status</th><th class="text-end no-print">Action</th></tr>
                 </thead>
                 <tbody>
                     <?php foreach ($rows as $row): ?>
@@ -216,7 +258,7 @@ if ($did_search) {
                                 $ss_badge_class = $ss_status_badges[$row['status']] ?? 'secondary';
                                 echo '<span class="badge bg-' . $ss_badge_class . '">' . ssv($row['status']) . '</span>';
                             ?></td>
-                            <td class="text-end">
+                            <td class="text-end no-print">
                                 <a href="index.php?page=student_admission&view=edit&id=<?php echo (int) $row['id']; ?>" class="btn btn-sm btn-outline-primary" title="View/Edit"><i class="fa-solid fa-pen"></i></a>
                             </td>
                         </tr>

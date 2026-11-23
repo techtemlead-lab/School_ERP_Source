@@ -2,6 +2,7 @@
 // admin/student_list.php - Current + Archive Student List (একই ফাইল, is_current দিয়ে আলাদা হয়)
 // current_student_list  => is_current = 1 (এই মুহূর্তে যে ক্লাসে পড়ছে)
 // archive_student_list  => is_current = 0 (প্রমোশনের পর আগের ক্লাসের ইতিহাস)
+require_once __DIR__ . '/../config/table_print.php';
 
 // পুরনো ইনস্টলেশনে students.is_current কলাম না থাকলে নিরাপদে যোগ করে দেওয়া হচ্ছে
 // (সব বিদ্যমান রেকর্ড ডিফল্টভাবে Current ধরা হয়)
@@ -135,6 +136,7 @@ if ($where) $sql .= " WHERE " . implode(' AND ', $where);
 $sql .= " ORDER BY students.class_id ASC, students.section_id ASC, CAST(students.roll_no AS UNSIGNED) ASC, students.id ASC";
 
 // Pagination — আগে শুধু প্রথম ৫০ জন দেখাত, পরের পেজে যাওয়ার উপায় ছিল না
+$is_print_all = tprint_is_print_all();
 $per_page_opts = [25, 50, 100, 200];
 $per_page = (int) ($_GET['per'] ?? 50);
 if (!in_array($per_page, $per_page_opts, true)) $per_page = 50;
@@ -153,35 +155,75 @@ $counts = $count_stmt->fetch();
 $total_count = (int) ($counts['total_count'] ?? 0);
 $total_pages = max(1, (int) ceil($total_count / $per_page));
 if ($cur_page > $total_pages) $cur_page = $total_pages;
-$offset = ($cur_page - 1) * $per_page;
+$offset = $is_print_all ? 0 : (($cur_page - 1) * $per_page);
 
-$stmt = $pdo->prepare($sql . " LIMIT " . (int) $per_page . " OFFSET " . (int) $offset);
+if ($is_print_all) {
+    $stmt = $pdo->prepare($sql . " LIMIT 5000 OFFSET 0");
+} else {
+    $stmt = $pdo->prepare($sql . " LIMIT " . (int) $per_page . " OFFSET " . (int) $offset);
+}
 $stmt->execute($params);
 $rows = $stmt->fetchAll();
+
+// প্রিন্ট হেডারের জন্য সক্রিয় ফিল্টারের সারাংশ
+$stl_find = function (array $list, $id, string $col): string {
+    foreach ($list as $item) {
+        if ((string) $item['id'] === (string) $id) { return (string) $item[$col]; }
+    }
+    return '';
+};
+$stl_parts = [];
+if ($f_session !== 'All') { $stl_parts[] = 'Session: ' . ($stl_find($sessions, $f_session, 'session_name') ?: $f_session); }
+if ($f_class !== 'All')   { $stl_parts[] = 'Class: ' . ($stl_find($classes, $f_class, 'class_name') ?: $f_class); }
+if ($f_group !== 'All')   { $stl_parts[] = 'Group: ' . $f_group; }
+if ($f_shift !== 'All')   { $stl_parts[] = 'Shift: ' . ($stl_find($shifts, $f_shift, 'shift_name') ?: $f_shift); }
+if ($f_section !== 'All') { $stl_parts[] = 'Section: ' . ($stl_find($sections_all, $f_section, 'section_name') ?: $f_section); }
+if ($f_name !== '')       { $stl_parts[] = 'Name: ' . $f_name; }
+if ($f_sid !== '')        { $stl_parts[] = 'ID: ' . $f_sid; }
+if ($f_roll !== '')       { $stl_parts[] = 'Roll: ' . $f_roll; }
+if ($f_phone !== '')      { $stl_parts[] = 'Phone: ' . $f_phone; }
+if ($f_dob !== '')        { $stl_parts[] = 'DOB: ' . $f_dob; }
+if ($f_status !== 'All')  { $stl_parts[] = 'Status: ' . $f_status; }
+$stl_parts[] = 'Total: ' . $total_count . ' (Male: ' . (int) ($counts['male_count'] ?? 0) . ', Female: ' . (int) ($counts['female_count'] ?? 0) . ')';
+$stl_sub = implode(' | ', $stl_parts);
 
 // পেজ লিংকে বর্তমান ফিল্টারগুলো ধরে রাখা
 function stl_page_url(int $pg): string {
     $q = $_GET;
+    unset($q['print_all'], $q['print_orient']);
     $q['p'] = $pg;
     return 'index.php?' . htmlspecialchars(http_build_query($q), ENT_QUOTES, 'UTF-8');
 }
 ?>
+<?php echo tprint_page_css('landscape', 9); ?>
 
 <div class="card-custom">
+    <?php echo tprint_header_html($pdo, $is_archive ? 'Archive Student List' : 'Current Student List', $stl_sub); ?>
     <?php if ($stl_msg): ?><div class="alert alert-success py-2"><?php echo htmlspecialchars($stl_msg); ?></div><?php endif; ?>
     <?php if ($stl_err): ?><div class="alert alert-danger py-2"><?php echo htmlspecialchars($stl_err); ?></div><?php endif; ?>
 
-    <div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
         <?php if (!$is_archive): ?>
-            <a href="index.php?page=student_admission" class="btn btn-success"><i class="fa-solid fa-plus"></i></a>
+            <a href="index.php?page=student_admission" class="btn btn-success no-print"><i class="fa-solid fa-plus"></i></a>
         <?php else: ?>
-            <span></span>
+            <span class="no-print"></span>
         <?php endif; ?>
         <div class="d-flex gap-4">
             <span class="text-info fw-bold"><i class="fa-solid fa-person"></i> Total Male : <?php echo (int) ($counts['male_count'] ?? 0); ?></span>
             <span class="text-success fw-bold"><i class="fa-solid fa-person-dress"></i> Total Female : <?php echo (int) ($counts['female_count'] ?? 0); ?></span>
         </div>
-        <span class="text-muted small">Showing <?php echo $total_count ? ($offset + 1) : 0; ?>-<?php echo $offset + count($rows); ?> of <?php echo $total_count; ?> items.</span>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="text-muted small no-print">Showing <?php echo $total_count ? ($offset + 1) : 0; ?>-<?php echo $offset + count($rows); ?> of <?php echo $total_count; ?> items.</span>
+            <?php echo tprint_controls([
+                'orient'        => 'landscape',
+                'wrap'          => false,
+                'print_all_url' => tprint_all_url(),
+                'total_count'   => $total_count,
+                'shown_count'   => count($rows),
+                'is_print_all'  => $is_print_all,
+                'font_px'       => 9,
+            ]); ?>
+        </div>
     </div>
 
         <!-- সারিওয়ারি Delete বাটন আগে প্রতিটা নিজের ছোট্ট &lt;form&gt;-এ মোড়ানো ছিল, আর সেই ফর্মগুলো
@@ -231,9 +273,9 @@ function stl_page_url(int $pg): string {
                         <th>Guardian's Phone</th>
                         <th>Date of Birth</th>
                         <th>Status</th>
-                        <th>Actions</th>
+                        <th class="no-print">Actions</th>
                     </tr>
-                    <tr>
+                    <tr class="no-print">
                         <th></th>
                         <th>
                             <select name="f_session" class="form-select form-select-sm" onchange="this.form.submit()">
@@ -316,7 +358,7 @@ function stl_page_url(int $pg): string {
                                 $badge_class = $status_badges[$row['status']] ?? 'secondary';
                                 echo '<span class="badge bg-' . $badge_class . '">' . slv($row['status']) . '</span>';
                             ?></td>
-                            <td class="text-nowrap">
+                            <td class="text-nowrap no-print">
                                 <a href="index.php?page=print_admission_form&id=<?php echo (int) $row['id']; ?>" class="btn btn-sm btn-outline-secondary" title="Print"><i class="fa-solid fa-print"></i></a>
                                 <a href="index.php?page=student_admission&view=view&id=<?php echo (int) $row['id']; ?>" class="btn btn-sm btn-outline-info" title="View"><i class="fa-solid fa-eye"></i></a>
                                 <a href="index.php?page=student_admission&view=edit&id=<?php echo (int) $row['id']; ?>" class="btn btn-sm btn-outline-primary" title="Edit"><i class="fa-solid fa-pen"></i></a>
@@ -331,9 +373,10 @@ function stl_page_url(int $pg): string {
         </div>
     </form>
 
-    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2">
+    <?php if (!$is_print_all): ?>
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2 no-print">
         <form method="GET" action="index.php" class="d-flex align-items-center gap-2 mb-0">
-            <?php foreach ($_GET as $gk => $gv): if (in_array($gk, ['per', 'p'], true) || is_array($gv)) continue; ?>
+            <?php foreach ($_GET as $gk => $gv): if (in_array($gk, ['per', 'p', 'print_all', 'print_orient'], true) || is_array($gv)) continue; ?>
                 <input type="hidden" name="<?php echo slv($gk); ?>" value="<?php echo slv($gv); ?>">
             <?php endforeach; ?>
             <label class="small text-muted mb-0">Per page</label>
@@ -358,6 +401,7 @@ function stl_page_url(int $pg): string {
         </nav>
         <?php endif; ?>
     </div>
+    <?php endif; ?>
 </div>
 
 <link href="https://cdn.jsdelivr.net/npm/air-datepicker@3.6.0/air-datepicker.css" rel="stylesheet">
