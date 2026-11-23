@@ -348,7 +348,7 @@ if (!function_exists('ac_css')) {
     .main-wrapper, .main-wrapper.expanded { margin-left: 0 !important; width: 100% !important; min-height: 0 !important; padding: 0 !important; }
     .content-body { padding: 0 !important; margin: 0 !important; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .ac-page { margin: 0 !important; border: none !important; padding: 0 !important; page-break-after: always; break-after: page; }
+    .ac-page { margin: 0 !important; border: none !important; box-sizing: border-box !important; width: 100% !important; page-break-after: always; break-after: page; }
     .ac-page:last-child { page-break-after: auto; break-after: auto; }
     .ac-pages { overflow: visible !important; }
     .ac-cell .admitcard2, .ac-cell .admit-half, .ac-cell .admit-full { box-shadow: none !important; }
@@ -590,12 +590,13 @@ if (!function_exists('ac_css')) {
 CSS;
         $my = (int) ($L['my'] ?? 8);
         $mx = (int) ($L['mx'] ?? 8);
-        $page = '@page { size: A4 ' . $L['ori'] . '; margin: ' . $my . 'mm ' . $mx . 'mm; }';
+        $page = '@page { size: A4 ' . $L['ori'] . '; margin: 0; }';
         $page_pad = ($L['preset'] === '2half') ? 'padding: ' . $my . 'mm ' . $mx . 'mm;' : '';
         $dyn  = '.ac-page { grid-template-columns: repeat(' . (int) $L['cols'] . ', ' . $L['w'] . 'mm); gap: ' . (int) $L['gap'] . 'mm;' . $page_pad . ' }'
               . '.ac-cell { width: ' . $L['w'] . 'mm; height: ' . $L['h'] . 'mm; }'
               . '.admitcard2 { width: ' . $L['dw'] . 'px; height: ' . round($L['dh'], 2) . 'px; transform: scale(' . round($L['k'], 5) . '); }';
-        return str_replace('<style>', '<style>' . $page . $dyn, $css);
+        $print_pad = '@media print { .ac-page { padding: ' . $my . 'mm ' . $mx . 'mm 0 ' . $mx . 'mm !important; } }';
+        return str_replace(['<style>', '</style>'], ['<style>' . $page, $dyn . $print_pad . '</style>'], $css);
     }
 }
 
