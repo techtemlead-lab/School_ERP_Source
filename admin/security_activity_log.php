@@ -5,6 +5,7 @@
 // লেখা হয়, বর্তমানে Auth (Login/Logout/Auto Logout), Security (Settings/Force Logout) এবং
 // User Management (Create/Update/Delete) মডিউল থেকে লগ হয়)।
 require_once __DIR__ . '/../config/security_helpers.php';
+require_once __DIR__ . '/../config/table_print.php';
 sec_ensure_tables($pdo);
 
 $is_super_admin = $_SESSION['is_super_admin'] ?? true;
@@ -32,6 +33,7 @@ $f_module = trim($_GET['f_module'] ?? 'All');
 $f_action = trim($_GET['f_action'] ?? 'All');
 $f_from   = trim($_GET['f_from'] ?? '');
 $f_to     = trim($_GET['f_to'] ?? '');
+$is_print_all = tprint_is_print_all();
 $page_no  = max(1, (int) ($_GET['p'] ?? 1));
 $per_page = 50;
 
@@ -49,9 +51,10 @@ $cnt_stmt->execute($params);
 $total_rows = (int) $cnt_stmt->fetchColumn();
 $total_pages = max(1, (int) ceil($total_rows / $per_page));
 $page_no = min($page_no, $total_pages);
-$offset = ($page_no - 1) * $per_page;
+$offset = $is_print_all ? 0 : (($page_no - 1) * $per_page);
+$query_limit = $is_print_all ? 2000 : $per_page;
 
-$sql = "SELECT * FROM activity_logs $where_sql ORDER BY created_at DESC LIMIT $per_page OFFSET $offset";
+$sql = "SELECT * FROM activity_logs $where_sql ORDER BY created_at DESC LIMIT $query_limit OFFSET $offset";
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $rows = $stmt->fetchAll();
@@ -82,17 +85,27 @@ $action_badge = [
     'Create' => 'success', 'Update' => 'primary', 'Delete' => 'danger', 'Force Logout' => 'danger',
 ];
 ?>
+<?php echo tprint_page_css('landscape', 10); ?>
 <style>
     #alFilterRow.collapse:not(.show) { display: none; }
     #alFilterRow.collapse.show { display: table-row; }
 </style>
 
 <div class="card-custom">
+    <?php echo tprint_header_html($pdo, 'System Activity Log', 'Total Entries: ' . $total_rows); ?>
     <?php if ($al_msg): ?><div class="alert alert-success py-2"><?php echo alv($al_msg); ?></div><?php endif; ?>
-    <div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2 no-print">
         <div class="text-muted small">মোট <?php echo $total_rows; ?> টি এন্ট্রি — Page <?php echo $page_no; ?> / <?php echo $total_pages; ?></div>
-        <div class="d-flex gap-1">
-            <a href="index.php?<?php echo http_build_query(array_merge($_GET, ['page' => 'security_activity_log', 'export' => 'csv'])); ?>" class="btn btn-sm btn-outline-success"><i class="fa-solid fa-file-csv"></i> Export CSV</a>
+        <div class="d-flex align-items-center gap-1 flex-wrap">
+            <?php echo tprint_controls([
+                'orient'        => 'landscape',
+                'wrap'          => false,
+                'print_all_url' => tprint_all_url(),
+                'total_count'   => $total_rows,
+                'shown_count'   => count($rows),
+                'is_print_all'  => $is_print_all,
+            ]); ?>
+            <a href="index.php?<?php echo http_build_query(array_merge($_GET, ['page' => 'security_activity_log', 'export' => 'csv'])); ?>" class="btn btn-sm btn-outline-success ms-1"><i class="fa-solid fa-file-csv"></i> Export CSV</a>
             <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#alFilterRow" title="Show/Hide Filter"><i class="fa-solid fa-chevron-up"></i></button>
             <a href="index.php?page=security_activity_log" class="btn btn-sm btn-outline-danger" title="Clear Filter"><i class="fa-solid fa-xmark"></i></a>
             <form method="POST" action="index.php?page=security_activity_log" class="d-inline" onsubmit="return confirm('১৮০ দিনের বেশি পুরনো সব Activity Log মুছে যাবে, নিশ্চিত?');">
@@ -110,7 +123,7 @@ $action_badge = [
                     <tr>
                         <th>Srl.</th><th>Username</th><th>User Type</th><th>Module</th><th>Action</th><th>Description</th><th>IP</th><th>Time</th>
                     </tr>
-                    <tr class="collapse show" id="alFilterRow">
+                    <tr class="collapse show no-print" id="alFilterRow">
                         <th></th>
                         <th><input type="text" name="f_uname" class="form-control form-control-sm" placeholder="Username" value="<?php echo alv($f_uname); ?>"></th>
                         <th></th>
@@ -158,11 +171,12 @@ $action_badge = [
             </table>
         </div>
 
-        <?php if ($total_pages > 1): ?>
-            <nav class="d-flex justify-content-center">
+        <?php if (!$is_print_all && $total_pages > 1): ?>
+            <nav class="d-flex justify-content-center no-print">
                 <ul class="pagination pagination-sm">
                     <?php
                     $qs = $_GET;
+                    unset($qs['print_all'], $qs['print_orient']);
                     for ($p = 1; $p <= $total_pages; $p++):
                         $qs['p'] = $p;
                         $qs['page'] = 'security_activity_log';

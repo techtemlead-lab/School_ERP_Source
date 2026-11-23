@@ -1,6 +1,7 @@
 <?php
 // admin/canteen_reports.php - Canteen > Reports
 require_once __DIR__ . '/canteen_common.php';
+require_once __DIR__ . '/../config/table_print.php';
 canteen_require_manage();
 
 $f_date_from = $_GET['from'] ?? date('Y-m-01');
@@ -74,11 +75,16 @@ $period_total = array_sum(array_column($daily_rows, 'total_amount'));
 $period_paid  = array_sum(array_column($daily_rows, 'total_paid'));
 $period_due   = array_sum(array_column($daily_rows, 'total_due'));
 ?>
+<?php echo tprint_page_css('portrait', 11); ?>
 
 <div class="card-custom">
-    <h4 class="fw-bold mb-4 text-dark"><i class="fa-solid fa-chart-line"></i> Canteen &raquo; Reports</h4>
+    <?php echo tprint_header_html($pdo, 'Canteen Report', 'Period: ' . $f_date_from . ' to ' . $f_date_to); ?>
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <h4 class="fw-bold m-0 text-dark d-print-none"><i class="fa-solid fa-chart-line"></i> Canteen &raquo; Reports</h4>
+        <?php echo tprint_controls(['orient' => 'portrait', 'wrap' => false]); ?>
+    </div>
 
-    <form method="GET" class="row g-2 mb-4 align-items-end">
+    <form method="GET" class="row g-2 mb-4 align-items-end no-print">
         <input type="hidden" name="page" value="canteen_reports">
         <div class="col-md-3"><label class="form-label small fw-bold">From</label><input type="date" name="from" class="form-control" value="<?php echo cv($f_date_from); ?>"></div>
         <div class="col-md-3"><label class="form-label small fw-bold">To</label><input type="date" name="to" class="form-control" value="<?php echo cv($f_date_to); ?>"></div>

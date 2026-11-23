@@ -3,6 +3,7 @@
 // qms-webhook.php দিয়ে বাইরের QMS থেকে আসা প্রশ্নগুলোর লিস্ট।
 
 require_once __DIR__ . '/../config/qms_helpers.php';
+require_once __DIR__ . '/../config/table_print.php';
 qms_ensure_tables($pdo);
 
 function qlv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
@@ -15,11 +16,16 @@ if ($view === 'view') {
     $stmt->execute([$id]);
     $q = $stmt->fetch();
     ?>
+    <?php echo tprint_page_css('portrait', 11); ?>
     <div class="card-custom">
         <?php if (!$q): ?>
             <div class="alert alert-warning">প্রশ্নটি পাওয়া যায়নি।</div>
         <?php else: ?>
-            <a href="index.php?page=result_question_list" class="btn btn-sm btn-outline-secondary mb-3">&larr; Back to List</a>
+            <?php echo tprint_header_html($pdo, 'Question Details', trim(($q['subject'] ?? '') . ($q['class_name'] ? ' | Class: ' . $q['class_name'] : ''))); ?>
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2 no-print">
+                <a href="index.php?page=result_question_list" class="btn btn-sm btn-outline-secondary">&larr; Back to List</a>
+                <?php echo tprint_controls(['orient' => 'portrait', 'wrap' => false]); ?>
+            </div>
             <table class="table table-bordered">
                 <tr><th style="width:220px;">Subject</th><td><?php echo qlv($q['subject']); ?></td></tr>
                 <tr><th>Class</th><td><?php echo qlv($q['class_name']); ?></td></tr>
@@ -54,40 +60,59 @@ if ($subject !== '') {
 }
 $where_sql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
 
+$is_print_all = tprint_is_print_all();
 $per_page = 25;
 $page_no = max(1, (int) ($_GET['p'] ?? 1));
-$offset = ($page_no - 1) * $per_page;
+$offset = $is_print_all ? 0 : (($page_no - 1) * $per_page);
+$query_limit = $is_print_all ? 2000 : $per_page;
 
 $count_stmt = $pdo->prepare("SELECT COUNT(*) FROM qms_questions $where_sql");
 $count_stmt->execute($params);
 $total = (int) $count_stmt->fetchColumn();
 
-$list_stmt = $pdo->prepare("SELECT * FROM qms_questions $where_sql ORDER BY id DESC LIMIT $per_page OFFSET $offset");
+$list_stmt = $pdo->prepare("SELECT * FROM qms_questions $where_sql ORDER BY id DESC LIMIT $query_limit OFFSET $offset");
 $list_stmt->execute($params);
 $rows = $list_stmt->fetchAll();
 
 $subjects = $pdo->query("SELECT DISTINCT subject FROM qms_questions WHERE subject IS NOT NULL AND subject != '' ORDER BY subject")->fetchAll(PDO::FETCH_COLUMN);
 $total_pages = max(1, (int) ceil($total / $per_page));
+$ql_parts = [];
+if ($search !== '')  { $ql_parts[] = 'Search: ' . $search; }
+if ($subject !== '') { $ql_parts[] = 'Subject: ' . $subject; }
+$ql_parts[] = 'Total: ' . $total;
+$ql_sub = implode(' | ', $ql_parts);
 ?>
+<?php echo tprint_page_css('landscape', 11); ?>
 
 <div class="card-custom">
-    <form method="GET" action="index.php" class="row g-2 align-items-center mb-4">
-        <input type="hidden" name="page" value="result_question_list">
-        <div class="col-auto">
-            <input type="text" name="search" class="form-control" placeholder="Search question / ID" value="<?php echo qlv($search); ?>">
-        </div>
-        <div class="col-auto">
-            <select name="subject" class="form-select">
-                <option value="">All Subjects</option>
-                <?php foreach ($subjects as $s): ?>
-                    <option value="<?php echo qlv($s); ?>" <?php echo $subject === $s ? 'selected' : ''; ?>><?php echo qlv($s); ?></option>
-                <?php endforeach; ?>
-            </select>
-        </div>
-        <div class="col-auto">
-            <button type="submit" class="btn btn-primary">Filter</button>
-        </div>
-    </form>
+    <?php echo tprint_header_html($pdo, 'Question List', $ql_sub); ?>
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2 no-print">
+        <form method="GET" action="index.php" class="row g-2 align-items-center mb-0">
+            <input type="hidden" name="page" value="result_question_list">
+            <div class="col-auto">
+                <input type="text" name="search" class="form-control" placeholder="Search question / ID" value="<?php echo qlv($search); ?>">
+            </div>
+            <div class="col-auto">
+                <select name="subject" class="form-select">
+                    <option value="">All Subjects</option>
+                    <?php foreach ($subjects as $s): ?>
+                        <option value="<?php echo qlv($s); ?>" <?php echo $subject === $s ? 'selected' : ''; ?>><?php echo qlv($s); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary">Filter</button>
+            </div>
+        </form>
+        <?php echo tprint_controls([
+            'orient'        => 'landscape',
+            'wrap'          => false,
+            'print_all_url' => tprint_all_url(),
+            'total_count'   => $total,
+            'shown_count'   => count($rows),
+            'is_print_all'  => $is_print_all,
+        ]); ?>
+    </div>
 
     <?php if (!$rows): ?>
         <div class="alert alert-info">এখনো কোনো প্রশ্ন আসেনি। QMS সিস্টেম থেকে প্রশ্ন Generate হলে এখানে চলে আসবে।</div>
@@ -103,7 +128,7 @@ $total_pages = max(1, (int) ceil($total / $per_page));
                         <th>Type</th>
                         <th>Marks</th>
                         <th>Received At</th>
-                        <th></th>
+                        <th class="no-print"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -116,15 +141,15 @@ $total_pages = max(1, (int) ceil($total / $per_page));
                             <td><?php echo qlv($r['question_type']); ?></td>
                             <td><?php echo qlv($r['marks']); ?></td>
                             <td><?php echo qlv($r['received_at']); ?></td>
-                            <td><a href="index.php?page=result_question_list&view=view&id=<?php echo (int) $r['id']; ?>" class="btn btn-sm btn-outline-primary">View</a></td>
+                            <td class="no-print"><a href="index.php?page=result_question_list&view=view&id=<?php echo (int) $r['id']; ?>" class="btn btn-sm btn-outline-primary">View</a></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
         </div>
 
-        <?php if ($total_pages > 1): ?>
-            <nav>
+        <?php if (!$is_print_all && $total_pages > 1): ?>
+            <nav class="no-print">
                 <ul class="pagination pagination-sm">
                     <?php for ($i = 1; $i <= $total_pages; $i++): ?>
                         <li class="page-item <?php echo $i === $page_no ? 'active' : ''; ?>">

@@ -3,6 +3,7 @@
 // কে (Username), কোন User Type, কোন IP/Device/Browser/OS থেকে, কতবার লগইন
 // (সফল/ব্যর্থ) করেছে তার সম্পূর্ণ হিস্ট্রি — login_logs টেবিল থেকে (log হয় admin/index.php-তে)
 // শুধুমাত্র Super Admin এই পেজ দেখতে পারবে।
+require_once __DIR__ . '/../config/table_print.php';
 
 $is_super_admin = $_SESSION['is_super_admin'] ?? true;
 if (!$is_super_admin) {
@@ -52,6 +53,7 @@ $f_status  = $_GET['f_status'] ?? 'All';
 $f_ip      = trim($_GET['f_ip'] ?? '');
 $f_from    = trim($_GET['f_from'] ?? '');
 $f_to      = trim($_GET['f_to'] ?? '');
+$is_print_all = tprint_is_print_all();
 $page_no   = max(1, (int) ($_GET['p'] ?? 1));
 $per_page  = 50;
 
@@ -71,9 +73,10 @@ $cnt_stmt->execute($params);
 $total_rows = (int) $cnt_stmt->fetchColumn();
 $total_pages = max(1, (int) ceil($total_rows / $per_page));
 $page_no = min($page_no, $total_pages);
-$offset = ($page_no - 1) * $per_page;
+$offset = $is_print_all ? 0 : (($page_no - 1) * $per_page);
+$query_limit = $is_print_all ? 2000 : $per_page;
 
-$sql = "SELECT * FROM login_logs $where_sql ORDER BY login_time DESC LIMIT $per_page OFFSET $offset";
+$sql = "SELECT * FROM login_logs $where_sql ORDER BY login_time DESC LIMIT $query_limit OFFSET $offset";
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $rows = $stmt->fetchAll();
@@ -91,10 +94,13 @@ $summary_rows = $sum_stmt->fetchAll();
 $user_types_ll = ['Super Admin', 'Accountant', 'Admin', 'Data Entry Operator', 'Demo', 'Human Resource', 'Student', 'Teacher', 'Unknown'];
 $csrf = htmlspecialchars(csrf_token());
 ?>
+<?php echo tprint_page_css('landscape', 10); ?>
 <style>
     #llFilterRow.collapse:not(.show) { display: none; }
     #llFilterRow.collapse.show { display: table-row; }
 </style>
+
+<?php echo tprint_header_html($pdo, 'Login / Session Log', 'Total Records: ' . $total_rows); ?>
 
 <div class="card-custom mb-3">
     <?php if ($ll_msg): ?><div class="alert alert-success py-2"><?php echo llv($ll_msg); ?></div><?php endif; ?>
@@ -121,10 +127,18 @@ $csrf = htmlspecialchars(csrf_token());
 </div>
 
 <div class="card-custom">
-    <div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2 no-print">
         <div class="text-muted small">মোট <?php echo $total_rows; ?> টি লগইন রেকর্ড — Page <?php echo $page_no; ?> / <?php echo $total_pages; ?></div>
-        <div>
-            <button type="button" class="btn btn-sm btn-outline-secondary me-1" data-bs-toggle="collapse" data-bs-target="#llFilterRow" title="Show/Hide Filter"><i class="fa-solid fa-chevron-up"></i></button>
+        <div class="d-flex align-items-center gap-1 flex-wrap">
+            <?php echo tprint_controls([
+                'orient'        => 'landscape',
+                'wrap'          => false,
+                'print_all_url' => tprint_all_url(),
+                'total_count'   => $total_rows,
+                'shown_count'   => count($rows),
+                'is_print_all'  => $is_print_all,
+            ]); ?>
+            <button type="button" class="btn btn-sm btn-outline-secondary ms-1" data-bs-toggle="collapse" data-bs-target="#llFilterRow" title="Show/Hide Filter"><i class="fa-solid fa-chevron-up"></i></button>
             <a href="index.php?page=login_logs" class="btn btn-sm btn-outline-danger" title="Clear Filter"><i class="fa-solid fa-xmark"></i></a>
             <form method="POST" action="index.php?page=login_logs" class="d-inline" onsubmit="return confirm('৯০ দিনের বেশি পুরনো সব লগ মুছে যাবে, নিশ্চিত?');">
                 <?php echo csrf_field(); ?>
@@ -149,7 +163,7 @@ $csrf = htmlspecialchars(csrf_token());
                         <th>OS</th>
                         <th>Login Time</th>
                     </tr>
-                    <tr class="collapse show" id="llFilterRow">
+                    <tr class="collapse show no-print" id="llFilterRow">
                         <th></th>
                         <th><input type="text" name="f_uname" class="form-control form-control-sm" placeholder="Username" value="<?php echo llv($f_uname); ?>"></th>
                         <th>
@@ -198,11 +212,12 @@ $csrf = htmlspecialchars(csrf_token());
             </table>
         </div>
 
-        <?php if ($total_pages > 1): ?>
-            <nav class="d-flex justify-content-center">
+        <?php if (!$is_print_all && $total_pages > 1): ?>
+            <nav class="d-flex justify-content-center no-print">
                 <ul class="pagination pagination-sm">
                     <?php
                     $qs = $_GET; // pagination লিংকে বর্তমান ফিল্টার ধরে রাখার জন্য
+                    unset($qs['print_all'], $qs['print_orient']);
                     for ($p = 1; $p <= $total_pages; $p++):
                         $qs['p'] = $p;
                         $qs['page'] = 'login_logs';

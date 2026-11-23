@@ -4,6 +4,7 @@
 // DSHE-BANBEIS এ প্রায়ই মেয়েদের উপবৃত্তির আলাদা পরিসংখ্যান চাওয়া হয় বলে এটা এখানে আলাদা দেখানো)।
 // CSV Export বাটন দিয়ে এক্সেলে খোলার মতো ফাইল ডাউনলোড করা যায়।
 require_once __DIR__ . '/../config/scholarship_helpers.php';
+require_once __DIR__ . '/../config/table_print.php';
 sch_ensure_tables($pdo);
 
 function srv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
@@ -76,8 +77,20 @@ foreach ($rows as $r) {
         $total_disbursed += (float) $r['amount'];
     }
 }
+
+$sr_parts = [];
+if ($f_session) {
+    foreach ($sessions as $s) { if ((int) $s['id'] === $f_session) { $sr_parts[] = 'Session: ' . $s['session_name']; break; } }
+}
+if ($f_type) {
+    foreach ($scholarship_types as $t) { if ((int) $t['id'] === $f_type) { $sr_parts[] = 'Type: ' . $t['name']; break; } }
+}
+if ($f_status !== '') { $sr_parts[] = 'Status: ' . $f_status; }
+$sr_parts[] = 'Records: ' . count($rows);
+$sr_sub = implode(' | ', $sr_parts);
 ?>
-<div class="card-custom mb-3">
+<?php echo tprint_page_css('landscape', 10); ?>
+<div class="card-custom mb-3 no-print">
     <form method="GET" action="index.php" class="row g-3 align-items-end">
         <input type="hidden" name="page" value="scholarship_report">
         <div class="col-md-3">
@@ -113,6 +126,9 @@ foreach ($rows as $r) {
         </div>
     </form>
 </div>
+
+<?php echo tprint_header_html($pdo, 'Scholarship Report', $sr_sub); ?>
+<?php echo tprint_controls(['orient' => 'landscape']); ?>
 
 <div class="row g-3 mb-3">
     <div class="col-md-4">
