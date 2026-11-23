@@ -2,6 +2,7 @@
 // admin/attendance_today.php - Attendance Module > Student Attendance > Today's Attendance
 // device_attendance_logs টেবিল থেকে (ZKTeco/eSSL ইত্যাদি ADMS পুশ ডেটা) নির্দিষ্ট দিনের
 // IN/OUT পাঞ্চ বের করে students টেবিলের সাথে ম্যাচ করে (rfid_card_no অথবা student_id দিয়ে) দেখানো হয়।
+require_once __DIR__ . '/../config/table_print.php';
 
 function ta_esc($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 
@@ -87,19 +88,34 @@ if (isset($_GET['debug'])) {
 
 $total_present = count($rows);
 $display_date  = date('F j, Y', strtotime($f_date));
+
+$ta_parts = [];
+if ($f_class !== 'All') {
+    foreach ($classes_list as $cl) {
+        if ((int) $cl['id'] === (int) $f_class) { $ta_parts[] = 'Class: ' . $cl['class_name']; break; }
+    }
+}
+if ($f_q !== '') { $ta_parts[] = 'Search: ' . $f_q; }
+$ta_parts[] = 'Total Present: ' . $total_present;
+$ta_sub = implode(' | ', $ta_parts);
 ?>
+<?php echo tprint_page_css('landscape', 11); ?>
 
 <div class="card-custom">
+    <?php echo tprint_header_html($pdo, 'Students Attendance (' . $display_date . ')', $ta_sub); ?>
     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-        <h6 class="fw-bold text-dark m-0">
+        <h6 class="fw-bold text-dark m-0 d-print-none">
             <i class="fa-solid fa-user-check text-primary"></i>
             Students Attendance <span class="text-danger">(<?php echo ta_esc($display_date); ?>)</span>
         </h6>
-        <div class="fw-bold text-dark">Total : (<?php echo (int) $total_present; ?>)</div>
+        <div class="d-flex align-items-center gap-3 flex-wrap">
+            <div class="fw-bold text-dark">Total : (<?php echo (int) $total_present; ?>)</div>
+            <?php echo tprint_controls(['orient' => 'landscape', 'wrap' => false]); ?>
+        </div>
     </div>
 
     <!-- Filter Bar -->
-    <form method="GET" class="row g-2 align-items-center mb-3">
+    <form method="GET" class="row g-2 align-items-center mb-3 no-print">
         <input type="hidden" name="page" value="attendance_today">
         <div class="col-6 col-md-3">
             <input type="date" name="date" class="form-control form-control-sm" value="<?php echo ta_esc($f_date); ?>" max="<?php echo date('Y-m-d'); ?>">

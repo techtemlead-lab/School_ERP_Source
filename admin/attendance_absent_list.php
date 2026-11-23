@@ -4,6 +4,7 @@
 // এবং ম্যানুয়াল অ্যাটেন্ডেন্সেও তাকে Present মার্ক করা না হয়ে থাকে।
 
 require_once __DIR__ . '/../config/sms.php';
+require_once __DIR__ . '/../config/table_print.php';
 sms_ensure_schema($pdo);
 
 function al_esc($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
@@ -168,7 +169,12 @@ if ($f_class > 0) {
 }
 
 $display_date = date('F j, Y', strtotime($today));
+$sel_class_name = '';
+foreach ($class_counts as $cc) {
+    if ((int) $cc['id'] === $f_class) { $sel_class_name = (string) $cc['class_name']; break; }
+}
 ?>
+<?php echo tprint_page_css('portrait', 11); ?>
 <style>
     .absent-class-item {
         display: flex; justify-content: space-between; align-items: center;
@@ -182,6 +188,10 @@ $display_date = date('F j, Y', strtotime($today));
         border-radius: 20px; padding: 2px 9px; min-width: 26px; text-align: center;
     }
     .absent-count-badge.zero { background: #cbd5e1; color: #475569; }
+    @media print {
+        .absent-table-col { width: 100% !important; flex: 0 0 100% !important; max-width: 100% !important; }
+        .absent-wrap { border: none !important; }
+    }
 </style>
 
 <?php if ($al_msg): ?>
@@ -198,22 +208,26 @@ $display_date = date('F j, Y', strtotime($today));
 <?php endif; ?>
 
 <div class="card-custom">
+    <?php echo tprint_header_html($pdo, 'Absent Student List (' . $display_date . ')', 'Class: ' . ($sel_class_name ?: 'All') . ' | Absent: ' . count($absent_students)); ?>
     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-        <h6 class="fw-bold text-dark m-0">
+        <h6 class="fw-bold text-dark m-0 d-print-none">
             <i class="fa-solid fa-user-xmark text-danger"></i>
             Today Students Absent <span class="text-danger">(<?php echo al_esc($display_date); ?>)</span>
         </h6>
-        <form method="GET" class="flex-grow-1 mx-3" style="max-width:400px;">
+        <form method="GET" class="flex-grow-1 mx-3 no-print" style="max-width:400px;">
             <input type="hidden" name="page" value="attendance_absent_list">
             <input type="hidden" name="class_id" value="<?php echo (int) $f_class; ?>">
             <input type="text" name="q" class="form-control form-control-sm" placeholder="Search by ID, Roll or Name" value="<?php echo al_esc($f_q); ?>">
         </form>
-        <div class="fw-bold text-danger fs-6">Total : <?php echo (int) $grand_total; ?></div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <div class="fw-bold text-danger fs-6">Total : <?php echo (int) $grand_total; ?></div>
+            <?php echo tprint_controls(['orient' => 'portrait', 'wrap' => false]); ?>
+        </div>
     </div>
 
-    <div class="row g-0 border rounded overflow-hidden">
+    <div class="row g-0 border rounded overflow-hidden absent-wrap">
         <!-- Left: Class-wise list -->
-        <div class="col-md-3 border-end" style="background:#fff;">
+        <div class="col-md-3 border-end no-print" style="background:#fff;">
             <?php if ($class_counts): foreach ($class_counts as $c): ?>
                 <a href="index.php?page=attendance_absent_list&class_id=<?php echo (int) $c['id']; ?>"
                    class="absent-class-item <?php echo (int) $c['id'] === $f_class ? 'active' : ''; ?>">
@@ -226,20 +240,21 @@ $display_date = date('F j, Y', strtotime($today));
         </div>
 
         <!-- Right: Absent students table -->
-        <div class="col-md-9">
+        <div class="col-md-9 absent-table-col">
             <form method="POST" action="index.php?page=attendance_absent_list&class_id=<?php echo (int) $f_class; ?>" id="smsForm">
                 <?php echo csrf_field(); ?>
                 <div class="table-responsive">
                     <table class="table table-bordered align-middle m-0" style="font-size: 13.5px;">
                         <thead class="table-light">
                             <tr>
-                                <th style="width:40px;"><input type="checkbox" id="checkAll" onclick="toggleAllChecks(this)"></th>
+                                <th class="no-print" style="width:40px;"><input type="checkbox" id="checkAll" onclick="toggleAllChecks(this)"></th>
                                 <th>ID</th>
                                 <th style="width:70px;">Roll</th>
                                 <th>Shift</th>
                                 <th>Section</th>
                                 <th>Name</th>
-                                <th style="width:150px;">
+                                <th class="d-none d-print-table-cell">Guardian Phone</th>
+                                <th class="no-print" style="width:150px;">
                                     <button type="submit" name="send_sms" class="btn btn-success btn-sm fw-bold w-100" onclick="return checkAllBeforeSubmit()">
                                         <i class="fa-solid fa-paper-plane"></i> Send SMS(All)
                                     </button>
@@ -249,7 +264,7 @@ $display_date = date('F j, Y', strtotime($today));
                         <tbody>
                             <?php if ($absent_students): foreach ($absent_students as $st): ?>
                                 <tr>
-                                    <td><input type="checkbox" name="student_ids[]" value="<?php echo (int) $st['id']; ?>" class="row-check" <?php echo empty($st['guardian_phone']) ? 'disabled' : ''; ?>></td>
+                                    <td class="no-print"><input type="checkbox" name="student_ids[]" value="<?php echo (int) $st['id']; ?>" class="row-check" <?php echo empty($st['guardian_phone']) ? 'disabled' : ''; ?>></td>
                                     <td><?php echo al_esc($st['student_id']); ?></td>
                                     <td><?php echo al_esc($st['roll_no']); ?></td>
                                     <td><?php echo al_esc($st['shift_name'] ?: '-'); ?></td>
@@ -258,7 +273,8 @@ $display_date = date('F j, Y', strtotime($today));
                                         <img src="<?php echo $st['photo_path'] ? '../' . al_esc($st['photo_path']) : 'data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2728%27 height=%2728%27%3E%3Crect width=%2728%27 height=%2728%27 fill=%27%23e2e8f0%27/%3E%3C/svg%3E'; ?>" style="width:28px;height:28px;border-radius:50%;object-fit:cover;margin-right:8px;border:1px solid #e2e8f0;">
                                         <?php echo al_esc($st['name_en']); ?>
                                     </td>
-                                    <td>
+                                    <td class="d-none d-print-table-cell"><?php echo al_esc($st['guardian_phone'] ?: '-'); ?></td>
+                                    <td class="no-print">
                                         <button type="submit" name="send_sms" class="btn btn-primary btn-sm w-100 fw-bold"
                                             onclick="return selectOnly(this, <?php echo (int) $st['id']; ?>)"
                                             <?php echo empty($st['guardian_phone']) ? 'disabled title="Guardian মোবাইল নেই"' : ''; ?>>
