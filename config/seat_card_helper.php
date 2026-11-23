@@ -300,7 +300,7 @@ if (!function_exists('ac_layout')) {
             '4rect' => ['portrait', 94, 135],
             '4sq'   => ['portrait', 94, 94],
             '3rect' => ['portrait', 194, 90],
-            '2half' => ['portrait', 193, 137],
+            '2half' => ['portrait', 193, 118],
             '1full' => ['portrait', 193, 278],
         ];
         $preset = (string) ($in['preset'] ?? '4rect');
@@ -311,9 +311,11 @@ if (!function_exists('ac_layout')) {
         } else {
             [$ori, $w, $h] = $presets[$preset];
         }
-        $gap = 4; $margin = 8;
-        $pw = ($ori === 'landscape' ? 297 : 210) - 2 * $margin;
-        $ph = ($ori === 'landscape' ? 210 : 297) - 2 * $margin;
+        $gap = ($preset === '2half') ? 28 : 4;
+        $margin_x = 8;
+        $margin_y = ($preset === '2half') ? 14 : 8;
+        $pw = ($ori === 'landscape' ? 297 : 210) - 2 * $margin_x;
+        $ph = ($ori === 'landscape' ? 210 : 297) - 2 * $margin_y;
         $w = max(50.0, min((float) $pw, $w));
         $h = max(40.0, min((float) $ph, $h));
         $cols = max(1, (int) floor(($pw + $gap) / ($w + $gap)));
@@ -328,6 +330,7 @@ if (!function_exists('ac_layout')) {
         return [
             'preset' => $preset, 'ori' => $ori, 'w' => round($w, 1), 'h' => round($h, 1),
             'cols' => $cols, 'rows' => $rows, 'per' => $cols * $rows, 'gap' => $gap,
+            'mx' => $margin_x, 'my' => $margin_y,
             'mode' => $mode, 'dw' => $dw, 'k' => $k, 'dh' => ($h * 3.7795) / $k,
         ];
     }
@@ -416,33 +419,37 @@ if (!function_exists('ac_css')) {
 .admitcard2.ac-tall .ad-info { flex: 1 1 150px; }
 .admitcard2.ac-tall .ad-qr { margin: 0 auto; }
 
-/* ====== ২ টা / পাতা — Half Page (Image #2 style, 193mm x 137mm) ====== */
+/* ====== ২ টা / পাতা — Half Page (Image #2 style, 193mm x 118mm) ====== */
 .admit-half {
     width: 100%; height: 100%; box-sizing: border-box; background: #fff; border: 1.5px solid #1e293b;
     display: flex; flex-direction: column; font-family: 'Segoe UI', 'Noto Sans Bengali', Arial, sans-serif;
     color: #111827; text-align: left; page-break-inside: avoid; break-inside: avoid;
 }
 .admit-half .ah-head {
-    display: flex; align-items: center; gap: 10px; padding: 7px 14px 6px; border-bottom: 1.3px solid #334155;
+    display: flex; align-items: center; gap: 8px; padding: 6px 12px 5px; border-bottom: 1.3px solid #334155;
 }
-.admit-half .ah-logo, .admit-half .ah-head-spacer {
-    width: 54px; height: 54px; flex: 0 0 54px; display: flex; align-items: center; justify-content: center; overflow: hidden;
+.admit-half .ah-logo {
+    width: 50px; height: 50px; flex: 0 0 50px; display: flex; align-items: center; justify-content: center; overflow: hidden;
 }
+.admit-half .ah-head-spacer { width: 12px; flex: 0 0 12px; }
 .admit-half .ah-logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .admit-half .ah-logo span {
-    width: 46px; height: 46px; border-radius: 50%; border: 2px solid #1e3a8a; color: #1e3a8a;
-    font-weight: 900; font-size: 20px; display: flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; border-radius: 50%; border: 2px solid #1e3a8a; color: #1e3a8a;
+    font-weight: 900; font-size: 19px; display: flex; align-items: center; justify-content: center;
 }
 .admit-half .ah-inst { flex: 1; text-align: center; min-width: 0; }
 .admit-half .ah-inst-name {
-    font-size: 21px; font-weight: 900; color: #1e3a8a; letter-spacing: .7px; line-height: 1.12;
-    text-transform: uppercase; overflow-wrap: break-word;
+    font-size: 16.5px; font-weight: 900; color: #1e3a8a; letter-spacing: .25px; line-height: 1.15;
+    text-transform: uppercase; white-space: nowrap;
 }
 .admit-half .ah-inst-sub {
-    font-size: 12.5px; color: #334155; font-style: italic; font-family: Georgia, 'Times New Roman', serif;
+    font-size: 12px; color: #334155; font-style: italic; font-family: Georgia, 'Times New Roman', serif;
     margin-top: 2px; line-height: 1.2; overflow-wrap: break-word;
 }
-.admit-half .ah-title-row { position: relative; text-align: center; padding: 6px 14px 2px; }
+.admit-half .ah-inst-contact {
+    font-size: 10.5px; color: #1e293b; font-weight: 600; margin-top: 2px; line-height: 1.2;
+}
+.admit-half .ah-title-row { position: relative; text-align: center; padding: 5px 14px 2px; }
 .admit-half .ah-card-box {
     display: inline-block; border: 1.4px solid #111827; padding: 2px 36px;
     font-size: 15px; font-weight: 800; color: #0f172a; line-height: 1.25;
@@ -451,15 +458,15 @@ if (!function_exists('ac_css')) {
     font-size: 13px; font-weight: 700; text-decoration: underline; text-underline-offset: 2px;
     color: #111827; margin-top: 3px;
 }
-.admit-half .ah-issue { position: absolute; right: 14px; top: 8px; font-size: 11px; color: #111827; }
+.admit-half .ah-issue { position: absolute; right: 14px; top: 7px; font-size: 11px; color: #111827; }
 .admit-half .ah-body {
-    flex: 1 1 auto; display: flex; align-items: flex-start; gap: 12px; padding: 10px 16px 4px; min-height: 0;
+    flex: 1 1 auto; display: flex; align-items: flex-start; gap: 12px; padding: 10px 16px 2px; min-height: 0;
 }
 .admit-half .ah-info-wrap {
     flex: 1; min-width: 0; display: grid; grid-template-columns: 1.35fr 1fr; gap: 0 14px; align-items: end;
 }
 .admit-half .ah-kv { width: 100%; border-collapse: collapse; }
-.admit-half .ah-kv td { padding: 2.5px 2px; font-size: 12.5px; color: #111827; vertical-align: top; line-height: 1.3; }
+.admit-half .ah-kv td { padding: 3px 2px; font-size: 12.5px; color: #111827; vertical-align: top; line-height: 1.3; }
 .admit-half .ah-kv td.ah-lbl { width: 82px; font-weight: 700; white-space: nowrap; }
 .admit-half .ah-kv td.ah-col { width: 10px; font-weight: 700; text-align: center; }
 .admit-half .ah-kv td.ah-val { font-weight: 500; overflow-wrap: break-word; }
@@ -469,16 +476,16 @@ if (!function_exists('ac_css')) {
 }
 .admit-half .ah-photo img { width: 100%; height: 100%; object-fit: cover; }
 .admit-half .ah-sigs {
-    display: flex; justify-content: space-between; align-items: flex-end; gap: 36px; padding: 4px 32px 7px;
+    display: flex; justify-content: space-between; align-items: flex-end; gap: 36px; padding: 2px 32px 6px;
 }
 .admit-half .ah-sig { width: 40%; text-align: center; }
-.admit-half .ah-sig-img { height: 30px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: 2px; }
-.admit-half .ah-sig-img img { max-height: 28px; max-width: 140px; object-fit: contain; }
+.admit-half .ah-sig-img { height: 28px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: 2px; }
+.admit-half .ah-sig-img img { max-height: 26px; max-width: 140px; object-fit: contain; }
 .admit-half .ah-sig-line {
     border-top: 1.2px solid #111827; padding-top: 3px; font-size: 11.5px; font-weight: 600; color: #111827;
 }
 .admit-half .ah-nb {
-    margin: 0 14px 9px; border: 1px solid #475569; padding: 4px 8px;
+    margin: 0 14px 8px; border: 1px solid #475569; padding: 4px 8px;
     font-size: 10.5px; font-weight: 700; line-height: 1.3; color: #111827;
 }
 
@@ -581,8 +588,11 @@ if (!function_exists('ac_css')) {
 .admit-full .af-strip-lbl { color: #b91c1c; font-weight: 800; }
 </style>
 CSS;
-        $page = '@page { size: A4 ' . $L['ori'] . '; margin: 8mm; }';
-        $dyn  = '.ac-page { grid-template-columns: repeat(' . (int) $L['cols'] . ', ' . $L['w'] . 'mm); gap: ' . (int) $L['gap'] . 'mm; }'
+        $my = (int) ($L['my'] ?? 8);
+        $mx = (int) ($L['mx'] ?? 8);
+        $page = '@page { size: A4 ' . $L['ori'] . '; margin: ' . $my . 'mm ' . $mx . 'mm; }';
+        $page_pad = ($L['preset'] === '2half') ? 'padding: ' . $my . 'mm ' . $mx . 'mm;' : '';
+        $dyn  = '.ac-page { grid-template-columns: repeat(' . (int) $L['cols'] . ', ' . $L['w'] . 'mm); gap: ' . (int) $L['gap'] . 'mm;' . $page_pad . ' }'
               . '.ac-cell { width: ' . $L['w'] . 'mm; height: ' . $L['h'] . 'mm; }'
               . '.admitcard2 { width: ' . $L['dw'] . 'px; height: ' . round($L['dh'], 2) . 'px; transform: scale(' . round($L['k'], 5) . '); }';
         return str_replace('<style>', '<style>' . $page . $dyn, $css);
@@ -600,6 +610,19 @@ if (!function_exists('ac_card_half')) {
         if ($sub === '') {
             $sub = trim((string) ($d['address'] ?? ''));
         }
+        $phone = trim((string) ($d['phone'] ?? ''));
+        $email = trim((string) ($d['email'] ?? ''));
+        $contact_parts = [];
+        if ($phone !== '') { $contact_parts[] = 'Mobile: ' . $phone; }
+        if ($email !== '') { $contact_parts[] = 'Email: ' . $email; }
+
+        $inst_len = mb_strlen($inst);
+        if ($inst_len <= 22)      { $inst_fs = '21px'; }
+        elseif ($inst_len <= 32)  { $inst_fs = '18.5px'; }
+        elseif ($inst_len <= 45)  { $inst_fs = '16.5px'; }
+        elseif ($inst_len <= 56)  { $inst_fs = '14.5px'; }
+        else                      { $inst_fs = '13px'; }
+
         $term = trim((string) ($d['term'] ?? ''));
         $issue_date = trim((string) ($d['issue_date'] ?? '')) ?: date('d/m/Y');
         $sig_principal = trim((string) ($d['sig_right_label'] ?? '')) ?: 'Principal';
@@ -627,8 +650,9 @@ if (!function_exists('ac_card_half')) {
                     <?php else: ?><span><?php echo sc_e(mb_substr($inst !== '' ? $inst : 'A', 0, 1)); ?></span><?php endif; ?>
                 </div>
                 <div class="ah-inst">
-                    <div class="ah-inst-name"><?php echo sc_e($inst); ?></div>
+                    <div class="ah-inst-name" style="font-size:<?php echo $inst_fs; ?>;"><?php echo sc_e($inst); ?></div>
                     <?php if ($sub !== ''): ?><div class="ah-inst-sub"><?php echo sc_e($sub); ?></div><?php endif; ?>
+                    <?php if ($contact_parts): ?><div class="ah-inst-contact"><?php echo sc_e(implode('  |  ', $contact_parts)); ?></div><?php endif; ?>
                 </div>
                 <div class="ah-head-spacer"></div>
             </div>
@@ -693,6 +717,8 @@ if (!function_exists('ac_card_full')) {
         $session = trim((string) ($d['session'] ?? '')) ?: trim((string) ($d['year'] ?? ''));
         $subtitle_parts = array_filter([
             trim((string) ($d['address'] ?? '')),
+            trim((string) ($d['phone'] ?? '')) !== '' ? 'Mobile: ' . trim((string) $d['phone']) : '',
+            trim((string) ($d['email'] ?? '')) !== '' ? 'Email: ' . trim((string) $d['email']) : '',
             trim((string) ($d['website'] ?? '')),
         ], static fn($v) => $v !== '');
 
