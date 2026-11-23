@@ -222,6 +222,8 @@ $dac_layout_opts_cfg = [
                    branches.address AS student_branch_address,
                    branches.city AS student_branch_city,
                    branches.zip_code AS student_branch_zip,
+                   branches.phone AS student_branch_phone,
+                   branches.email AS student_branch_email,
                    branches.signature_path AS student_branch_sig
             FROM students
             LEFT JOIN academic_classes ON academic_classes.id = students.class_id
@@ -323,11 +325,32 @@ $dac_layout_opts_cfg = [
                 $st_branch_name = trim((string) ($st['student_branch_name'] ?? '')) ?: trim((string) ($branch['branch_name'] ?? ''));
                 $st_branch_short = trim((string) ($st['student_branch_short'] ?? '')) ?: trim((string) ($branch['short_name'] ?? ''));
                 $st_sig = trim((string) ($st['student_branch_sig'] ?? '')) ?: trim((string) ($branch['signature_path'] ?? ''));
+
+                $raw_slogan = trim((string) ($institute['slogan'] ?? ''));
+                $resolved_slogan = ($raw_slogan === '' || in_array(strtolower($raw_slogan), ['excellence in education', 'an enlightened generation, our promise'], true))
+                    ? 'An Enlightened Generation Is Our Commitment'
+                    : $raw_slogan;
+
+                $resolved_phone = '';
+                foreach ([$institute['phone_number'] ?? '', $st['student_branch_phone'] ?? '', $branch['phone'] ?? ''] as $cand_phone) {
+                    $cand_phone = trim((string) $cand_phone);
+                    if ($cand_phone !== '' && $cand_phone !== '01700000000') { $resolved_phone = $cand_phone; break; }
+                }
+                if ($resolved_phone === '') { $resolved_phone = '+8801779802912'; }
+
+                $resolved_email = '';
+                foreach ([$institute['email'] ?? '', $st['student_branch_email'] ?? '', $branch['email'] ?? ''] as $cand_email) {
+                    $cand_email = trim((string) $cand_email);
+                    if ($cand_email !== '' && $cand_email !== 'info@yourschool.com') { $resolved_email = $cand_email; break; }
+                }
+                if ($resolved_email === '') { $resolved_email = 'tawhaazinnurain@gmail.com'; }
                 ?>
                 <?php echo ac_card([
                     'institute'         => $inst_display_name,
                     'logo'              => $institute['logo_path'] ?? '',
-                    'slogan'            => trim((string) ($institute['slogan'] ?? '')),
+                    'slogan'            => $resolved_slogan,
+                    'phone'             => $resolved_phone,
+                    'email'             => $resolved_email,
                     'eiin'              => trim((string) ($institute['eiin_no'] ?? '')),
                     'address'           => $addr_line,
                     'website'           => trim((string) ($institute['website'] ?? '')),
