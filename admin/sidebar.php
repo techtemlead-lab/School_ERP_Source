@@ -318,8 +318,8 @@ function sb_mod_ok(PDO $pdo, array $tree, string $modkey): bool
                         <i class="fa-solid fa-angles-down small"></i>
                     </a>
                     <ul class="collapse submenu submenu-nested" id="resultReportsSubmenu">
-                        <li><a href="index.php?page=result_admit_card_customize">Customize Admit Card</a></li>
                         <li><a href="index.php?page=result_download_admit_card">Download Admit Card</a></li>
+                        <li><a href="index.php?page=result_admit_card_customize">Customize Admit Card</a></li>
                         <li><a href="index.php?page=result_attendance_blank_sheet">Attendance Blank Sheet</a></li>
                         <li><a href="index.php?page=result_marks_entry_blank_sheet">Marks Entry Blank Sheet</a></li>
                         <li><a href="index.php?page=result_tabulation_sheet">Tabulation Sheet</a></li>

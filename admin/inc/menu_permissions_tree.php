@@ -157,8 +157,8 @@ return [
                 ['key'=>'result_marks_entry_exam','label'=>'Marks Entry (Exam)'],
             ]],
             ['type'=>'group','key'=>'resultReportsSubmenu','label'=>'Result Reports','children'=>[
-                ['key'=>'result_admit_card_customize','label'=>'Customize Admit Card'],
                 ['key'=>'result_download_admit_card','label'=>'Download Admit Card'],
+                ['key'=>'result_admit_card_customize','label'=>'Customize Admit Card'],
                 ['key'=>'result_attendance_blank_sheet','label'=>'Attendance Blank Sheet'],
                 ['key'=>'result_marks_entry_blank_sheet','label'=>'Marks Entry Blank Sheet'],
                 ['key'=>'result_tabulation_sheet','label'=>'Tabulation Sheet'],
