@@ -1,64 +1,40 @@
 <?php
 // admin/result_download_admit_card.php - Result Module > Result Reports > Download Admit Card
-// Class/Shift/Section/Term/Part/Student ফিল্টার দিয়ে সাবমিট করলে প্রতিটা শিক্ষার্থীর জন্য
-// একটা প্রিন্টযোগ্য Admit Card (QR কোড + ছবি + ঠিকানাসহ) জেনারেট হয়।
+// General (নিয়মিত পরীক্ষা) ও Admission (ভর্তি পরীক্ষা) — দুই ধরনের অ্যাডমিট কার্ড জেনারেশন।
+// লেআউট ও কাস্টমাইজেশন Customize Admit Card থেকে নিয়ন্ত্রিত হয়; এখানে পেজ টাইপ, মার্জিন ও কালার/গ্রেস্কেল নির্বাচন করা যায়।
 
 require_once __DIR__ . '/../config/seat_card_helper.php';
 function dacv($val): string { return htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8'); }
 
-function dac_layout_in(array $src): array
+function dac_print_fields(string $paper, string $margin, string $color_mode, bool $auto_submit = false): void
 {
-    return [
-        'preset' => (string) ($src['layout'] ?? $src['preset'] ?? ''), 'ori' => (string) ($src['ori'] ?? 'portrait'),
-        'w' => $src['cw'] ?? $src['w'] ?? 94, 'h' => $src['ch'] ?? $src['h'] ?? 94,
+    $on_chg_pm  = $auto_submit ? ' onchange="this.form.submit()"' : '';
+    $on_chg_col = $auto_submit ? ' onchange="dacToggleColorMode(this.value);this.form.submit()"' : '';
+    $papers = ['A4' => 'A4', 'Legal' => 'Legal', 'Letter' => 'Letter'];
+    $margins = [
+        'normal' => 'Normal (স্বাভাবিক)',
+        'narrow' => 'Narrow (চিকন)',
+        'wide'   => 'Wide (প্রশস্ত)',
+        'none'   => 'None (শূন্য)',
     ];
-}
-
-function dac_layout_fields(array $L, array $opts_cfg = []): void
-{
-    $opts = [
-        '4rect'  => '৪ টা / পাতা — Rectangular',
-        '4sq'    => '৪ টা / পাতা — Square',
-        '3rect'  => '৩ টা / পাতা — Rectangular',
-        '2half'  => '২ টা / পাতা — Half Page',
-        '1full'  => '১ টা / পাতা — Full Page',
-        'custom' => 'Custom (নিজে সাইজ বসাব)',
-    ];
-    $can_customize = !empty($opts_cfg['can_customize']);
-    $is_custom_instr = !empty($opts_cfg['is_custom_instr']);
-    $color_mode = (($opts_cfg['color_mode'] ?? 'color') === 'grayscale') ? 'grayscale' : 'color';
-
-    echo '<select name="layout" id="dacLayout" data-ss="off" class="form-select form-select-sm" style="width:auto;" onchange="dacLayoutToggle()">';
-    foreach ($opts as $k => $label) { echo '<option value="' . $k . '"' . ($L['preset'] === $k ? ' selected' : '') . '>' . dacv($label) . '</option>'; }
-    echo '</select>';
-    echo '<span id="dacCustom" class="align-items-center gap-2" style="display:none;">'
-       . '<select name="ori" id="dacOri" data-ss="off" class="form-select form-select-sm" style="width:auto;" onchange="dacLayoutToggle()">'
-       . '<option value="portrait"' . ($L['ori'] === 'portrait' ? ' selected' : '') . '>Portrait</option>'
-       . '<option value="landscape"' . ($L['ori'] === 'landscape' ? ' selected' : '') . '>Landscape</option></select>'
-       . '<label class="small mb-0">চওড়া</label><input type="number" name="cw" id="dacCw" class="form-control form-control-sm" style="width:80px;" min="50" max="287" step="0.5" value="' . dacv($L['w']) . '" oninput="dacLayoutToggle()">'
-       . '<label class="small mb-0">উচ্চতা</label><input type="number" name="ch" id="dacCh" class="form-control form-control-sm" style="width:80px;" min="40" max="287" step="0.5" value="' . dacv($L['h']) . '" oninput="dacLayoutToggle()"> <span class="small">mm</span>'
-       . '</span> <span id="dacPer" class="badge bg-secondary"></span>';
-    echo ' <select name="color_mode" id="dacColorMode" data-ss="off" class="form-select form-select-sm" style="width:auto;" onchange="dacToggleColorMode(this.value)" title="Print Color Mode">'
+    echo '<label class="small fw-bold mb-0">Page Type:</label>'
+       . '<select name="paper_size" data-ss="off" class="form-select form-select-sm" style="width:auto;" title="Paper Size"' . $on_chg_pm . '>';
+    foreach ($papers as $k => $lbl) {
+        echo '<option value="' . $k . '"' . ($paper === $k ? ' selected' : '') . '>' . dacv($lbl) . '</option>';
+    }
+    echo '</select>'
+       . '<label class="small fw-bold mb-0 ms-1">Margin:</label>'
+       . '<select name="page_margin" data-ss="off" class="form-select form-select-sm" style="width:auto;" title="Page Margin"' . $on_chg_pm . '>';
+    foreach ($margins as $k => $lbl) {
+        echo '<option value="' . $k . '"' . ($margin === $k ? ' selected' : '') . '>' . dacv($lbl) . '</option>';
+    }
+    echo '</select>'
+       . '<label class="small fw-bold mb-0 ms-1">Mode:</label>'
+       . '<select name="color_mode" id="dacColorMode" data-ss="off" class="form-select form-select-sm" style="width:auto;" title="Print Color Mode"' . $on_chg_col . '>'
        . '<option value="color"' . ($color_mode === 'color' ? ' selected' : '') . '>Color</option>'
        . '<option value="grayscale"' . ($color_mode === 'grayscale' ? ' selected' : '') . '>Grayscale (B&amp;W)</option>'
-       . '</select>';
-    if ($can_customize) {
-        echo ' <a id="dacInstrBtn" href="index.php?page=result_admit_card_customize#dacRulesSection" class="btn btn-sm btn-outline-primary fw-semibold align-items-center gap-1" style="display:none;">'
-           . '<i class="fa-solid fa-file-pen"></i> নিয়মকানুন এডিট করুন'
-           . ($is_custom_instr ? ' <span class="badge bg-success">Custom</span>' : '')
-           . '</a>';
-    }
-    echo '<script>function dacLayoutToggle(){var sel=document.getElementById("dacLayout");var val=sel?sel.value:"4rect";var c=val==="custom";'
-       . 'var ce=document.getElementById("dacCustom");if(ce){ce.style.display=c?"inline-flex":"none";}'
-       . 'var P={"4rect":[2,2],"4sq":[2,2],"3rect":[1,3],"2half":[1,2],"1full":[1,1]};var n;'
-       . 'if(!c){var sz=P[val]||[2,2];n=sz[0]*sz[1];}else{'
-       . 'var ori=document.getElementById("dacOri").value,w=parseFloat(document.getElementById("dacCw").value)||94,h=parseFloat(document.getElementById("dacCh").value)||94;'
-       . 'var pw=(ori==="landscape"?297:210)-16,ph=(ori==="landscape"?210:297)-16;w=Math.max(50,Math.min(pw,w));h=Math.max(40,Math.min(ph,h));'
-       . 'n=Math.max(1,Math.floor((pw+4)/(w+4)))*Math.max(1,Math.floor((ph+4)/(h+4)));}'
-       . 'var pe=document.getElementById("dacPer");if(pe){pe.textContent="প্রতি A4 পাতায় "+n+" টা";}'
-       . 'var ib=document.getElementById("dacInstrBtn");if(ib){ib.style.display=(val==="1full")?"inline-flex":"none";}'
-       . '}dacLayoutToggle();'
-       . 'function dacToggleColorMode(v){var p=document.getElementById("dacPages");if(p){p.classList.toggle("ac-gray",v==="grayscale");}}</script>';
+       . '</select>'
+       . '<script>function dacToggleColorMode(v){var p=document.getElementById("dacPages");if(p){p.classList.toggle("ac-gray",v==="grayscale");}}</script>';
 }
 
 function dac_routine_block_url(array $g): string
@@ -183,7 +159,7 @@ function dac_render_routine_block_alert(string $cls_name, string $trm_name, stri
         echo '<a href="' . dacv($routine_url) . '" class="btn btn-sm btn-primary fw-semibold"><i class="fa-solid fa-calendar-plus me-1"></i> Exam Routine যোগ করুন</a>';
     }
     if ($can_customize) {
-        echo '<a href="index.php?page=result_admit_card_customize#dacRoutineSection" class="btn btn-sm btn-outline-secondary fw-semibold"><i class="fa-solid fa-sliders me-1"></i> Customize Admit Card-এ রুটিন অফ করুন</a>';
+        echo '<a href="index.php?page=result_admit_card_customize&admit_type=general#dacRoutineSection" class="btn btn-sm btn-outline-secondary fw-semibold"><i class="fa-solid fa-sliders me-1"></i> Customize Admit Card-এ রুটিন অফ করুন</a>';
     }
     echo '</div></div>';
 }
@@ -215,41 +191,67 @@ $instr_branch_id = $fr_bid2;
 $can_customize = !function_exists('perm_page_allowed') || perm_page_allowed($pdo, 'result_admit_card_customize');
 $can_routine   = !function_exists('perm_page_allowed') || perm_page_allowed($pdo, 'result_exam_routine');
 
+$view = $_GET['view'] ?? 'config';
+if ($view === 'output' && !empty($_SESSION['dac_generate']['admit_type'])) {
+    $admit_type = ac_normalize_type((string) $_SESSION['dac_generate']['admit_type']);
+} elseif (isset($_POST['admit_type'])) {
+    $admit_type = ac_normalize_type((string) $_POST['admit_type']);
+} elseif (isset($_GET['admit_type'])) {
+    $admit_type = ac_normalize_type((string) $_GET['admit_type']);
+} else {
+    $admit_type = ac_normalize_type((string) ($_SESSION['dac_generate']['admit_type'] ?? 'general'));
+}
+
 // -----------------------------------------------------------
-// POST: ফর্ম সাবমিট -> রুটিন যাচাই ও ফিল্টার সেশনে রেখে output ভিউতে রিডাইরেক্ট
+// POST: ফর্ম সাবমিট -> পেজ/মার্জিন/কালার সংরক্ষণ + রুটিন যাচাই -> output ভিউ
 // -----------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_admit_cards'])) {
+    $post_type = ac_normalize_type($_POST['admit_type'] ?? 'general');
+    $back_url = 'index.php?page=result_download_admit_card&admit_type=' . $post_type;
+
     if (!csrf_verify($_POST['csrf_token'] ?? null)) {
         $_SESSION['dac_err'] = 'ফর্মের মেয়াদ শেষ হয়ে গেছে, পেজ রিলোড করে আবার চেষ্টা করুন।';
-        header('Location: index.php?page=result_download_admit_card');
+        header('Location: ' . $back_url);
         exit();
     }
 
     $f_class_id = (int) ($_POST['class_id'] ?? 0);
     $f_term_id  = (int) ($_POST['term_id'] ?? 0);
 
-    if ($f_class_id <= 0 || $f_term_id <= 0) {
-        $_SESSION['dac_err'] = 'Class এবং Term আবশ্যক।';
-        header('Location: index.php?page=result_download_admit_card');
+    if ($f_class_id <= 0 || ($post_type === 'general' && $f_term_id <= 0)) {
+        $_SESSION['dac_err'] = $post_type === 'admission'
+            ? 'Class নির্বাচন করা আবশ্যক।'
+            : 'Class এবং Term আবশ্যক।';
+        header('Location: ' . $back_url);
         exit();
     }
 
-    $post_g = [
-        'class_id'       => $f_class_id,
-        'shift_id'       => (int) ($_POST['shift_id'] ?? 0),
-        'section_id'     => (int) ($_POST['section_id'] ?? 0),
-        'term_id'        => $f_term_id,
-        'part_id'        => (int) ($_POST['part_id'] ?? 0),
-        'student_id_row' => (int) ($_POST['student_id_row'] ?? 0),
-    ];
-    $_SESSION['dac_layout'] = ac_layout(dac_layout_in($_POST));
-    $_SESSION['dac_color'] = (($_POST['color_mode'] ?? 'color') === 'grayscale') ? 'grayscale' : 'color';
+    $p_paper = in_array($_POST['paper_size'] ?? 'A4', ['A4', 'Letter', 'Legal'], true) ? (string) $_POST['paper_size'] : 'A4';
+    $p_margin = in_array($_POST['page_margin'] ?? 'normal', ['normal', 'narrow', 'wide', 'none'], true) ? (string) $_POST['page_margin'] : 'normal';
+    $p_color = (($_POST['color_mode'] ?? 'color') === 'grayscale') ? 'grayscale' : 'color';
+    $_SESSION['dac_paper'] = $p_paper;
+    $_SESSION['dac_margin'] = $p_margin;
+    $_SESSION['dac_color_' . $post_type] = $p_color;
 
-    $post_ac_settings = ac_load_settings($pdo, $instr_branch_id);
-    $post_layout = $_SESSION['dac_layout'];
-    $routine_required = !empty($post_ac_settings['show_routine'])
-        && ($post_layout['preset'] === '1full')
-        && (($post_ac_settings['full_template'] ?? 'classic') === 'modern');
+    $post_g = [
+        'admit_type'            => $post_type,
+        'class_id'              => $f_class_id,
+        'shift_id'              => (int) ($_POST['shift_id'] ?? 0),
+        'section_id'            => (int) ($_POST['section_id'] ?? 0),
+        'term_id'               => $post_type === 'general' ? $f_term_id : 0,
+        'part_id'               => $post_type === 'general' ? (int) ($_POST['part_id'] ?? 0) : 0,
+        'student_id_row'        => (int) ($_POST['student_id_row'] ?? 0),
+        'admission_title'       => mb_substr(trim((string) ($_POST['admission_title'] ?? 'Admission Test')), 0, 120) ?: 'Admission Test',
+        'admission_exam_date'   => mb_substr(trim((string) ($_POST['admission_exam_date'] ?? '')), 0, 150),
+        'admission_venue'       => mb_substr(trim((string) ($_POST['admission_venue'] ?? '')), 0, 180),
+        'admission_result_date' => mb_substr(trim((string) ($_POST['admission_result_date'] ?? '')), 0, 150),
+    ];
+
+    $post_ac_settings = ac_load_settings($pdo, $instr_branch_id, $post_type);
+    $post_preset = ac_normalize_layout_key((string) ($post_ac_settings['default_layout'] ?? '1full_modern'), (string) ($post_ac_settings['full_template'] ?? 'modern'));
+    $routine_required = ($post_type === 'general')
+        && !empty($post_ac_settings['show_routine'])
+        && ($post_preset === '1full_modern');
 
     if ($routine_required && !dac_fetch_routine_rows($pdo, $post_g)) {
         unset($_SESSION['dac_generate']);
@@ -262,40 +264,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_admit_cards'
             'term_name'   => trim((string) ($trm_q->fetchColumn() ?: '')),
             'routine_url' => dac_routine_block_url($post_g),
         ];
-        header('Location: index.php?page=result_download_admit_card');
+        header('Location: ' . $back_url);
         exit();
     }
 
     $_SESSION['dac_generate'] = $post_g;
-    header('Location: index.php?page=result_download_admit_card&view=output');
+    header('Location: index.php?page=result_download_admit_card&view=output&admit_type=' . $post_type);
     exit();
 }
 
-$ac_settings      = ac_load_settings($pdo, $instr_branch_id);
-$dac_instructions = ac_load_instructions($pdo, $instr_branch_id);
+$ac_settings      = ac_load_settings($pdo, $instr_branch_id, $admit_type);
+$dac_instructions = ac_load_instructions($pdo, $instr_branch_id, $admit_type);
 
-// সর্বশেষ বাছাই করা লেআউট (GET > SESSION > কাস্টমাইজেশন ডিফল্ট)
-if (isset($_GET['layout'])) {
-    $dac_layout_src = dac_layout_in($_GET);
-} elseif (!empty($_SESSION['dac_layout'])) {
-    $dac_layout_src = dac_layout_in($_SESSION['dac_layout']);
-} else {
-    $dac_layout_src = [
-        'preset' => $ac_settings['default_layout'] ?? '4rect',
-        'ori'    => $ac_settings['default_ori'] ?? 'portrait',
-        'w'      => $ac_settings['default_w'] ?? 94,
-        'h'      => $ac_settings['default_h'] ?? 135,
-    ];
-}
-$dac_layout = ac_layout($dac_layout_src);
-$_SESSION['dac_layout'] = $dac_layout;
+// পেজ সাইজ, মার্জিন এবং কালার মোড (GET > SESSION > কাস্টমাইজেশন ডিফল্ট)
+$dac_paper = in_array($_GET['paper_size'] ?? ($_SESSION['dac_paper'] ?? 'A4'), ['A4', 'Letter', 'Legal'], true)
+    ? (string) ($_GET['paper_size'] ?? ($_SESSION['dac_paper'] ?? 'A4'))
+    : 'A4';
+$dac_margin = in_array($_GET['page_margin'] ?? ($_SESSION['dac_margin'] ?? 'normal'), ['normal', 'narrow', 'wide', 'none'], true)
+    ? (string) ($_GET['page_margin'] ?? ($_SESSION['dac_margin'] ?? 'normal'))
+    : 'normal';
 
 if (isset($_GET['color_mode'])) {
     $dac_color = ($_GET['color_mode'] === 'grayscale') ? 'grayscale' : 'color';
+} elseif (isset($_SESSION['dac_color_' . $admit_type])) {
+    $dac_color = ($_SESSION['dac_color_' . $admit_type] === 'grayscale') ? 'grayscale' : 'color';
 } else {
-    $dac_color = (($_SESSION['dac_color'] ?? 'color') === 'grayscale') ? 'grayscale' : 'color';
+    $dac_color = (($ac_settings['default_color_mode'] ?? 'color') === 'grayscale') ? 'grayscale' : 'color';
 }
-$_SESSION['dac_color'] = $dac_color;
+$_SESSION['dac_paper'] = $dac_paper;
+$_SESSION['dac_margin'] = $dac_margin;
+$_SESSION['dac_color_' . $admit_type] = $dac_color;
+
+// লেআউট সর্বদা Customize Admit Card থেকে আসে
+$dac_layout = ac_layout([
+    'preset'        => $ac_settings['default_layout'] ?? '1full_modern',
+    'full_template' => $ac_settings['full_template'] ?? 'modern',
+    'ori'           => $ac_settings['default_ori'] ?? 'portrait',
+    'w'             => $ac_settings['default_w'] ?? 94,
+    'h'             => $ac_settings['default_h'] ?? 135,
+    'gap'           => $ac_settings['default_gap'] ?? 4,
+    'paper'         => $dac_paper,
+    'margin'        => $dac_margin,
+]);
+$layout_labels = ac_layout_labels();
+$active_layout_label = $layout_labels[$dac_layout['preset']] ?? $dac_layout['preset'];
 
 $classes  = $pdo->query("SELECT id, class_name FROM academic_classes WHERE status = 'Active' ORDER BY rank ASC, class_name ASC")->fetchAll();
 $shifts   = $pdo->query("SELECT id, shift_name FROM academic_shifts WHERE status = 'Active' ORDER BY shift_name ASC")->fetchAll();
@@ -309,32 +321,27 @@ $parts = $current_session_id
     : null;
 if ($parts) { $parts->execute([$current_session_id]); $parts = $parts->fetchAll(); } else { $parts = []; }
 
-$rdac_where = ["status = 'Active'"]; $rdac_params = [];
+$target_stu_status = ($admit_type === 'admission') ? 'Pending' : 'Active';
+$rdac_where = ["status = ?"];
+$rdac_params = [$target_stu_status];
 branch_apply_filter($rdac_where, $rdac_params);
 $rdac_stmt = $pdo->prepare("SELECT id, name_en, student_id FROM students WHERE " . implode(' AND ', $rdac_where) . " ORDER BY name_en ASC LIMIT 300");
 $rdac_stmt->execute($rdac_params);
 $all_students = $rdac_stmt->fetchAll();
-
-$view = $_GET['view'] ?? 'config';
-$dac_layout_opts_cfg = [
-    'can_customize'   => $can_customize,
-    'is_custom_instr' => !empty($dac_instructions['is_custom']),
-    'color_mode'      => $dac_color,
-];
 ?>
 
 <?php if ($view === 'output'): ?>
     <?php
     // ================= OUTPUT VIEW: অ্যাডমিট কার্ড জেনারেট =================
     $g = $_SESSION['dac_generate'] ?? [];
-
     if (!$g) {
-        header('Location: index.php?page=result_download_admit_card');
+        header('Location: index.php?page=result_download_admit_card&admit_type=' . $admit_type);
         exit();
     }
 
-    $where = ["students.status = 'Active'"];
-    $params = [];
+    $out_stu_status = ($admit_type === 'admission') ? 'Pending' : 'Active';
+    $where = ["students.status = ?"];
+    $params = [$out_stu_status];
     if (!empty($g['class_id']))       { $where[] = 'students.class_id = ?'; $params[] = $g['class_id']; }
     if (!empty($g['shift_id']))       { $where[] = 'students.shift_id = ?'; $params[] = $g['shift_id']; }
     if (!empty($g['section_id']))     { $where[] = 'students.section_id = ?'; $params[] = $g['section_id']; }
@@ -365,7 +372,7 @@ $dac_layout_opts_cfg = [
             LEFT JOIN academic_sessions ON academic_sessions.id = students.session_id
             LEFT JOIN branches ON branches.id = students.branch_id
             WHERE " . implode(' AND ', $where) . "
-            ORDER BY (students.roll_no + 0) ASC, students.roll_no ASC";
+            ORDER BY (students.roll_no + 0) ASC, students.roll_no ASC, students.id ASC";
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $students = $stmt->fetchAll();
@@ -383,16 +390,20 @@ $dac_layout_opts_cfg = [
     }
 
     $term_name = '';
-    if (!empty($g['term_id'])) {
-        $ts = $pdo->prepare("SELECT term_name FROM exam_terms WHERE id = ?");
-        $ts->execute([$g['term_id']]);
-        $term_name = $ts->fetchColumn() ?: '';
-    }
     $part_name = '';
-    if (!empty($g['part_id'])) {
-        $ps = $pdo->prepare("SELECT part_name FROM exam_parts WHERE id = ?");
-        $ps->execute([$g['part_id']]);
-        $part_name = $ps->fetchColumn() ?: '';
+    if ($admit_type === 'admission') {
+        $term_name = trim((string) ($g['admission_title'] ?? 'Admission Test')) ?: 'Admission Test';
+    } else {
+        if (!empty($g['term_id'])) {
+            $ts = $pdo->prepare("SELECT term_name FROM exam_terms WHERE id = ?");
+            $ts->execute([$g['term_id']]);
+            $term_name = $ts->fetchColumn() ?: '';
+        }
+        if (!empty($g['part_id'])) {
+            $ps = $pdo->prepare("SELECT part_name FROM exam_parts WHERE id = ?");
+            $ps->execute([$g['part_id']]);
+            $part_name = $ps->fetchColumn() ?: '';
+        }
     }
 
     $sig_left_label = 'Class Teacher';
@@ -407,7 +418,7 @@ $dac_layout_opts_cfg = [
         // exam_result_settings না থাকলে ডিফল্ট লেবেল থাকবে
     }
 
-    $all_routine_rows = dac_fetch_routine_rows($pdo, $g);
+    $all_routine_rows = ($admit_type === 'general') ? dac_fetch_routine_rows($pdo, $g) : [];
     $exam_date_str = '';
     $exam_time_str = '';
     foreach ($all_routine_rows as $er_item) {
@@ -417,10 +428,14 @@ $dac_layout_opts_cfg = [
             break;
         }
     }
+    if ($admit_type === 'admission' && !empty($g['admission_exam_date'])) {
+        $exam_date_str = (string) $g['admission_exam_date'];
+        $exam_time_str = trim((string) ($g['admission_venue'] ?? '')) ?: '—';
+    }
 
-    $routine_required = !empty($ac_settings['show_routine'])
-        && ($dac_layout['preset'] === '1full')
-        && (($ac_settings['full_template'] ?? 'classic') === 'modern');
+    $routine_required = ($admit_type === 'general')
+        && !empty($ac_settings['show_routine'])
+        && ($dac_layout['preset'] === '1full_modern');
     $output_routine_blocked = $routine_required && !$all_routine_rows;
 
     $admit_year = date('Y');
@@ -429,21 +444,22 @@ $dac_layout_opts_cfg = [
     <?php echo ac_css($dac_layout); ?>
 
     <div class="no-print d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-        <div class="d-flex align-items-center gap-2">
-            <a href="index.php?page=result_download_admit_card" class="btn btn-secondary"><i class="fa-solid fa-arrow-left"></i> Back</a>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <a href="index.php?page=result_download_admit_card&admit_type=<?php echo dacv($admit_type); ?>" class="btn btn-secondary"><i class="fa-solid fa-arrow-left"></i> Back</a>
             <?php if ($can_customize): ?>
-                <a href="index.php?page=result_admit_card_customize" class="btn btn-outline-primary btn-sm fw-semibold">
+                <a href="index.php?page=result_admit_card_customize&admit_type=<?php echo dacv($admit_type); ?>" class="btn btn-outline-primary btn-sm fw-semibold">
                     <i class="fa-solid fa-sliders me-1"></i> Customize Admit Card
                 </a>
             <?php endif; ?>
+            <span class="badge bg-light text-dark border"><?php echo dacv($active_layout_label); ?></span>
         </div>
         <form method="GET" class="d-flex align-items-center gap-2 flex-wrap">
             <input type="hidden" name="page" value="result_download_admit_card">
             <input type="hidden" name="view" value="output">
-            <?php dac_layout_fields($dac_layout, $dac_layout_opts_cfg); ?>
-            <button type="submit" class="btn btn-sm btn-outline-secondary">Apply</button>
+            <input type="hidden" name="admit_type" value="<?php echo dacv($admit_type); ?>">
+            <?php dac_print_fields($dac_paper, $dac_margin, $dac_color, true); ?>
             <?php if (!$output_routine_blocked): ?>
-                <button type="button" class="btn btn-primary fw-bold" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
+                <button type="button" class="btn btn-primary fw-bold ms-1" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
             <?php endif; ?>
         </form>
     </div>
@@ -493,61 +509,62 @@ $dac_layout_opts_cfg = [
                 }
                 ?>
                 <?php echo ac_card([
-                    'institute'         => $inst_display_name,
-                    'logo'              => $institute['logo_path'] ?? '',
-                    'slogan'            => $resolved_slogan,
-                    'phone'             => $resolved_phone,
-                    'email'             => $resolved_email,
-                    'eiin'              => trim((string) ($institute['eiin_no'] ?? '')),
-                    'address'           => $addr_line,
-                    'website'           => trim((string) ($institute['website'] ?? '')),
-                    'branch_name'       => $st_branch_name,
-                    'branch_short'      => $st_branch_short,
-                    'branch_address'    => $st_branch_addr,
-                    'branch_signature'  => $st_sig,
-                    'term'              => $term_name,
-                    'part'              => $part_name,
-                    'year'              => $admit_year,
-                    'issue_date'        => $issue_date,
-                    'exam_date'         => $exam_date_str,
-                    'exam_time'         => $exam_time_str,
-                    'sig_left_label'    => $sig_left_label,
-                    'sig_right_label'   => $sig_right_label,
-                    'session'           => trim((string) ($st['session_name'] ?? '')) ?: $current_session_name,
-                    'name'              => $st['name_en'],
-                    'father_name'       => $st['father_name'] ?? '',
-                    'mother_name'       => $st['mother_name'] ?? '',
-                    'dob'               => $st['dob'] ?? '',
-                    'birth_reg_no'      => $st['birth_reg_no'] ?? '',
-                    'student_mobile'    => trim((string) (($st['guardian_phone'] ?? '') ?: ($st['mobile'] ?? ''))),
-                    'gender'            => $st['gender'] ?? '',
-                    'religion'          => $st['religion'] ?? '',
-                    'blood_group'       => $st['blood_group'] ?? '',
-                    'present_address'   => $st['present_address'] ?? '',
-                    'permanent_address' => $st['permanent_address'] ?? '',
-                    'class'             => $st['class_name'] ?? '',
-                    'version'           => trim((string) ($st['class_medium_name'] ?? '')) ?: $school_version,
-                    'group'             => $st['group_name'] ?? '',
-                    'shift'             => $st['shift_name'] ?? '',
-                    'section'           => $st['section_name'] ?? '',
-                    'roll'              => $st['roll_no'],
-                    'student_id'        => $st['student_id'],
-                    'photo'             => $st['photo_path'] ?? '',
-                    'qr_id'             => 'acqr-' . (int) $i,
-                    'layout'            => $dac_layout,
-                    'routine_rows'      => dac_student_routine($all_routine_rows, $st),
-                    'instructions'      => $dac_instructions,
-                    'settings'          => $ac_settings,
+                    'admit_type'            => $admit_type,
+                    'institute'             => $inst_display_name,
+                    'logo'                  => $institute['logo_path'] ?? '',
+                    'slogan'                => $resolved_slogan,
+                    'phone'                 => $resolved_phone,
+                    'email'                 => $resolved_email,
+                    'eiin'                  => trim((string) ($institute['eiin_no'] ?? '')),
+                    'address'               => $addr_line,
+                    'website'               => trim((string) ($institute['website'] ?? '')),
+                    'branch_name'           => $st_branch_name,
+                    'branch_short'          => $st_branch_short,
+                    'branch_address'        => $st_branch_addr,
+                    'branch_signature'      => $st_sig,
+                    'term'                  => $term_name,
+                    'part'                  => $part_name,
+                    'year'                  => $admit_year,
+                    'issue_date'            => $issue_date,
+                    'exam_date'             => $exam_date_str,
+                    'exam_time'             => $exam_time_str,
+                    'admission_exam_date'   => $g['admission_exam_date'] ?? '',
+                    'admission_venue'       => $g['admission_venue'] ?? '',
+                    'admission_result_date' => $g['admission_result_date'] ?? '',
+                    'sig_left_label'        => $sig_left_label,
+                    'sig_right_label'       => $sig_right_label,
+                    'session'               => trim((string) ($st['session_name'] ?? '')) ?: $current_session_name,
+                    'name'                  => $st['name_en'],
+                    'father_name'           => $st['father_name'] ?? '',
+                    'mother_name'           => $st['mother_name'] ?? '',
+                    'dob'                   => $st['dob'] ?? '',
+                    'birth_reg_no'          => $st['birth_reg_no'] ?? '',
+                    'student_mobile'        => trim((string) (($st['guardian_phone'] ?? '') ?: ($st['mobile'] ?? ''))),
+                    'gender'                => $st['gender'] ?? '',
+                    'religion'              => $st['religion'] ?? '',
+                    'blood_group'           => $st['blood_group'] ?? '',
+                    'present_address'       => $st['present_address'] ?? '',
+                    'permanent_address'     => $st['permanent_address'] ?? '',
+                    'class'                 => $st['class_name'] ?? '',
+                    'version'               => trim((string) ($st['class_medium_name'] ?? '')) ?: $school_version,
+                    'group'                 => $st['group_name'] ?? '',
+                    'shift'                 => $st['shift_name'] ?? '',
+                    'section'               => $st['section_name'] ?? '',
+                    'roll'                  => $st['roll_no'],
+                    'student_id'            => $st['student_id'],
+                    'photo'                 => $st['photo_path'] ?? '',
+                    'qr_id'                 => 'acqr-' . (int) $i,
+                    'layout'                => $dac_layout,
+                    'routine_rows'          => ($admit_type === 'general') ? dac_student_routine($all_routine_rows, $st) : [],
+                    'instructions'          => $dac_instructions,
+                    'settings'              => $ac_settings,
                 ]); ?>
             <?php endforeach; ?>
         </div>
         <?php endforeach; ?>
         </div>
         <?php
-        $needs_qr = !empty($ac_settings['show_qr']) && (
-            !in_array($dac_layout['preset'], ['2half', '1full'], true)
-            || ($dac_layout['preset'] === '1full' && ($ac_settings['full_template'] ?? 'classic') === 'modern')
-        );
+        $needs_qr = !empty($ac_settings['show_qr']) && !in_array($dac_layout['preset'], ['2half', '1full_classic'], true);
         if ($needs_qr) { echo sc_qr_script(); }
         ?>
     <?php endif; ?>
@@ -560,16 +577,34 @@ $dac_layout_opts_cfg = [
         <?php if ($dac_routine_block): dac_render_routine_block_alert((string) ($dac_routine_block['class_name'] ?? ''), (string) ($dac_routine_block['term_name'] ?? ''), (string) ($dac_routine_block['routine_url'] ?? 'index.php?page=result_exam_routine'), $can_routine, $can_customize); endif; ?>
 
         <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
-            <h6 class="text-muted mb-0">Generate Admit Card for Session : <?php echo dacv($current_session_name); ?></h6>
-            <?php if ($can_customize): ?>
-                <a href="index.php?page=result_admit_card_customize" class="btn btn-outline-primary btn-sm fw-semibold">
-                    <i class="fa-solid fa-sliders me-1"></i> Customize Admit Card
-                </a>
-            <?php endif; ?>
+            <div>
+                <h6 class="text-muted mb-1">Generate Admit Card for Session : <?php echo dacv($current_session_name); ?></h6>
+                <div class="small text-muted">
+                    সক্রিয় লেআউট (Customize থেকে নির্ধারিত): <span class="badge bg-light text-primary border"><?php echo dacv($active_layout_label); ?></span>
+                </div>
+            </div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <div class="btn-group btn-group-sm" role="group" aria-label="Admit Card Type">
+                    <a href="index.php?page=result_download_admit_card&admit_type=general"
+                       class="btn fw-semibold <?php echo $admit_type === 'general' ? 'btn-primary' : 'btn-outline-primary'; ?>">
+                        <i class="fa-solid fa-graduation-cap me-1"></i> General Exam
+                    </a>
+                    <a href="index.php?page=result_download_admit_card&admit_type=admission"
+                       class="btn fw-semibold <?php echo $admit_type === 'admission' ? 'btn-primary' : 'btn-outline-primary'; ?>">
+                        <i class="fa-solid fa-user-plus me-1"></i> Admission Exam
+                    </a>
+                </div>
+                <?php if ($can_customize): ?>
+                    <a href="index.php?page=result_admit_card_customize&admit_type=<?php echo dacv($admit_type); ?>" class="btn btn-outline-primary btn-sm fw-semibold">
+                        <i class="fa-solid fa-sliders me-1"></i> Customize Admit Card
+                    </a>
+                <?php endif; ?>
+            </div>
         </div>
 
-        <form method="POST" action="index.php?page=result_download_admit_card">
+        <form method="POST" action="index.php?page=result_download_admit_card&admit_type=<?php echo dacv($admit_type); ?>">
             <?php echo csrf_field(); ?>
+            <input type="hidden" name="admit_type" value="<?php echo dacv($admit_type); ?>">
             <div class="row">
                 <div class="col-md-4">
                     <div class="row mb-3 align-items-center">
@@ -581,6 +616,7 @@ $dac_layout_opts_cfg = [
                             </select>
                         </div>
                     </div>
+                    <?php if ($admit_type === 'general'): ?>
                     <div class="row mb-3 align-items-center">
                         <label class="col-sm-4 col-form-label fw-bold text-end">Term <span class="text-danger">*</span></label>
                         <div class="col-sm-8">
@@ -590,6 +626,14 @@ $dac_layout_opts_cfg = [
                             </select>
                         </div>
                     </div>
+                    <?php else: ?>
+                    <div class="row mb-3 align-items-center">
+                        <label class="col-sm-4 col-form-label fw-bold text-end">Exam Title</label>
+                        <div class="col-sm-8">
+                            <input type="text" name="admission_title" maxlength="120" class="form-control" value="Admission Test" placeholder="Admission Test">
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 </div>
 
                 <div class="col-md-4">
@@ -602,6 +646,7 @@ $dac_layout_opts_cfg = [
                             </select>
                         </div>
                     </div>
+                    <?php if ($admit_type === 'general'): ?>
                     <div class="row mb-3 align-items-center">
                         <label class="col-sm-4 col-form-label fw-bold text-end">Part</label>
                         <div class="col-sm-8">
@@ -611,6 +656,14 @@ $dac_layout_opts_cfg = [
                             </select>
                         </div>
                     </div>
+                    <?php else: ?>
+                    <div class="row mb-3 align-items-center">
+                        <label class="col-sm-4 col-form-label fw-bold text-end">Exam Date</label>
+                        <div class="col-sm-8">
+                            <input type="text" name="admission_exam_date" maxlength="150" class="form-control" placeholder="যেমন: 25 Dec 2026, 10:00 AM">
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 </div>
 
                 <div class="col-md-4">
@@ -624,7 +677,7 @@ $dac_layout_opts_cfg = [
                         </div>
                     </div>
                     <div class="row mb-3 align-items-center">
-                        <label class="col-sm-4 col-form-label fw-bold text-end">Student</label>
+                        <label class="col-sm-4 col-form-label fw-bold text-end"><?php echo $admit_type === 'admission' ? 'Applicant' : 'Student'; ?></label>
                         <div class="col-sm-8">
                             <select name="student_id_row" class="form-select">
                                 <option value="">সবাই (Bulk)</option>
@@ -637,18 +690,38 @@ $dac_layout_opts_cfg = [
                 </div>
             </div>
 
-            <hr>
-            <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
-                <label class="fw-bold mb-0">Card Layout:</label>
-                <?php dac_layout_fields($dac_layout, $dac_layout_opts_cfg); ?>
+            <?php if ($admit_type === 'admission'): ?>
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="row mb-3 align-items-center">
+                        <label class="col-sm-4 col-form-label fw-bold text-end">Venue / Centre</label>
+                        <div class="col-sm-8">
+                            <input type="text" name="admission_venue" maxlength="180" class="form-control" placeholder="যেমন: Main Campus, Room 101">
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="row mb-3 align-items-center">
+                        <label class="col-sm-4 col-form-label fw-bold text-end">Result Date</label>
+                        <div class="col-sm-8">
+                            <input type="text" name="admission_result_date" maxlength="150" class="form-control" placeholder="ঐচ্ছিক — যেমন: 28 Dec 2026">
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="text-end">
+            <?php endif; ?>
+
+            <hr>
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <?php dac_print_fields($dac_paper, $dac_margin, $dac_color, false); ?>
+                </div>
                 <button type="submit" name="generate_admit_cards" class="btn btn-primary px-5 fw-bold" style="background-color:#1e3a8a;">Submit</button>
             </div>
         </form>
     </div>
 
-    <?php if (!$terms): ?>
+    <?php if ($admit_type === 'general' && !$terms): ?>
         <div class="alert alert-warning mt-3">
             এই সেশনের জন্য কোনো <strong>Exam Term</strong> সেট করা নেই। অ্যাডমিট কার্ড জেনারেট করার আগে
             <a href="index.php?page=result_exam_terms">Exam Terms</a> পেজ থেকে একটা Term যোগ করুন।
