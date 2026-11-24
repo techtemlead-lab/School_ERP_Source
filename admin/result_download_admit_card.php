@@ -61,9 +61,137 @@ function dac_layout_fields(array $L, array $opts_cfg = []): void
        . 'function dacToggleColorMode(v){var p=document.getElementById("dacPages");if(p){p.classList.toggle("ac-gray",v==="grayscale");}}</script>';
 }
 
+function dac_routine_block_url(array $g): string
+{
+    $qs = ['page' => 'result_exam_routine'];
+    foreach (['class_id', 'shift_id', 'section_id', 'term_id', 'part_id'] as $k) {
+        if (!empty($g[$k]) && (int) $g[$k] > 0) {
+            $qs[$k] = (int) $g[$k];
+        }
+    }
+    return 'index.php?' . http_build_query($qs);
+}
+
+function dac_fetch_routine_rows(PDO $pdo, array $g): array
+{
+    $cid = (int) ($g['class_id'] ?? 0);
+    $tid = (int) ($g['term_id'] ?? 0);
+    if ($cid <= 0 || $tid <= 0) {
+        return [];
+    }
+    try {
+        $er_where = [
+            'er.class_id = ?',
+            'er.term_id = ?',
+            "er.status = 'Active'",
+            '(er.exam_date IS NOT NULL OR er.start_time IS NOT NULL)',
+        ];
+        $er_params = [$cid, $tid];
+        if (!empty($g['shift_id']))   { $er_where[] = 'er.shift_id = ?';   $er_params[] = (int) $g['shift_id']; }
+        if (!empty($g['section_id'])) { $er_where[] = 'er.section_id = ?'; $er_params[] = (int) $g['section_id']; }
+        if (!empty($g['part_id']))    { $er_where[] = 'er.part_id = ?';    $er_params[] = (int) $g['part_id']; }
+        $er_stmt = $pdo->prepare(
+            "SELECT er.shift_id, er.section_id, er.part_id, er.subject_id,
+                    er.exam_date, er.start_time, er.end_time,
+                    s.subject_name, s.full_marks
+             FROM exam_routines er
+             LEFT JOIN academic_subjects s ON s.id = er.subject_id
+             WHERE " . implode(' AND ', $er_where) . "
+             ORDER BY (er.exam_date IS NULL) ASC, er.exam_date ASC, er.start_time ASC"
+        );
+        $er_stmt->execute($er_params);
+        $rows = [];
+        foreach ($er_stmt->fetchAll(PDO::FETCH_ASSOC) as $er_row) {
+            $st_t = !empty($er_row['start_time']) ? strtotime($er_row['start_time']) : false;
+            $en_t = !empty($er_row['end_time']) ? strtotime($er_row['end_time']) : false;
+            $t_str = '';
+            if ($st_t !== false && $en_t !== false) {
+                $t_str = date('g:i A', $st_t) . ' - ' . date('g:i A', $en_t);
+            } elseif ($st_t !== false) {
+                $t_str = date('g:i A', $st_t);
+            }
+            $d_raw = trim((string) ($er_row['exam_date'] ?? ''));
+            $d_disp = ($d_raw !== '' && $d_raw !== '0000-00-00' && strtotime($d_raw) !== false)
+                ? date('d M Y (D)', strtotime($d_raw))
+                : '—';
+            $rows[] = [
+                'shift_id'   => (int) ($er_row['shift_id'] ?? 0),
+                'section_id' => (int) ($er_row['section_id'] ?? 0),
+                'part_id'    => (int) ($er_row['part_id'] ?? 0),
+                'subject_id' => (int) ($er_row['subject_id'] ?? 0),
+                'raw_date'   => $d_raw,
+                'date'       => $d_disp,
+                'time'       => $t_str ?: '—',
+                'subject'    => trim((string) ($er_row['subject_name'] ?? '')) ?: '—',
+                'full_marks' => isset($er_row['full_marks']) && $er_row['full_marks'] !== null ? (string) $er_row['full_marks'] : '',
+            ];
+        }
+        return $rows;
+    } catch (Throwable $e) {
+        return [];
+    }
+}
+
+function dac_student_routine(array $all_rows, array $st): array
+{
+    if (!$all_rows) {
+        return [];
+    }
+    $st_shift   = (int) ($st['shift_id'] ?? 0);
+    $st_section = (int) ($st['section_id'] ?? 0);
+    $picked = [];
+    if ($st_shift > 0 && $st_section > 0) {
+        $picked = array_values(array_filter(
+            $all_rows,
+            static fn($r) => (int) $r['shift_id'] === $st_shift && (int) $r['section_id'] === $st_section
+        ));
+    }
+    if (!$picked && $st_shift > 0) {
+        $picked = array_values(array_filter(
+            $all_rows,
+            static fn($r) => (int) $r['shift_id'] === $st_shift
+        ));
+    }
+    if (!$picked) {
+        $picked = $all_rows;
+    }
+    $seen = [];
+    $out = [];
+    foreach ($picked as $r) {
+        $key = ((int) $r['subject_id']) . '|' . ($r['raw_date'] ?? '') . '|' . ($r['time'] ?? '');
+        if (isset($seen[$key])) {
+            continue;
+        }
+        $seen[$key] = true;
+        $out[] = $r;
+    }
+    return $out;
+}
+
+function dac_render_routine_block_alert(string $cls_name, string $trm_name, string $routine_url, bool $can_routine, bool $can_customize): void
+{
+    $scope = implode(' — ', array_filter([$cls_name, $trm_name], static fn($v) => $v !== ''));
+    echo '<div class="no-print alert alert-warning border-warning shadow-sm mb-3">'
+       . '<div class="fw-bold mb-1"><i class="fa-solid fa-triangle-exclamation text-danger me-1"></i> Exam Routine না থাকায় Admit Card জেনারেট ব্লক করা হয়েছে</div>'
+       . '<div class="small mb-2">';
+    if ($scope !== '') {
+        echo '<strong>' . dacv($scope) . '</strong>-এর জন্য ';
+    }
+    echo '<strong>Result Module &gt; Exam Procedure &gt; Exam Routine</strong> মডিউলে এখনো কোনো Exam Routine যোগ করা হয়নি। অ্যাডমিট কার্ড জেনারেট করতে চাইলে ওখানে গিয়ে আগে এই শ্রেণি/পরীক্ষার Exam Routine যোগ করে আসুন, অথবা Customize Admit Card সেটিংস থেকে <strong>Exam Routine</strong> অপশনটি অফ (OFF) করে দিন।</div>'
+       . '<div class="d-flex gap-2 flex-wrap">';
+    if ($can_routine) {
+        echo '<a href="' . dacv($routine_url) . '" class="btn btn-sm btn-primary fw-semibold"><i class="fa-solid fa-calendar-plus me-1"></i> Exam Routine যোগ করুন</a>';
+    }
+    if ($can_customize) {
+        echo '<a href="index.php?page=result_admit_card_customize#dacRoutineSection" class="btn btn-sm btn-outline-secondary fw-semibold"><i class="fa-solid fa-sliders me-1"></i> Customize Admit Card-এ রুটিন অফ করুন</a>';
+    }
+    echo '</div></div>';
+}
+
 $dac_err = $_SESSION['dac_err'] ?? '';
 $dac_msg = $_SESSION['dac_msg'] ?? '';
-unset($_SESSION['dac_err'], $_SESSION['dac_msg']);
+$dac_routine_block = $_SESSION['dac_routine_block'] ?? null;
+unset($_SESSION['dac_err'], $_SESSION['dac_msg'], $_SESSION['dac_routine_block']);
 
 // -----------------------------------------------------------
 // বর্তমান একাডেমিক সেশন + প্রতিষ্ঠানের তথ্য
@@ -85,9 +213,10 @@ $addr_line = $branch ? ($branch['address'] . ', ' . $branch['city'] . '-' . $bra
 $inst_display_name = ($branch['branch_name'] ?? null) ?: ($institute['institute_name'] ?? '');
 $instr_branch_id = $fr_bid2;
 $can_customize = !function_exists('perm_page_allowed') || perm_page_allowed($pdo, 'result_admit_card_customize');
+$can_routine   = !function_exists('perm_page_allowed') || perm_page_allowed($pdo, 'result_exam_routine');
 
 // -----------------------------------------------------------
-// POST: ফর্ম সাবমিট -> ফিল্টার সেশনে রেখে output ভিউতে রিডাইরেক্ট
+// POST: ফর্ম সাবমিট -> রুটিন যাচাই ও ফিল্টার সেশনে রেখে output ভিউতে রিডাইরেক্ট
 // -----------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_admit_cards'])) {
     if (!csrf_verify($_POST['csrf_token'] ?? null)) {
@@ -105,7 +234,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_admit_cards'
         exit();
     }
 
-    $_SESSION['dac_generate'] = [
+    $post_g = [
         'class_id'       => $f_class_id,
         'shift_id'       => (int) ($_POST['shift_id'] ?? 0),
         'section_id'     => (int) ($_POST['section_id'] ?? 0),
@@ -115,6 +244,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_admit_cards'
     ];
     $_SESSION['dac_layout'] = ac_layout(dac_layout_in($_POST));
     $_SESSION['dac_color'] = (($_POST['color_mode'] ?? 'color') === 'grayscale') ? 'grayscale' : 'color';
+
+    $post_ac_settings = ac_load_settings($pdo, $instr_branch_id);
+    $post_layout = $_SESSION['dac_layout'];
+    $routine_required = !empty($post_ac_settings['show_routine'])
+        && ($post_layout['preset'] === '1full')
+        && (($post_ac_settings['full_template'] ?? 'classic') === 'modern');
+
+    if ($routine_required && !dac_fetch_routine_rows($pdo, $post_g)) {
+        unset($_SESSION['dac_generate']);
+        $cls_q = $pdo->prepare("SELECT class_name FROM academic_classes WHERE id = ?");
+        $cls_q->execute([$f_class_id]);
+        $trm_q = $pdo->prepare("SELECT term_name FROM exam_terms WHERE id = ?");
+        $trm_q->execute([$f_term_id]);
+        $_SESSION['dac_routine_block'] = [
+            'class_name'  => trim((string) ($cls_q->fetchColumn() ?: '')),
+            'term_name'   => trim((string) ($trm_q->fetchColumn() ?: '')),
+            'routine_url' => dac_routine_block_url($post_g),
+        ];
+        header('Location: index.php?page=result_download_admit_card');
+        exit();
+    }
+
+    $_SESSION['dac_generate'] = $post_g;
     header('Location: index.php?page=result_download_admit_card&view=output');
     exit();
 }
@@ -255,51 +407,21 @@ $dac_layout_opts_cfg = [
         // exam_result_settings না থাকলে ডিফল্ট লেবেল থাকবে
     }
 
-    $exam_routine_rows = [];
+    $all_routine_rows = dac_fetch_routine_rows($pdo, $g);
     $exam_date_str = '';
     $exam_time_str = '';
-    try {
-        $er_where = ['er.class_id = ?', 'er.term_id = ?', "er.status = 'Active'"];
-        $er_params = [(int) $g['class_id'], (int) $g['term_id']];
-        if (!empty($g['shift_id']))   { $er_where[] = 'er.shift_id = ?';   $er_params[] = (int) $g['shift_id']; }
-        if (!empty($g['section_id'])) { $er_where[] = 'er.section_id = ?'; $er_params[] = (int) $g['section_id']; }
-        if (!empty($g['part_id']))    { $er_where[] = 'er.part_id = ?';    $er_params[] = (int) $g['part_id']; }
-        $er_stmt = $pdo->prepare(
-            "SELECT er.exam_date, er.start_time, er.end_time,
-                    s.subject_name, s.full_marks
-             FROM exam_routines er
-             LEFT JOIN academic_subjects s ON s.id = er.subject_id
-             WHERE " . implode(' AND ', $er_where) . "
-             ORDER BY (er.exam_date IS NULL) ASC, er.exam_date ASC, er.start_time ASC"
-        );
-        $er_stmt->execute($er_params);
-        foreach ($er_stmt->fetchAll(PDO::FETCH_ASSOC) as $er_row) {
-            $st_t = !empty($er_row['start_time']) ? strtotime($er_row['start_time']) : false;
-            $en_t = !empty($er_row['end_time']) ? strtotime($er_row['end_time']) : false;
-            $t_str = '';
-            if ($st_t !== false && $en_t !== false) {
-                $t_str = date('g:i A', $st_t) . ' - ' . date('g:i A', $en_t);
-            } elseif ($st_t !== false) {
-                $t_str = date('g:i A', $st_t);
-            }
-            $d_raw = trim((string) ($er_row['exam_date'] ?? ''));
-            $d_disp = ($d_raw !== '' && $d_raw !== '0000-00-00' && strtotime($d_raw) !== false)
-                ? date('d M Y (D)', strtotime($d_raw))
-                : '—';
-            if ($exam_date_str === '' && $d_raw !== '') {
-                $exam_date_str = ac_fmt_date($d_raw, '');
-                $exam_time_str = $t_str;
-            }
-            $exam_routine_rows[] = [
-                'date'       => $d_disp,
-                'time'       => $t_str ?: '—',
-                'subject'    => trim((string) ($er_row['subject_name'] ?? '')) ?: '—',
-                'full_marks' => isset($er_row['full_marks']) && $er_row['full_marks'] !== null ? (string) $er_row['full_marks'] : '',
-            ];
+    foreach ($all_routine_rows as $er_item) {
+        if (!empty($er_item['raw_date'])) {
+            $exam_date_str = ac_fmt_date($er_item['raw_date'], '');
+            $exam_time_str = (string) ($er_item['time'] ?? '');
+            break;
         }
-    } catch (Throwable $e) {
-        // exam_routines না থাকলে নিরাপদে স্কিপ করবে
     }
+
+    $routine_required = !empty($ac_settings['show_routine'])
+        && ($dac_layout['preset'] === '1full')
+        && (($ac_settings['full_template'] ?? 'classic') === 'modern');
+    $output_routine_blocked = $routine_required && !$all_routine_rows;
 
     $admit_year = date('Y');
     $issue_date = date('d/m/Y');
@@ -320,14 +442,23 @@ $dac_layout_opts_cfg = [
             <input type="hidden" name="view" value="output">
             <?php dac_layout_fields($dac_layout, $dac_layout_opts_cfg); ?>
             <button type="submit" class="btn btn-sm btn-outline-secondary">Apply</button>
-            <button type="button" class="btn btn-primary fw-bold" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
+            <?php if (!$output_routine_blocked): ?>
+                <button type="button" class="btn btn-primary fw-bold" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
+            <?php endif; ?>
         </form>
     </div>
 
     <?php if ($dac_msg): ?><div class="no-print alert alert-success py-2 mb-3"><?php echo dacv($dac_msg); ?></div><?php endif; ?>
     <?php if ($dac_err): ?><div class="no-print alert alert-danger py-2 mb-3"><?php echo dacv($dac_err); ?></div><?php endif; ?>
 
-    <?php if (!$students): ?>
+    <?php if ($output_routine_blocked): ?>
+        <?php
+        $blk_cs = $pdo->prepare("SELECT class_name FROM academic_classes WHERE id = ?");
+        $blk_cs->execute([(int) ($g['class_id'] ?? 0)]);
+        $blk_class_name = trim((string) ($blk_cs->fetchColumn() ?: ''));
+        dac_render_routine_block_alert($blk_class_name, $term_name, dac_routine_block_url($g), $can_routine, $can_customize);
+        ?>
+    <?php elseif (!$students): ?>
         <div class="card-custom"><p class="text-muted mb-0">নির্বাচিত ফিল্টারে কোনো শিক্ষার্থী পাওয়া যায়নি।</p></div>
     <?php else: ?>
         <div class="ac-pages<?php echo $dac_color === 'grayscale' ? ' ac-gray' : ''; ?>" id="dacPages">
@@ -404,7 +535,7 @@ $dac_layout_opts_cfg = [
                     'photo'             => $st['photo_path'] ?? '',
                     'qr_id'             => 'acqr-' . (int) $i,
                     'layout'            => $dac_layout,
-                    'routine_rows'      => $exam_routine_rows,
+                    'routine_rows'      => dac_student_routine($all_routine_rows, $st),
                     'instructions'      => $dac_instructions,
                     'settings'          => $ac_settings,
                 ]); ?>
@@ -426,6 +557,7 @@ $dac_layout_opts_cfg = [
     <div class="card-custom">
         <?php if ($dac_msg): ?><div class="alert alert-success py-2"><?php echo dacv($dac_msg); ?></div><?php endif; ?>
         <?php if ($dac_err): ?><div class="alert alert-danger py-2"><?php echo dacv($dac_err); ?></div><?php endif; ?>
+        <?php if ($dac_routine_block): dac_render_routine_block_alert((string) ($dac_routine_block['class_name'] ?? ''), (string) ($dac_routine_block['term_name'] ?? ''), (string) ($dac_routine_block['routine_url'] ?? 'index.php?page=result_exam_routine'), $can_routine, $can_customize); endif; ?>
 
         <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
             <h6 class="text-muted mb-0">Generate Admit Card for Session : <?php echo dacv($current_session_name); ?></h6>
