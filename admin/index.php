@@ -864,6 +864,8 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                         echo 'Result Module > Exam Procedure > Marks Entry (Subject)';
                     } elseif ($page == 'result_marks_entry_exam') {
                         echo 'Result Module > Exam Procedure > Marks Entry (Exam)';
+                    } elseif ($page == 'result_admit_card_customize') {
+                        echo 'Result Module > Result Reports > Customize Admit Card';
                     } elseif ($page == 'result_download_admit_card') {
                         echo 'Result Module > Result Reports > Download Admit Card';
                     } elseif ($page == 'result_attendance_blank_sheet') {
@@ -1247,6 +1249,7 @@ if (!erp_is_demo() && isset($_POST['change_password'])) {
                 'result_formative_entry'      => 'result_formative_entry.php',
                 'result_formative_report'     => 'result_formative_report.php',
                 'result_marks_entry_exam'     => 'result_marks_entry_exam.php',
+                'result_admit_card_customize' => 'result_admit_card_customize.php',
                 'result_download_admit_card'  => 'result_download_admit_card.php',
                 'result_attendance_blank_sheet' => 'result_attendance_blank_sheet.php',
                 'result_marks_entry_blank_sheet' => 'result_marks_entry_blank_sheet.php',
