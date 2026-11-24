@@ -26,6 +26,7 @@ function dac_layout_fields(array $L, array $opts_cfg = []): void
     ];
     $can_customize = !empty($opts_cfg['can_customize']);
     $is_custom_instr = !empty($opts_cfg['is_custom_instr']);
+    $color_mode = (($opts_cfg['color_mode'] ?? 'color') === 'grayscale') ? 'grayscale' : 'color';
 
     echo '<select name="layout" id="dacLayout" data-ss="off" class="form-select form-select-sm" style="width:auto;" onchange="dacLayoutToggle()">';
     foreach ($opts as $k => $label) { echo '<option value="' . $k . '"' . ($L['preset'] === $k ? ' selected' : '') . '>' . dacv($label) . '</option>'; }
@@ -37,6 +38,10 @@ function dac_layout_fields(array $L, array $opts_cfg = []): void
        . '<label class="small mb-0">চওড়া</label><input type="number" name="cw" id="dacCw" class="form-control form-control-sm" style="width:80px;" min="50" max="287" step="0.5" value="' . dacv($L['w']) . '" oninput="dacLayoutToggle()">'
        . '<label class="small mb-0">উচ্চতা</label><input type="number" name="ch" id="dacCh" class="form-control form-control-sm" style="width:80px;" min="40" max="287" step="0.5" value="' . dacv($L['h']) . '" oninput="dacLayoutToggle()"> <span class="small">mm</span>'
        . '</span> <span id="dacPer" class="badge bg-secondary"></span>';
+    echo ' <select name="color_mode" id="dacColorMode" data-ss="off" class="form-select form-select-sm" style="width:auto;" onchange="dacToggleColorMode(this.value)" title="Print Color Mode">'
+       . '<option value="color"' . ($color_mode === 'color' ? ' selected' : '') . '>Color</option>'
+       . '<option value="grayscale"' . ($color_mode === 'grayscale' ? ' selected' : '') . '>Grayscale (B&amp;W)</option>'
+       . '</select>';
     if ($can_customize) {
         echo ' <a id="dacInstrBtn" href="index.php?page=result_admit_card_customize#dacRulesSection" class="btn btn-sm btn-outline-primary fw-semibold align-items-center gap-1" style="display:none;">'
            . '<i class="fa-solid fa-file-pen"></i> নিয়মকানুন এডিট করুন'
@@ -52,7 +57,8 @@ function dac_layout_fields(array $L, array $opts_cfg = []): void
        . 'n=Math.max(1,Math.floor((pw+4)/(w+4)))*Math.max(1,Math.floor((ph+4)/(h+4)));}'
        . 'var pe=document.getElementById("dacPer");if(pe){pe.textContent="প্রতি A4 পাতায় "+n+" টা";}'
        . 'var ib=document.getElementById("dacInstrBtn");if(ib){ib.style.display=(val==="1full")?"inline-flex":"none";}'
-       . '}dacLayoutToggle();</script>';
+       . '}dacLayoutToggle();'
+       . 'function dacToggleColorMode(v){var p=document.getElementById("dacPages");if(p){p.classList.toggle("ac-gray",v==="grayscale");}}</script>';
 }
 
 $dac_err = $_SESSION['dac_err'] ?? '';
@@ -108,6 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_admit_cards'
         'student_id_row' => (int) ($_POST['student_id_row'] ?? 0),
     ];
     $_SESSION['dac_layout'] = ac_layout(dac_layout_in($_POST));
+    $_SESSION['dac_color'] = (($_POST['color_mode'] ?? 'color') === 'grayscale') ? 'grayscale' : 'color';
     header('Location: index.php?page=result_download_admit_card&view=output');
     exit();
 }
@@ -131,6 +138,13 @@ if (isset($_GET['layout'])) {
 $dac_layout = ac_layout($dac_layout_src);
 $_SESSION['dac_layout'] = $dac_layout;
 
+if (isset($_GET['color_mode'])) {
+    $dac_color = ($_GET['color_mode'] === 'grayscale') ? 'grayscale' : 'color';
+} else {
+    $dac_color = (($_SESSION['dac_color'] ?? 'color') === 'grayscale') ? 'grayscale' : 'color';
+}
+$_SESSION['dac_color'] = $dac_color;
+
 $classes  = $pdo->query("SELECT id, class_name FROM academic_classes WHERE status = 'Active' ORDER BY rank ASC, class_name ASC")->fetchAll();
 $shifts   = $pdo->query("SELECT id, shift_name FROM academic_shifts WHERE status = 'Active' ORDER BY shift_name ASC")->fetchAll();
 $sections = $pdo->query("SELECT id, section_name, class_id, shift_id FROM academic_sections WHERE status = 'Active' ORDER BY section_name ASC")->fetchAll();
@@ -153,6 +167,7 @@ $view = $_GET['view'] ?? 'config';
 $dac_layout_opts_cfg = [
     'can_customize'   => $can_customize,
     'is_custom_instr' => !empty($dac_instructions['is_custom']),
+    'color_mode'      => $dac_color,
 ];
 ?>
 
@@ -315,7 +330,7 @@ $dac_layout_opts_cfg = [
     <?php if (!$students): ?>
         <div class="card-custom"><p class="text-muted mb-0">নির্বাচিত ফিল্টারে কোনো শিক্ষার্থী পাওয়া যায়নি।</p></div>
     <?php else: ?>
-        <div class="ac-pages">
+        <div class="ac-pages<?php echo $dac_color === 'grayscale' ? ' ac-gray' : ''; ?>" id="dacPages">
         <?php foreach (array_chunk($students, $dac_layout['per'], true) as $page_students): ?>
         <div class="ac-page">
             <?php foreach ($page_students as $i => $st): ?>

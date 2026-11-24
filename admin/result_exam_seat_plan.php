@@ -1,7 +1,7 @@
 <?php
 // admin/result_exam_seat_plan.php - Result Module > Exam Settings > Exam Seat Plan
-// স্ক্রিনশট অনুযায়ী: Class/Shift/Section/Term/Part/Room ফিল্টার দিয়ে সাবমিট করলে
-// প্রতিটি শিক্ষার্থীর জন্য একটা প্রিন্টযোগ্য "Seat Layout" কার্ড (QR কোড + ছবিসহ) জেনারেট হয়।
+// Class/Shift/Section/Term/Part/Room ফিল্টার দিয়ে সাবমিট করলে প্রতিটি শিক্ষার্থীর জন্য
+// প্রিন্টযোগ্য "Seat Layout" কার্ড (Color/Grayscale এবং Photo On/Off সহ) জেনারেট হয়।
 require_once __DIR__ . '/../config/exam_fee_helpers.php';
 require_once __DIR__ . '/../config/seat_card_helper.php';
 ef_ensure_tables($pdo);
@@ -42,6 +42,19 @@ $current_session_id = $current_session ? (int) $current_session['id'] : 0;
 $current_session_name = $current_session['session_name'] ?? '—';
 
 $institute = $pdo->query("SELECT institute_name, logo_path FROM institute_settings WHERE id = 1")->fetch();
+$sp_bid = branch_current_id();
+if ($sp_bid !== null) {
+    $sp_br_stmt = $pdo->prepare("SELECT branch_name FROM branches WHERE id = ? LIMIT 1");
+    $sp_br_stmt->execute([$sp_bid]);
+    $sp_branch = $sp_br_stmt->fetch();
+} else {
+    $sp_branch = $pdo->query("SELECT branch_name FROM branches WHERE status = 'Active' ORDER BY id ASC LIMIT 1")->fetch();
+}
+$sp_ac_settings = ac_load_settings($pdo, $sp_bid);
+$sp_inst_name = trim((string) ($sp_ac_settings['custom_institute_name'] ?? ''))
+    ?: (trim((string) ($sp_branch['branch_name'] ?? '')) ?: trim((string) ($institute['institute_name'] ?? '')));
+$sp_logo_path = trim((string) ($sp_ac_settings['logo_path'] ?? ''))
+    ?: trim((string) ($institute['logo_path'] ?? ''));
 
 // -----------------------------------------------------------
 // POST: ফর্ম সাবমিট -> ফিল্টার সেশনে রেখে output ভিউতে রিডাইরেক্ট
@@ -69,6 +82,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_seat_plan'])
         'term_id'    => $f_term_id,
         'part_id'    => (int) ($_POST['part_id'] ?? 0),
         'room'       => trim($_POST['room'] ?? ''),
+    ];
+    $_SESSION['sp_opts'] = [
+        'color_mode' => (($_POST['color_mode'] ?? 'color') === 'grayscale') ? 'grayscale' : 'color',
+        'show_photo' => !empty($_POST['show_photo']) ? 1 : 0,
     ];
 
     // Room তথ্য সেভ করা হচ্ছে (থাকলে) — যাতে Student পোর্টাল থেকে পরে ঠিক একই Room দেখা যায়
@@ -106,6 +123,15 @@ $parts = $current_session_id
     : null;
 if ($parts) { $parts->execute([$current_session_id]); $parts = $parts->fetchAll(); } else { $parts = []; }
 
+$sp_opts = is_array($_SESSION['sp_opts'] ?? null) ? $_SESSION['sp_opts'] : [];
+$sp_color = isset($_GET['color_mode'])
+    ? (($_GET['color_mode'] === 'grayscale') ? 'grayscale' : 'color')
+    : ((($sp_opts['color_mode'] ?? 'color') === 'grayscale') ? 'grayscale' : 'color');
+$sp_photo = isset($_GET['show_photo'])
+    ? (!empty($_GET['show_photo']) ? 1 : 0)
+    : (!empty($sp_opts['show_photo']) ? 1 : 0);
+$_SESSION['sp_opts'] = ['color_mode' => $sp_color, 'show_photo' => $sp_photo];
+
 $view = $_GET['view'] ?? 'config';
 ?>
 
@@ -113,7 +139,6 @@ $view = $_GET['view'] ?? 'config';
     <?php
     // ================= OUTPUT VIEW: সিট লেআউট কার্ড জেনারেট =================
     $g = $_SESSION['sp_generate'] ?? [];
-    unset($_SESSION['sp_generate']);
 
     if (!$g) {
         header('Location: index.php?page=result_exam_seat_plan');
@@ -155,26 +180,37 @@ $view = $_GET['view'] ?? 'config';
     ?>
     <?php echo sc_css(); ?>
 
-    <div class="no-print d-flex justify-content-between align-items-center mb-3">
+    <div class="no-print d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
         <a href="index.php?page=result_exam_seat_plan" class="btn btn-secondary"><i class="fa-solid fa-arrow-left"></i> Back</a>
-        <button type="button" class="btn btn-primary fw-bold" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
+        <form method="GET" class="d-flex align-items-center gap-2 flex-wrap">
+            <input type="hidden" name="page" value="result_exam_seat_plan">
+            <input type="hidden" name="view" value="output">
+            <select name="color_mode" data-ss="off" class="form-select form-select-sm" style="width:auto;" onchange="this.form.submit()" title="Print Color Mode">
+                <option value="color"<?php echo $sp_color === 'color' ? ' selected' : ''; ?>>Color</option>
+                <option value="grayscale"<?php echo $sp_color === 'grayscale' ? ' selected' : ''; ?>>Grayscale (B&amp;W)</option>
+            </select>
+            <select name="show_photo" data-ss="off" class="form-select form-select-sm" style="width:auto;" onchange="this.form.submit()" title="Student Photo">
+                <option value="0"<?php echo $sp_photo === 0 ? ' selected' : ''; ?>>Without Photo</option>
+                <option value="1"<?php echo $sp_photo === 1 ? ' selected' : ''; ?>>With Photo</option>
+            </select>
+            <button type="button" class="btn btn-primary fw-bold" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
+        </form>
     </div>
 
     <?php if (!$students): ?>
         <div class="card-custom"><p class="text-muted mb-0">নির্বাচিত ফিল্টারে কোনো শিক্ষার্থী পাওয়া যায়নি।</p></div>
     <?php else: ?>
-        <div class="sc-grid">
-            <?php foreach ($students as $i => $st): ?>
+        <div class="sc-grid<?php echo $sp_color === 'grayscale' ? ' sc-gray' : ''; ?>">
+            <?php foreach ($students as $st): ?>
                 <?php echo sc_card([
-                    'institute' => $institute['institute_name'] ?? '', 'logo' => $institute['logo_path'] ?? '',
+                    'institute' => $sp_inst_name, 'logo' => $sp_logo_path,
                     'room' => $room, 'term' => $term_name, 'part' => $part_name, 'year' => $seat_year,
                     'name' => $st['name_en'], 'class' => $st['class_name'] ?? '', 'shift' => $st['shift_name'] ?? '',
                     'section' => $st['section_name'] ?? '', 'roll' => $st['roll_no'], 'student_id' => $st['student_id'],
-                    'photo' => $st['photo_path'] ?? '', 'qr_id' => 'scqr-' . (int) $i,
+                    'photo' => $st['photo_path'] ?? '', 'show_photo' => ($sp_photo === 1),
                 ]); ?>
             <?php endforeach; ?>
         </div>
-        <?php echo sc_qr_script(); ?>
     <?php endif; ?>
 
 <?php else: ?>
@@ -247,7 +283,23 @@ $view = $_GET['view'] ?? 'config';
             </div>
 
             <hr>
-            <div class="text-end">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                    <div class="d-flex align-items-center gap-2">
+                        <label class="fw-bold mb-0 small">Mode:</label>
+                        <select name="color_mode" data-ss="off" class="form-select form-select-sm" style="width:auto;">
+                            <option value="color"<?php echo $sp_color === 'color' ? ' selected' : ''; ?>>Color</option>
+                            <option value="grayscale"<?php echo $sp_color === 'grayscale' ? ' selected' : ''; ?>>Grayscale (B&amp;W)</option>
+                        </select>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <label class="fw-bold mb-0 small">Photo:</label>
+                        <select name="show_photo" data-ss="off" class="form-select form-select-sm" style="width:auto;">
+                            <option value="0"<?php echo $sp_photo === 0 ? ' selected' : ''; ?>>Without Photo</option>
+                            <option value="1"<?php echo $sp_photo === 1 ? ' selected' : ''; ?>>With Photo</option>
+                        </select>
+                    </div>
+                </div>
                 <button type="submit" name="generate_seat_plan" class="btn btn-primary px-5 fw-bold" style="background-color:#1e3a8a;">Submit</button>
             </div>
         </form>

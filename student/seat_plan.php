@@ -16,8 +16,10 @@ $parts_stmt = $pdo->prepare("SELECT id, part_name FROM exam_parts WHERE session_
 $parts_stmt->execute([(int) $student['session_id']]);
 $parts = $parts_stmt->fetchAll();
 
-$sel_term = (int) ($_GET['term_id'] ?? ($terms[0]['id'] ?? 0));
-$sel_part = (int) ($_GET['part_id'] ?? 0);
+$sel_term  = (int) ($_GET['term_id'] ?? ($terms[0]['id'] ?? 0));
+$sel_part  = (int) ($_GET['part_id'] ?? 0);
+$sel_color = (($_GET['color_mode'] ?? 'color') === 'grayscale') ? 'grayscale' : 'color';
+$sel_photo = !empty($_GET['show_photo']) ? 1 : 0;
 
 $pay_msg = '';
 $pay_err = '';
@@ -80,6 +82,19 @@ $class_name   = sp_lookup_name($pdo, 'academic_classes', $student['class_id'] ?:
 $section_name = sp_lookup_name($pdo, 'academic_sections', $student['section_id'] ?: null);
 $shift_name   = sp_lookup_name($pdo, 'academic_shifts', $student['shift_id'] ?: null);
 $institute = $pdo->query("SELECT institute_name, logo_path FROM institute_settings WHERE id = 1")->fetch();
+$st_bid = !empty($student['branch_id']) ? (int) $student['branch_id'] : 0;
+if ($st_bid > 0) {
+    $st_br_stmt = $pdo->prepare("SELECT branch_name FROM branches WHERE id = ? LIMIT 1");
+    $st_br_stmt->execute([$st_bid]);
+    $st_branch = $st_br_stmt->fetch();
+} else {
+    $st_branch = $pdo->query("SELECT branch_name FROM branches WHERE status = 'Active' ORDER BY id ASC LIMIT 1")->fetch();
+}
+$sp_ac_settings = ac_load_settings($pdo, $st_bid);
+$sp_inst_name = trim((string) ($sp_ac_settings['custom_institute_name'] ?? ''))
+    ?: (trim((string) ($st_branch['branch_name'] ?? '')) ?: trim((string) ($institute['institute_name'] ?? '')));
+$sp_logo_path = trim((string) ($sp_ac_settings['logo_path'] ?? ''))
+    ?: trim((string) ($institute['logo_path'] ?? ''));
 ?>
 <?php if (!$terms): ?>
     <div class="card-custom text-center py-5">
@@ -110,6 +125,20 @@ $institute = $pdo->query("SELECT institute_name, logo_path FROM institute_settin
             </select>
         </div>
         <?php endif; ?>
+        <div class="col-auto">
+            <label class="form-label fw-bold" style="font-size:12.5px;">Mode</label>
+            <select name="color_mode" data-ss="off" class="form-select form-select-sm" onchange="this.form.submit()">
+                <option value="color"<?php echo $sel_color === 'color' ? ' selected' : ''; ?>>Color</option>
+                <option value="grayscale"<?php echo $sel_color === 'grayscale' ? ' selected' : ''; ?>>Grayscale (B&amp;W)</option>
+            </select>
+        </div>
+        <div class="col-auto">
+            <label class="form-label fw-bold" style="font-size:12.5px;">Photo</label>
+            <select name="show_photo" data-ss="off" class="form-select form-select-sm" onchange="this.form.submit()">
+                <option value="0"<?php echo $sel_photo === 0 ? ' selected' : ''; ?>>Without Photo</option>
+                <option value="1"<?php echo $sel_photo === 1 ? ' selected' : ''; ?>>With Photo</option>
+            </select>
+        </div>
     </form>
 </div>
 
@@ -124,21 +153,19 @@ $institute = $pdo->query("SELECT institute_name, logo_path FROM institute_settin
         <button type="button" class="btn text-white fw-bold" style="background:#0f766e;" onclick="window.print()"><i class="fa-solid fa-print me-1"></i>Print / Download</button>
     </div>
 
-    <div class="sc-grid">
+    <div class="sc-grid<?php echo $sel_color === 'grayscale' ? ' sc-gray' : ''; ?>">
         <?php echo sc_card([
-            'institute' => $institute['institute_name'] ?? '', 'logo' => $institute['logo_path'] ?? '',
+            'institute' => $sp_inst_name, 'logo' => $sp_logo_path,
             'room' => $room, 'term' => $term_name, 'part' => $part_name, 'year' => date('Y'),
             'name' => $student['name_en'], 'class' => $class_name, 'shift' => $shift_name,
             'section' => $section_name, 'roll' => $student['roll_no'], 'student_id' => $student['student_id'],
-            'photo' => $student['photo_path'] ?? '', 'qr_id' => 'scqr0',
+            'photo' => $student['photo_path'] ?? '', 'show_photo' => ($sel_photo === 1),
         ]); ?>
     </div>
 
     <?php if ($room === ''): ?>
         <p class="text-muted text-center mt-2" style="font-size:12.5px;">এখনো Room নাম্বার নির্ধারণ করা হয়নি — নির্ধারণ হলে এখানে দেখা যাবে।</p>
     <?php endif; ?>
-
-    <?php echo sc_qr_script(); ?>
 
 <?php else: ?>
     <!-- ================= FEE DUE — PAYMENT GATE ================= -->
