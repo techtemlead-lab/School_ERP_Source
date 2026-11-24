@@ -49,6 +49,7 @@ try {
 }
 
 $can_edit = !function_exists('perm_action_allowed') || perm_action_allowed($pdo, 'result_admit_card_customize', 'edit');
+$can_routine = !function_exists('perm_page_allowed') || perm_page_allowed($pdo, 'result_exam_routine');
 
 // -----------------------------------------------------------
 // POST Handlers
@@ -214,27 +215,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['update_admit_card_se
         'show_student_mobile'    => isset($_POST['show_student_mobile']) ? 1 : 0,
         'show_permanent_address' => isset($_POST['show_permanent_address']) ? 1 : 0,
         'show_routine'           => isset($_POST['show_routine']) ? 1 : 0,
-        'routine_mode'           => (string) ($_POST['routine_mode'] ?? 'auto_db'),
-        'schedule_exam_date'     => (string) ($_POST['schedule_exam_date'] ?? ''),
-        'schedule_result_date'   => (string) ($_POST['schedule_result_date'] ?? ''),
     ];
-
-    $r_dates = is_array($_POST['routine_date'] ?? null) ? $_POST['routine_date'] : [];
-    $r_times = is_array($_POST['routine_time'] ?? null) ? $_POST['routine_time'] : [];
-    $r_subjs = is_array($_POST['routine_subject'] ?? null) ? $_POST['routine_subject'] : [];
-    $r_marks = is_array($_POST['routine_marks'] ?? null) ? $_POST['routine_marks'] : [];
-    $cust_rows = [];
-    foreach ($r_subjs as $idx => $sbj) {
-        $d_val = trim((string) ($r_dates[$idx] ?? ''));
-        $t_val = trim((string) ($r_times[$idx] ?? ''));
-        $s_val = trim((string) $sbj);
-        $m_val = trim((string) ($r_marks[$idx] ?? ''));
-        if ($d_val === '' && $t_val === '' && $s_val === '' && $m_val === '') {
-            continue;
-        }
-        $cust_rows[] = ['date' => $d_val, 'time' => $t_val, 'subject' => $s_val, 'full_marks' => $m_val];
-    }
-    $new_cfg['custom_routine_rows'] = $cust_rows;
 
     ac_save_settings($pdo, $fr_bid, $new_cfg);
 
@@ -653,80 +634,24 @@ $student_toggles = [
         </div>
     </div>
 
-    <!-- ৫. এক্সাম রুটিন / এক্সাম সিডিউল কাস্টমাইজেশন (Template 2) -->
-    <?php $cust_routine_list = is_array($S['custom_routine_rows'] ?? null) ? $S['custom_routine_rows'] : []; ?>
+    <!-- ৫. এক্সাম রুটিন (Template 2 — ERP Exam Routine) -->
     <div class="card-custom mb-3" id="dacRoutineSection">
         <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3 flex-wrap gap-2">
-            <h6 class="fw-bold mb-0"><i class="fa-solid fa-calendar-days text-primary me-2"></i>৫. এক্সাম রুটিন ও এক্সাম সিডিউল (Template 2 — ১-পেজ লেআউট)</h6>
+            <h6 class="fw-bold mb-0"><i class="fa-solid fa-calendar-days text-primary me-2"></i>৫. এক্সাম রুটিন (Template 2 — ১-পেজ লেআউট)</h6>
             <div class="form-check form-switch mb-0">
                 <input class="form-check-input" type="checkbox" role="switch" id="sw_show_routine" name="show_routine"<?php echo !empty($S['show_routine']) ? ' checked' : ''; ?>>
-                <label class="form-check-label small fw-bold" for="sw_show_routine">অ্যাডমিট কার্ডে রুটিন / সিডিউল দেখাবে</label>
+                <label class="form-check-label small fw-bold" for="sw_show_routine">অ্যাডমিট কার্ডে Exam Routine দেখাবে</label>
             </div>
         </div>
-        <div class="row g-3">
-            <div class="col-md-6">
-                <label class="form-label fw-bold small mb-1">রুটিন / সিডিউল প্রদর্শনের ধরন</label>
-                <select name="routine_mode" id="accRoutineMode" data-ss="off" class="form-select form-select-sm" onchange="accRoutineToggle()">
-                    <option value="auto_db"<?php echo ($S['routine_mode'] ?? 'auto_db') === 'auto_db' ? ' selected' : ''; ?>>স্বয়ংক্রিয় ERP Exam Routine (তারিখ, সময়, বিষয় ও পূর্ণমান)</option>
-                    <option value="custom_table"<?php echo ($S['routine_mode'] ?? '') === 'custom_table' ? ' selected' : ''; ?>>কাস্টম এক্সাম রুটিন টেবিল (এখান থেকে লিখুন)</option>
-                    <option value="admission_schedule"<?php echo ($S['routine_mode'] ?? '') === 'admission_schedule' ? ' selected' : ''; ?>>ভর্তি পরীক্ষা / ১-দিনের সিডিউল (Written Exam &amp; Result Date)</option>
-                </select>
-            </div>
-            <div class="col-md-6 d-flex align-items-end">
-                <div class="small text-muted">
-                    <strong>Auto ERP Mode:</strong> `Result Module > Exam Routine` থেকে স্বয়ংক্রিয়ভাবে ক্লাস-টার্ম অনুযায়ী রুটিন নেবে (আর না থাকলে নিচের কাস্টম রুটিন ব্যবহার করবে)।
-                </div>
-            </div>
-
-            <!-- Custom Routine Table -->
-            <div class="col-12" id="accRoutineTableWrap">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <span class="fw-bold small">কাস্টম এক্সাম রুটিন সারি (Date, Time, Subject, Full Marks)</span>
-                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="accAddRoutineRow()">
-                        <i class="fa-solid fa-plus me-1"></i> নতুন বিষয় যোগ করুন
-                    </button>
-                </div>
-                <div class="table-responsive">
-                    <table class="table table-sm table-bordered align-middle mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th style="width:22%;">Date (তারিখ ও বার)</th>
-                                <th style="width:22%;">Time (সময়)</th>
-                                <th>Subject (বিষয়ের নাম)</th>
-                                <th style="width:14%;">Full Marks</th>
-                                <th style="width:44px;"></th>
-                            </tr>
-                        </thead>
-                        <tbody id="accRoutineTbody">
-                            <?php if ($cust_routine_list): ?>
-                                <?php foreach ($cust_routine_list as $rr): ?>
-                                <tr>
-                                    <td><input type="text" name="routine_date[]" maxlength="100" class="form-control form-control-sm" value="<?php echo accv($rr['date'] ?? ''); ?>" placeholder="যেমন: 10 Dec 2026 (Thu)"></td>
-                                    <td><input type="text" name="routine_time[]" maxlength="100" class="form-control form-control-sm" value="<?php echo accv($rr['time'] ?? ''); ?>" placeholder="যেমন: 10:00 AM - 01:00 PM"></td>
-                                    <td><input type="text" name="routine_subject[]" maxlength="120" class="form-control form-control-sm" value="<?php echo accv($rr['subject'] ?? ''); ?>" placeholder="যেমন: Bangla 1st Paper"></td>
-                                    <td><input type="text" name="routine_marks[]" maxlength="40" class="form-control form-control-sm text-center" value="<?php echo accv($rr['full_marks'] ?? ''); ?>" placeholder="100"></td>
-                                    <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger py-0 px-2" onclick="accDelRoutineRow(this)" title="Remove">&times;</button></td>
-                                </tr>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Admission Schedule Box -->
-            <div class="col-12" id="accScheduleWrap">
-                <div class="row g-3 p-2 bg-light border rounded">
-                    <div class="col-md-6">
-                        <label class="form-label fw-bold small mb-1">Written Exam Date &amp; Time</label>
-                        <input type="text" name="schedule_exam_date" maxlength="150" class="form-control form-control-sm" value="<?php echo accv($S['schedule_exam_date'] ?? ''); ?>" placeholder="যেমন: Dec 25, 2026 09:00 AM">
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label fw-bold small mb-1">Result Date &amp; Time</label>
-                        <input type="text" name="schedule_result_date" maxlength="150" class="form-control form-control-sm" value="<?php echo accv($S['schedule_result_date'] ?? ''); ?>" placeholder="যেমন: Dec 28, 2026 05:00 PM">
-                    </div>
-                </div>
-            </div>
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+            <p class="small text-muted mb-0" style="max-width:740px;">
+                চালু থাকলে <strong>Result Module &gt; Exam Procedure &gt; Exam Routine</strong> মডিউলে সংরক্ষিত রুটিন স্বয়ংক্রিয়ভাবে অ্যাডমিট কার্ডে যুক্ত হবে। কোনো শ্রেণি বা পরীক্ষার রুটিন যুক্ত করা না থাকলে অ্যাডমিট কার্ড জেনারেট ব্লক থাকবে — রুটিন যুক্ত করার পর অথবা এই অপশনটি অফ (OFF) করলে পুনরায় জেনারেট করা যাবে।
+            </p>
+            <?php if ($can_routine): ?>
+            <a href="index.php?page=result_exam_routine" class="btn btn-outline-primary btn-sm fw-semibold text-nowrap">
+                <i class="fa-solid fa-calendar-days me-1"></i> Exam Routine মডিউলে যান
+            </a>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -806,55 +731,6 @@ function accLayoutToggle() {
     }
 }
 accLayoutToggle();
-
-function accRoutineToggle() {
-    var m = document.getElementById('accRoutineMode');
-    var tw = document.getElementById('accRoutineTableWrap');
-    var sw = document.getElementById('accScheduleWrap');
-    if (!m || !tw || !sw) { return; }
-    var isSched = (m.value === 'admission_schedule');
-    tw.style.display = isSched ? 'none' : 'block';
-    sw.style.display = isSched ? 'block' : 'none';
-}
-accRoutineToggle();
-
-function accAddRoutineRow() {
-    var tb = document.getElementById('accRoutineTbody');
-    if (!tb) { return; }
-    var tr = document.createElement('tr');
-    var specs = [
-        ['routine_date[]', 100, 'যেমন: 10 Dec 2026 (Thu)', 'form-control form-control-sm'],
-        ['routine_time[]', 100, 'যেমন: 10:00 AM - 01:00 PM', 'form-control form-control-sm'],
-        ['routine_subject[]', 120, 'যেমন: English 1st Paper', 'form-control form-control-sm'],
-        ['routine_marks[]', 40, '100', 'form-control form-control-sm text-center']
-    ];
-    specs.forEach(function (sp) {
-        var td = document.createElement('td');
-        var inp = document.createElement('input');
-        inp.type = 'text';
-        inp.name = sp[0];
-        inp.maxLength = sp[1];
-        inp.placeholder = sp[2];
-        inp.className = sp[3];
-        td.appendChild(inp);
-        tr.appendChild(td);
-    });
-    var actTd = document.createElement('td');
-    actTd.className = 'text-center';
-    var btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'btn btn-sm btn-outline-danger py-0 px-2';
-    btn.textContent = '\u00d7';
-    btn.onclick = function () { accDelRoutineRow(btn); };
-    actTd.appendChild(btn);
-    tr.appendChild(actTd);
-    tb.appendChild(tr);
-}
-
-function accDelRoutineRow(btn) {
-    var tr = btn && btn.closest ? btn.closest('tr') : null;
-    if (tr && tr.parentNode) { tr.parentNode.removeChild(tr); }
-}
 
 function accFillGovtDefaults() {
     var d = <?php echo json_encode($govt_defaults, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;

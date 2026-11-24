@@ -1008,6 +1008,7 @@ if (!function_exists('ac_css')) {
 .admit-modern .am-routine-tbl th, .admit-modern .am-routine-tbl td { border: 1px solid #9ca3af; padding: 3px 6px; text-align: left; }
 .admit-modern .am-routine-tbl th { background: #e5e7eb; font-weight: 700; color: #111827; }
 .admit-modern .am-routine-tbl .am-rc { text-align: center; }
+.admit-modern .am-routine-empty { min-height: 28px; }
 .admit-modern .am-sched-row {
     display: flex; justify-content: space-around; align-items: center; gap: 12px; font-size: 11px; padding: 3px 0; flex-wrap: wrap;
 }
@@ -1261,29 +1262,9 @@ if (!function_exists('ac_card_full_modern')) {
         $pres_addr = trim((string) ($d['present_address'] ?? '')) ?: '—';
         $perm_addr = trim((string) ($d['permanent_address'] ?? '')) ?: '—';
 
-        $rmode = (string) ($S['routine_mode'] ?? 'auto_db');
-        $db_rows = is_array($d['routine_rows'] ?? null) ? $d['routine_rows'] : [];
-        $cust_rows = is_array($S['custom_routine_rows'] ?? null) ? $S['custom_routine_rows'] : [];
-        $sched_exam = trim((string) ($S['schedule_exam_date'] ?? ''));
-        $sched_res = trim((string) ($S['schedule_result_date'] ?? ''));
-
-        $routine_rows_to_show = [];
-        $show_sched_box = false;
-        if (!empty($S['show_routine'])) {
-            if ($rmode === 'admission_schedule') {
-                if ($sched_exam === '' && !empty($db_rows[0])) {
-                    $sched_exam = trim((string) (($db_rows[0]['date'] ?? '') . ' ' . ($db_rows[0]['time'] ?? '')));
-                }
-                if ($sched_exam !== '' || $sched_res !== '') {
-                    $show_sched_box = true;
-                }
-            } else {
-                $routine_rows_to_show = ($rmode === 'custom_table') ? $cust_rows : ($db_rows ?: $cust_rows);
-                if (!$routine_rows_to_show && ($sched_exam !== '' || $sched_res !== '')) {
-                    $show_sched_box = true;
-                }
-            }
-        }
+        $routine_rows_to_show = (!empty($S['show_routine']) && is_array($d['routine_rows'] ?? null))
+            ? $d['routine_rows']
+            : [];
 
         $instr = is_array($d['instructions'] ?? null) ? $d['instructions'] : ac_default_instructions();
         $note_text = trim((string) ($instr['note_text'] ?? ''));
@@ -1430,9 +1411,10 @@ if (!function_exists('ac_card_full_modern')) {
                 <?php endif; ?>
             </div>
 
-            <?php if ($routine_rows_to_show): ?>
+            <?php if (!empty($S['show_routine'])): ?>
             <div class="am-routine-box">
                 <div class="am-routine-title">Exam Routine</div>
+                <?php if ($routine_rows_to_show): ?>
                 <table class="am-routine-tbl">
                     <thead>
                         <tr>
@@ -1453,14 +1435,9 @@ if (!function_exists('ac_card_full_modern')) {
                         <?php endforeach; ?>
                     </tbody>
                 </table>
-            </div>
-            <?php elseif ($show_sched_box): ?>
-            <div class="am-routine-box">
-                <div class="am-routine-title">Exam Schedule</div>
-                <div class="am-sched-row">
-                    <?php if ($sched_exam !== ''): ?><div>Written Exam Date: <strong><?php echo sc_e($sched_exam); ?></strong></div><?php endif; ?>
-                    <?php if ($sched_res !== ''): ?><div>Result Date: <strong><?php echo sc_e($sched_res); ?></strong></div><?php endif; ?>
-                </div>
+                <?php else: ?>
+                <div class="am-routine-empty"></div>
+                <?php endif; ?>
             </div>
             <?php endif; ?>
 
