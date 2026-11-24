@@ -286,6 +286,270 @@ if (!function_exists('ac_reset_instructions')) {
     }
 }
 
+if (!function_exists('ac_default_settings')) {
+    /**
+     * হোয়াইট-লেবেল অ্যাডমিট কার্ড কাস্টমাইজেশনের ডিফল্ট সেটিংস (কোনো নির্দিষ্ট স্কুলের হার্ডকোড ডাটা ছাড়া)।
+     */
+    function ac_default_settings(): array
+    {
+        return [
+            'default_layout'        => '4rect',
+            'default_ori'           => 'portrait',
+            'default_w'             => 94.0,
+            'default_h'             => 135.0,
+            'full_template'         => 'classic',
+
+            'card_title'            => 'Admit Card',
+            'show_nb_note'          => 1,
+            'nb_note_text'          => 'N.B: This Admit Card must be carried in the exam hall. Without this card no one will be allowed to sit for the exam.',
+            'show_compact_note'     => 1,
+            'compact_note_text'     => 'পরীক্ষার হলে এই কার্ডটি অবশ্যই সঙ্গে আনতে হবে।',
+
+            'show_logo'             => 1,
+            'logo_path'             => '',
+            'show_institute_name'   => 1,
+            'custom_institute_name' => '',
+            'show_slogan'           => 1,
+            'custom_slogan'         => '',
+            'show_address'          => 1,
+            'show_address_half'     => 0,
+            'custom_address'        => '',
+            'show_phone'            => 1,
+            'custom_phone'          => '',
+            'show_email'            => 1,
+            'custom_email'          => '',
+            'show_website'          => 1,
+            'custom_website'        => '',
+            'show_eiin'             => 1,
+            'custom_eiin'           => '',
+            'show_issue_date'       => 1,
+
+            'show_sig_principal'    => 1,
+            'sig_principal_path'    => '',
+            'sig_principal_name'    => '',
+            'sig_principal_label'   => '',
+            'show_sig_secondary'    => 1,
+            'sig_secondary_path'    => '',
+            'sig_secondary_name'    => '',
+            'sig_secondary_label'   => '',
+            'show_sig_candidate'    => 1,
+            'sig_candidate_label'   => 'Signature of the Candidate',
+
+            'show_photo'            => 1,
+            'show_qr'               => 1,
+            'show_student_id'       => 1,
+            'show_roll'             => 1,
+            'show_class'            => 1,
+            'show_group'            => 1,
+            'show_shift'            => 1,
+            'show_section'          => 1,
+            'show_branch'           => 1,
+            'show_session'          => 1,
+            'show_dob'              => 1,
+            'show_father_name'      => 1,
+            'show_mother_name'      => 1,
+            'show_student_address'  => 1,
+            'show_gender'           => 1,
+            'show_religion'         => 1,
+            'show_blood_group'      => 1,
+            'show_exam_schedule'    => 1,
+            'show_instructions'     => 1,
+
+            'is_custom'             => false,
+            'scope_branch_id'       => 0,
+        ];
+    }
+}
+
+if (!function_exists('ac_ensure_settings_table')) {
+    function ac_ensure_settings_table(PDO $pdo): void
+    {
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS admit_card_settings (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                branch_id INT NOT NULL DEFAULT 0,
+                default_layout VARCHAR(30) NOT NULL DEFAULT '4rect',
+                default_ori VARCHAR(15) NOT NULL DEFAULT 'portrait',
+                default_w DECIMAL(5,1) NOT NULL DEFAULT 94.0,
+                default_h DECIMAL(5,1) NOT NULL DEFAULT 135.0,
+                full_template VARCHAR(30) NOT NULL DEFAULT 'classic',
+                logo_path VARCHAR(255) NULL,
+                sig_principal_path VARCHAR(255) NULL,
+                sig_secondary_path VARCHAR(255) NULL,
+                config_json MEDIUMTEXT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uniq_branch (branch_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+    }
+}
+
+if (!function_exists('ac_load_settings')) {
+    function ac_load_settings(PDO $pdo, ?int $branch_id = null): array
+    {
+        $def = ac_default_settings();
+        $bid = $branch_id !== null ? max(0, (int) $branch_id) : 0;
+        try {
+            ac_ensure_settings_table($pdo);
+            $stmt = $pdo->prepare("SELECT * FROM admit_card_settings WHERE branch_id = ? LIMIT 1");
+            $stmt->execute([$bid]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row && $bid > 0) {
+                $stmt->execute([0]);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            }
+            if ($row) {
+                $extra = json_decode((string) ($row['config_json'] ?? ''), true);
+                $cfg = is_array($extra) ? array_merge($def, $extra) : $def;
+                $cfg['default_layout']     = (string) ($row['default_layout'] ?? $def['default_layout']);
+                $cfg['default_ori']        = (string) ($row['default_ori'] ?? $def['default_ori']);
+                $cfg['default_w']          = (float) ($row['default_w'] ?? $def['default_w']);
+                $cfg['default_h']          = (float) ($row['default_h'] ?? $def['default_h']);
+                $cfg['full_template']      = (string) ($row['full_template'] ?? $def['full_template']);
+                $cfg['logo_path']          = (string) ($row['logo_path'] ?? '');
+                $cfg['sig_principal_path'] = (string) ($row['sig_principal_path'] ?? '');
+                $cfg['sig_secondary_path'] = (string) ($row['sig_secondary_path'] ?? '');
+                $cfg['is_custom']          = true;
+                $cfg['scope_branch_id']    = (int) ($row['branch_id'] ?? $bid);
+                return $cfg;
+            }
+        } catch (Throwable $e) {
+            // DB সমস্যা হলে নিরাপদ ডিফল্ট রিটার্ন করবে
+        }
+        $def['scope_branch_id'] = $bid;
+        return $def;
+    }
+}
+
+if (!function_exists('ac_save_settings')) {
+    function ac_save_settings(PDO $pdo, ?int $branch_id, array $in): void
+    {
+        ac_ensure_settings_table($pdo);
+        $def = ac_default_settings();
+        $bid = $branch_id !== null ? max(0, (int) $branch_id) : 0;
+
+        $allowed_layouts = ['4rect', '4sq', '3rect', '2half', '1full', 'custom'];
+        $dl = (string) ($in['default_layout'] ?? $def['default_layout']);
+        if (!in_array($dl, $allowed_layouts, true)) { $dl = '4rect'; }
+        $ori = (($in['default_ori'] ?? 'portrait') === 'landscape') ? 'landscape' : 'portrait';
+        $dw = max(50.0, min(287.0, (float) ($in['default_w'] ?? 94.0)));
+        $dh = max(40.0, min(287.0, (float) ($in['default_h'] ?? 135.0)));
+        $ft = preg_replace('/[^a-z0-9_-]/i', '', (string) ($in['full_template'] ?? 'classic')) ?: 'classic';
+
+        $logo = trim((string) ($in['logo_path'] ?? ''));
+        $sig_p = trim((string) ($in['sig_principal_path'] ?? ''));
+        $sig_s = trim((string) ($in['sig_secondary_path'] ?? ''));
+
+        $payload = [];
+        foreach ($def as $k => $v) {
+            if (in_array($k, ['default_layout', 'default_ori', 'default_w', 'default_h', 'full_template', 'logo_path', 'sig_principal_path', 'sig_secondary_path', 'is_custom', 'scope_branch_id'], true)) {
+                continue;
+            }
+            if (is_int($v)) {
+                $payload[$k] = !empty($in[$k]) ? 1 : 0;
+            } else {
+                $payload[$k] = mb_substr(trim((string) ($in[$k] ?? $v)), 0, 500);
+            }
+        }
+        $json = json_encode($payload, JSON_UNESCAPED_UNICODE);
+
+        $stmt = $pdo->prepare(
+            "INSERT INTO admit_card_settings
+                (branch_id, default_layout, default_ori, default_w, default_h, full_template, logo_path, sig_principal_path, sig_secondary_path, config_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                default_layout = VALUES(default_layout),
+                default_ori = VALUES(default_ori),
+                default_w = VALUES(default_w),
+                default_h = VALUES(default_h),
+                full_template = VALUES(full_template),
+                logo_path = VALUES(logo_path),
+                sig_principal_path = VALUES(sig_principal_path),
+                sig_secondary_path = VALUES(sig_secondary_path),
+                config_json = VALUES(config_json)"
+        );
+        $stmt->execute([$bid, $dl, $ori, $dw, $dh, $ft, $logo ?: null, $sig_p ?: null, $sig_s ?: null, $json]);
+    }
+}
+
+if (!function_exists('ac_reset_settings')) {
+    /**
+     * কাস্টম সেটিংস মুছে পুরনো আপলোড করা ইমেজ পাথগুলো রিটার্ন করে।
+     */
+    function ac_reset_settings(PDO $pdo, ?int $branch_id = null): array
+    {
+        ac_ensure_settings_table($pdo);
+        $bid = $branch_id !== null ? max(0, (int) $branch_id) : 0;
+        $q = $pdo->prepare("SELECT logo_path, sig_principal_path, sig_secondary_path FROM admit_card_settings WHERE branch_id = ? LIMIT 1");
+        $q->execute([$bid]);
+        $old = $q->fetch(PDO::FETCH_ASSOC) ?: [];
+        $del = $pdo->prepare("DELETE FROM admit_card_settings WHERE branch_id = ?");
+        $del->execute([$bid]);
+        return array_values(array_filter([
+            $old['logo_path'] ?? '',
+            $old['sig_principal_path'] ?? '',
+            $old['sig_secondary_path'] ?? '',
+        ], static fn($v) => trim((string) $v) !== ''));
+    }
+}
+
+if (!function_exists('ac_cfg')) {
+    function ac_cfg(array $d): array
+    {
+        $def = ac_default_settings();
+        $in = is_array($d['settings'] ?? null) ? $d['settings'] : [];
+        return array_merge($def, $in);
+    }
+}
+
+if (!function_exists('ac_resolve_header')) {
+    function ac_resolve_header(array $d, array $S): array
+    {
+        $custom_inst = trim((string) ($S['custom_institute_name'] ?? ''));
+        $inst = $custom_inst !== '' ? $custom_inst : trim((string) ($d['institute'] ?? ''));
+
+        $custom_logo = trim((string) ($S['logo_path'] ?? ''));
+        $logo = ac_asset_url($custom_logo !== '' ? $custom_logo : ($d['logo'] ?? ''));
+
+        $custom_slogan = trim((string) ($S['custom_slogan'] ?? ''));
+        $slogan = $custom_slogan !== '' ? $custom_slogan : trim((string) ($d['slogan'] ?? ''));
+
+        $custom_addr = trim((string) ($S['custom_address'] ?? ''));
+        $address = $custom_addr !== '' ? $custom_addr : trim((string) ($d['address'] ?? ''));
+
+        $custom_phone = trim((string) ($S['custom_phone'] ?? ''));
+        $phone = $custom_phone !== '' ? $custom_phone : trim((string) ($d['phone'] ?? ''));
+
+        $custom_email = trim((string) ($S['custom_email'] ?? ''));
+        $email = $custom_email !== '' ? $custom_email : trim((string) ($d['email'] ?? ''));
+
+        $custom_web = trim((string) ($S['custom_website'] ?? ''));
+        $website = $custom_web !== '' ? $custom_web : trim((string) ($d['website'] ?? ''));
+
+        $custom_eiin = trim((string) ($S['custom_eiin'] ?? ''));
+        $eiin = $custom_eiin !== '' ? $custom_eiin : trim((string) ($d['eiin'] ?? ''));
+
+        $p_path = trim((string) ($S['sig_principal_path'] ?? ''));
+        $sig_p_img = ac_asset_url($p_path !== '' ? $p_path : ($d['branch_signature'] ?? ''));
+        $sig_p_name = trim((string) ($S['sig_principal_name'] ?? ''));
+        $sig_p_label = trim((string) ($S['sig_principal_label'] ?? '')) ?: trim((string) ($d['sig_right_label'] ?? ''));
+
+        $s_path = trim((string) ($S['sig_secondary_path'] ?? ''));
+        $sig_s_img = ac_asset_url($s_path !== '' ? $s_path : ($d['secondary_signature'] ?? ''));
+        $sig_s_name = trim((string) ($S['sig_secondary_name'] ?? ''));
+        $sig_s_label = trim((string) ($S['sig_secondary_label'] ?? '')) ?: trim((string) ($d['sig_left_label'] ?? ''));
+
+        $card_title = trim((string) ($S['card_title'] ?? '')) ?: 'Admit Card';
+
+        return compact(
+            'inst', 'logo', 'slogan', 'address', 'phone', 'email', 'website', 'eiin',
+            'sig_p_img', 'sig_p_name', 'sig_p_label',
+            'sig_s_img', 'sig_s_name', 'sig_s_label',
+            'card_title'
+        );
+    }
+}
+
 // ------------------------------------------------------------------
 // Admit Card ডিজাইন (Result > Download Admit Card)
 // ------------------------------------------------------------------
@@ -403,9 +667,14 @@ if (!function_exists('ac_css')) {
 .admitcard2 .ad-qr img, .admitcard2 .ad-qr canvas { width: 100% !important; height: 100% !important; }
 .admitcard2 .ad-foot {
     display: flex; justify-content: space-between; align-items: flex-end; gap: 10px;
-    padding: 20px 14px 7px; background: #f8fafc; border-top: 1px solid #e2e8f0;
+    padding: 18px 14px 7px; background: #f8fafc; border-top: 1px solid #e2e8f0;
 }
-.admitcard2 .ad-sign { flex: 1; text-align: center; font-size: 9.5px; color: #475569; border-top: 1px solid #64748b; padding-top: 2px; }
+.admitcard2 .ad-foot.has-sig-img { padding-top: 5px; }
+.admitcard2 .ad-sign { flex: 1; text-align: center; font-size: 9.5px; color: #475569; }
+.admitcard2 .ad-sign-img { height: 22px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: 2px; }
+.admitcard2 .ad-sign-img img { max-height: 20px; max-width: 90px; object-fit: contain; }
+.admitcard2 .ad-sign-line { border-top: 1px solid #64748b; padding-top: 2px; }
+.admitcard2 .ad-sign-name { font-weight: 700; color: #0f172a; font-size: 9.5px; line-height: 1.15; }
 .admitcard2 .ad-note { text-align: center; font-size: 8.5px; color: #64748b; padding: 0 8px 6px; background: #f8fafc; }
 /* wide (চওড়া কার্ড): বড় ফন্ট/ছবি */
 .admitcard2.ac-wide .ad-photo { width: 110px; height: 132px; flex-basis: 110px; }
@@ -446,6 +715,9 @@ if (!function_exists('ac_css')) {
     font-size: 12px; color: #334155; font-style: italic; font-family: Georgia, 'Times New Roman', serif;
     margin-top: 2px; line-height: 1.2; overflow-wrap: break-word;
 }
+.admit-half .ah-inst-addr {
+    font-size: 10px; color: #475569; margin-top: 1px; line-height: 1.2; overflow-wrap: break-word;
+}
 .admit-half .ah-inst-contact {
     font-size: 10.5px; color: #1e293b; font-weight: 600; margin-top: 2px; line-height: 1.2;
 }
@@ -484,6 +756,8 @@ if (!function_exists('ac_css')) {
 .admit-half .ah-sig-line {
     border-top: 1.2px solid #111827; padding-top: 3px; font-size: 11.5px; font-weight: 600; color: #111827;
 }
+.admit-half .ah-sig-name { font-size: 11px; font-weight: 700; color: #0f172a; margin-top: 2px; line-height: 1.15; }
+.admit-half .ah-sig-role { font-size: 10.5px; font-weight: 500; color: #334155; line-height: 1.15; }
 .admit-half .ah-nb {
     margin: 0 14px 8px; border: 1px solid #475569; padding: 4px 8px;
     font-size: 10.5px; font-weight: 700; line-height: 1.3; color: #111827;
@@ -515,6 +789,7 @@ if (!function_exists('ac_css')) {
     font-size: 13px; font-weight: 700; color: #111827; text-transform: uppercase; margin-top: 2px; line-height: 1.2;
 }
 .admit-full .af-sub { font-size: 10px; color: #475569; margin-top: 1px; }
+.admit-full .af-slogan { font-size: 10px; font-style: italic; color: #334155; margin-top: 1px; }
 .admit-full .af-upper {
     display: grid; grid-template-columns: 40% 36% 24%; border-bottom: 1px solid #6b7280;
 }
@@ -551,6 +826,7 @@ if (!function_exists('ac_css')) {
     padding: 4px 6px 5px; text-align: center; min-height: 44px;
 }
 .admit-full .af-msig img { max-height: 26px; max-width: 120px; object-fit: contain; margin-bottom: 2px; }
+.admit-full .af-msig-name { font-size: 9.5px; font-weight: 700; color: #0f172a; line-height: 1.15; }
 .admit-full .af-msig-lbl { font-size: 9.5px; font-weight: 700; color: #1f2937; }
 .admit-full .af-col-right { display: flex; flex-direction: column; min-width: 0; }
 .admit-full .af-roll-box { border-bottom: 1px solid #9ca3af; text-align: center; }
@@ -603,19 +879,15 @@ CSS;
 if (!function_exists('ac_card_half')) {
     function ac_card_half(array $d): string
     {
-        $logo = ac_asset_url($d['logo'] ?? '');
-        $photo = ac_asset_url($d['photo'] ?? '');
-        $sig_img = ac_asset_url($d['branch_signature'] ?? '');
-        $inst = trim((string) ($d['institute'] ?? ''));
-        $sub = trim((string) ($d['slogan'] ?? ''));
-        if ($sub === '') {
-            $sub = trim((string) ($d['address'] ?? ''));
-        }
-        $phone = trim((string) ($d['phone'] ?? ''));
-        $email = trim((string) ($d['email'] ?? ''));
+        $S = ac_cfg($d);
+        $H = ac_resolve_header($d, $S);
+        $photo = !empty($S['show_photo']) ? ac_asset_url($d['photo'] ?? '') : '';
+        $inst = $H['inst'];
+
         $contact_parts = [];
-        if ($phone !== '') { $contact_parts[] = 'Mobile: ' . $phone; }
-        if ($email !== '') { $contact_parts[] = 'Email: ' . $email; }
+        if (!empty($S['show_phone']) && $H['phone'] !== '') { $contact_parts[] = 'Mobile: ' . $H['phone']; }
+        if (!empty($S['show_email']) && $H['email'] !== '') { $contact_parts[] = 'Email: ' . $H['email']; }
+        if (!empty($S['show_website']) && $H['website'] !== '') { $contact_parts[] = $H['website']; }
 
         $inst_len = mb_strlen($inst);
         if ($inst_len <= 22)      { $inst_fs = '21px'; }
@@ -626,44 +898,60 @@ if (!function_exists('ac_card_half')) {
 
         $term = trim((string) ($d['term'] ?? ''));
         $issue_date = trim((string) ($d['issue_date'] ?? '')) ?: date('d/m/Y');
-        $sig_principal = trim((string) ($d['sig_right_label'] ?? '')) ?: 'Principal';
-        $sig_teacher = trim((string) ($d['sig_left_label'] ?? '')) ?: 'Class Teacher';
 
-        $left_rows = [
-            ['Name',       trim((string) ($d['name'] ?? '')) ?: '—'],
-            ['Student ID', trim((string) ($d['student_id'] ?? '')) ?: '—'],
-            ['Roll No',    trim((string) ($d['roll'] ?? '')) ?: '—'],
-            ['Class',      trim((string) ($d['class'] ?? '')) ?: '—'],
-            ['Group',      trim((string) ($d['group'] ?? '')) ?: 'None'],
-            ['Section',    trim((string) ($d['section'] ?? '')) ?: '—'],
-        ];
-        $mid_rows = [
-            ['Branch',  trim((string) ($d['branch_name'] ?? '')) ?: ($inst ?: '—')],
-            ['Shift',   trim((string) ($d['shift'] ?? '')) ?: '—'],
-            ['Session', trim((string) ($d['session'] ?? '')) ?: (trim((string) ($d['year'] ?? '')) ?: '—')],
-        ];
+        $show_head_logo = !empty($S['show_logo']);
+        $show_head_name = !empty($S['show_institute_name']) && $inst !== '';
+        $show_head_sub  = !empty($S['show_slogan']) && $H['slogan'] !== '';
+        $show_head_addr = !empty($S['show_address']) && !empty($S['show_address_half']) && $H['address'] !== '';
+        $show_header = $show_head_logo || $show_head_name || $show_head_sub || $show_head_addr || !empty($contact_parts);
+
+        $left_rows = [['Name', trim((string) ($d['name'] ?? '')) ?: '—']];
+        if (!empty($S['show_student_id'])) { $left_rows[] = ['Student ID', trim((string) ($d['student_id'] ?? '')) ?: '—']; }
+        if (!empty($S['show_roll']))       { $left_rows[] = ['Roll No',    trim((string) ($d['roll'] ?? '')) ?: '—']; }
+        if (!empty($S['show_class']))      { $left_rows[] = ['Class',      trim((string) ($d['class'] ?? '')) ?: '—']; }
+        if (!empty($S['show_group']))      { $left_rows[] = ['Group',      trim((string) ($d['group'] ?? '')) ?: 'None']; }
+        if (!empty($S['show_section']))    { $left_rows[] = ['Section',    trim((string) ($d['section'] ?? '')) ?: '—']; }
+
+        $mid_rows = [];
+        if (!empty($S['show_branch']))  { $mid_rows[] = ['Branch',  trim((string) ($d['branch_name'] ?? '')) ?: ($inst ?: '—')]; }
+        if (!empty($S['show_shift']))   { $mid_rows[] = ['Shift',   trim((string) ($d['shift'] ?? '')) ?: '—']; }
+        if (!empty($S['show_session'])) { $mid_rows[] = ['Session', trim((string) ($d['session'] ?? '')) ?: (trim((string) ($d['year'] ?? '')) ?: '—')]; }
+
+        $sigs = [];
+        if (!empty($S['show_sig_principal'])) {
+            $sigs[] = ['img' => $H['sig_p_img'], 'name' => $H['sig_p_name'], 'label' => $H['sig_p_label'] ?: 'Principal'];
+        }
+        if (!empty($S['show_sig_secondary'])) {
+            $sigs[] = ['img' => $H['sig_s_img'], 'name' => $H['sig_s_name'], 'label' => $H['sig_s_label'] ?: 'Class Teacher'];
+        }
+        $nb_text = (!empty($S['show_nb_note'])) ? trim((string) ($S['nb_note_text'] ?? '')) : '';
 
         ob_start(); ?>
         <div class="ac-cell ac-cell-half"><div class="admit-half">
+            <?php if ($show_header): ?>
             <div class="ah-head">
+                <?php if ($show_head_logo): ?>
                 <div class="ah-logo">
-                    <?php if ($logo !== ''): ?><img src="<?php echo sc_e($logo); ?>" alt="Logo">
+                    <?php if ($H['logo'] !== ''): ?><img src="<?php echo sc_e($H['logo']); ?>" alt="Logo">
                     <?php else: ?><span><?php echo sc_e(mb_substr($inst !== '' ? $inst : 'A', 0, 1)); ?></span><?php endif; ?>
                 </div>
+                <?php endif; ?>
                 <div class="ah-inst">
-                    <div class="ah-inst-name" style="font-size:<?php echo $inst_fs; ?>;"><?php echo sc_e($inst); ?></div>
-                    <?php if ($sub !== ''): ?><div class="ah-inst-sub"><?php echo sc_e($sub); ?></div><?php endif; ?>
+                    <?php if ($show_head_name): ?><div class="ah-inst-name" style="font-size:<?php echo $inst_fs; ?>;"><?php echo sc_e($inst); ?></div><?php endif; ?>
+                    <?php if ($show_head_sub): ?><div class="ah-inst-sub"><?php echo sc_e($H['slogan']); ?></div><?php endif; ?>
+                    <?php if ($show_head_addr): ?><div class="ah-inst-addr"><?php echo sc_e($H['address']); ?></div><?php endif; ?>
                     <?php if ($contact_parts): ?><div class="ah-inst-contact"><?php echo sc_e(implode('  |  ', $contact_parts)); ?></div><?php endif; ?>
                 </div>
-                <div class="ah-head-spacer"></div>
+                <?php if ($show_head_logo): ?><div class="ah-head-spacer"></div><?php endif; ?>
             </div>
+            <?php endif; ?>
             <div class="ah-title-row">
-                <span class="ah-card-box">Admit Card</span>
+                <span class="ah-card-box"><?php echo sc_e($H['card_title']); ?></span>
                 <?php if ($term !== ''): ?><div class="ah-term"><?php echo sc_e($term); ?></div><?php endif; ?>
-                <div class="ah-issue"><strong>Issue Date:</strong> <?php echo sc_e($issue_date); ?></div>
+                <?php if (!empty($S['show_issue_date'])): ?><div class="ah-issue"><strong>Issue Date:</strong> <?php echo sc_e($issue_date); ?></div><?php endif; ?>
             </div>
             <div class="ah-body">
-                <div class="ah-info-wrap">
+                <div class="ah-info-wrap"<?php echo empty($mid_rows) ? ' style="grid-template-columns:1fr;"' : ''; ?>>
                     <table class="ah-kv">
                         <?php foreach ($left_rows as [$k, $v]): ?>
                         <tr>
@@ -673,6 +961,7 @@ if (!function_exists('ac_card_half')) {
                         </tr>
                         <?php endforeach; ?>
                     </table>
+                    <?php if ($mid_rows): ?>
                     <table class="ah-kv">
                         <?php foreach ($mid_rows as [$k, $v]): ?>
                         <tr>
@@ -682,25 +971,35 @@ if (!function_exists('ac_card_half')) {
                         </tr>
                         <?php endforeach; ?>
                     </table>
+                    <?php endif; ?>
                 </div>
+                <?php if (!empty($S['show_photo'])): ?>
                 <div class="ah-photo">
                     <?php if ($photo !== ''): ?><img src="<?php echo sc_e($photo); ?>" alt="Photo">
                     <?php else: ?>Photo<?php endif; ?>
                 </div>
+                <?php endif; ?>
             </div>
-            <div class="ah-sigs">
+            <?php if ($sigs): ?>
+            <div class="ah-sigs"<?php echo count($sigs) === 1 ? ' style="justify-content:flex-end;"' : ''; ?>>
+                <?php foreach ($sigs as $sg): ?>
                 <div class="ah-sig">
                     <div class="ah-sig-img">
-                        <?php if ($sig_img !== ''): ?><img src="<?php echo sc_e($sig_img); ?>" alt="Signature"><?php endif; ?>
+                        <?php if ($sg['img'] !== ''): ?><img src="<?php echo sc_e($sg['img']); ?>" alt="Signature"><?php endif; ?>
                     </div>
-                    <div class="ah-sig-line"><?php echo sc_e($sig_principal); ?></div>
+                    <?php if ($sg['name'] !== ''): ?>
+                        <div class="ah-sig-line">
+                            <div class="ah-sig-name"><?php echo sc_e($sg['name']); ?></div>
+                            <div class="ah-sig-role"><?php echo sc_e($sg['label']); ?></div>
+                        </div>
+                    <?php else: ?>
+                        <div class="ah-sig-line"><?php echo sc_e($sg['label']); ?></div>
+                    <?php endif; ?>
                 </div>
-                <div class="ah-sig">
-                    <div class="ah-sig-img"></div>
-                    <div class="ah-sig-line"><?php echo sc_e($sig_teacher); ?></div>
-                </div>
+                <?php endforeach; ?>
             </div>
-            <div class="ah-nb">N.B: This Admit Card must be carried in the exam hall. Without this card no one will be allowed to sit for the exam.</div>
+            <?php endif; ?>
+            <?php if ($nb_text !== ''): ?><div class="ah-nb"><?php echo sc_e($nb_text); ?></div><?php endif; ?>
         </div></div>
         <?php
         return ob_get_clean();
@@ -710,27 +1009,72 @@ if (!function_exists('ac_card_half')) {
 if (!function_exists('ac_card_full')) {
     function ac_card_full(array $d): string
     {
-        $logo = ac_asset_url($d['logo'] ?? '');
-        $photo = ac_asset_url($d['photo'] ?? '');
-        $sig_img = ac_asset_url($d['branch_signature'] ?? '');
-        $inst = trim((string) ($d['institute'] ?? ''));
+        $S = ac_cfg($d);
+        $H = ac_resolve_header($d, $S);
+        $photo = !empty($S['show_photo']) ? ac_asset_url($d['photo'] ?? '') : '';
+        $inst = $H['inst'];
         $term = trim((string) ($d['term'] ?? ''));
         $session = trim((string) ($d['session'] ?? '')) ?: trim((string) ($d['year'] ?? ''));
+
         $subtitle_parts = array_filter([
-            trim((string) ($d['address'] ?? '')),
-            trim((string) ($d['phone'] ?? '')) !== '' ? 'Mobile: ' . trim((string) $d['phone']) : '',
-            trim((string) ($d['email'] ?? '')) !== '' ? 'Email: ' . trim((string) $d['email']) : '',
-            trim((string) ($d['website'] ?? '')),
+            !empty($S['show_address']) ? $H['address'] : '',
+            (!empty($S['show_phone']) && $H['phone'] !== '') ? 'Mobile: ' . $H['phone'] : '',
+            (!empty($S['show_email']) && $H['email'] !== '') ? 'Email: ' . $H['email'] : '',
+            !empty($S['show_website']) ? $H['website'] : '',
         ], static fn($v) => $v !== '');
 
-        $eiin = trim((string) ($d['eiin'] ?? '')) ?: (trim((string) ($d['branch_short'] ?? '')) ?: '—');
+        $eiin = $H['eiin'] !== '' ? $H['eiin'] : (trim((string) ($d['branch_short'] ?? '')) ?: '—');
         $centre_name = trim((string) ($d['branch_name'] ?? '')) ?: ($inst ?: '—');
-        $centre_addr = trim((string) ($d['branch_address'] ?? '')) ?: trim((string) ($d['address'] ?? ''));
+        $centre_addr = trim((string) ($d['branch_address'] ?? '')) ?: $H['address'];
         $cand_addr = trim((string) ($d['present_address'] ?? '')) ?: (trim((string) ($d['permanent_address'] ?? '')) ?: '—');
         $dob_fmt = ac_fmt_date($d['dob'] ?? '', '—');
         $exam_date = trim((string) ($d['exam_date'] ?? '')) ?: (trim((string) ($d['issue_date'] ?? '')) ?: date('d/m/Y'));
         $exam_time = trim((string) ($d['exam_time'] ?? '')) ?: (trim((string) ($d['shift'] ?? '')) ?: '—');
-        $sig_principal = trim((string) ($d['sig_right_label'] ?? '')) ?: 'Head of Institute';
+        $sig_principal_lbl = $H['sig_p_label'] ?: 'Head of Institute';
+
+        $show_head_logo = !empty($S['show_logo']);
+        $show_head_name = !empty($S['show_institute_name']) && $inst !== '';
+        $show_head_slogan = !empty($S['show_slogan']) && $H['slogan'] !== '';
+        $show_right_col = !empty($S['show_roll']) || !empty($S['show_photo']) || !empty($S['show_sig_candidate']);
+
+        $band1 = [];
+        if (!empty($S['show_student_id'])) { $band1[] = ['Student ID / Reg. No.', trim((string) ($d['student_id'] ?? '')) ?: '—', true]; }
+        if (!empty($S['show_dob']))        { $band1[] = ['Date of Birth', $dob_fmt, false]; }
+
+        $band2 = [];
+        if (!empty($S['show_gender']))      { $band2[] = ['Gender', trim((string) ($d['gender'] ?? '')) ?: '—', false]; }
+        if (!empty($S['show_religion']))    { $band2[] = ['Religion', trim((string) ($d['religion'] ?? '')) ?: '—', false]; }
+        if (!empty($S['show_blood_group'])) { $band2[] = ['Blood Group', trim((string) ($d['blood_group'] ?? '')) ?: '—', false]; }
+
+        $band3 = [];
+        if (!empty($S['show_class'])) { $band3[] = ['Class', trim((string) ($d['class'] ?? '')) ?: '—', false]; }
+        if (!empty($S['show_group'])) { $band3[] = ['Group', trim((string) ($d['group'] ?? '')) ?: 'N/A', false]; }
+
+        $band4 = [];
+        if (!empty($S['show_shift']))   { $band4[] = ['Shift', trim((string) ($d['shift'] ?? '')) ?: '—', false]; }
+        if (!empty($S['show_section'])) { $band4[] = ['Section', trim((string) ($d['section'] ?? '')) ?: '—', false]; }
+
+        $band5 = [];
+        if (!empty($S['show_session']))       { $band5[] = ['Session', $session ?: '—', false]; }
+        if (!empty($S['show_exam_schedule'])) { $band5[] = ['Exam Part', trim((string) ($d['part'] ?? '')) ?: 'Regular', false]; }
+
+        $band6 = [];
+        if (!empty($S['show_exam_schedule'])) {
+            $band6[] = ['Exam Date', $exam_date, false];
+            $band6[] = ['Term', $term ?: '—', false];
+            $band6[] = ['Timings', $exam_time, false];
+        }
+
+        $render_band = static function (array $cells): string {
+            if (!$cells) { return ''; }
+            $cols = count($cells);
+            $out = '<div class="af-mgrid2" style="grid-template-columns:repeat(' . $cols . ',minmax(0,1fr));">';
+            foreach ($cells as [$lbl, $val, $lg]) {
+                $out .= '<div class="af-mcell"><div class="af-mlbl">' . sc_e($lbl) . '</div>'
+                      . '<div class="af-mval' . ($lg ? ' af-mval-lg' : '') . '">' . sc_e($val) . '</div></div>';
+            }
+            return $out . '</div>';
+        };
 
         $instr = is_array($d['instructions'] ?? null) ? $d['instructions'] : ac_default_instructions();
         $note_text = trim((string) ($instr['note_text'] ?? ''));
@@ -753,139 +1097,104 @@ if (!function_exists('ac_card_full')) {
         ob_start(); ?>
         <div class="ac-cell ac-cell-full"><div class="admit-full">
             <div class="af-head">
+                <?php if ($show_head_logo): ?>
                 <div class="af-logo">
-                    <?php if ($logo !== ''): ?><img src="<?php echo sc_e($logo); ?>" alt="Logo">
+                    <?php if ($H['logo'] !== ''): ?><img src="<?php echo sc_e($H['logo']); ?>" alt="Logo">
                     <?php else: ?><span><?php echo sc_e(mb_substr($inst !== '' ? $inst : 'A', 0, 1)); ?></span><?php endif; ?>
                 </div>
+                <?php endif; ?>
                 <div class="af-head-text">
-                    <div class="af-inst"><?php echo sc_e($inst); ?></div>
-                    <div class="af-title">ADMIT CARD<?php echo $term !== '' ? ' — ' . sc_e($term) : ''; ?><?php echo $session !== '' ? ' (' . sc_e($session) . ')' : ''; ?></div>
+                    <?php if ($show_head_name): ?><div class="af-inst"><?php echo sc_e($inst); ?></div><?php endif; ?>
+                    <?php if ($show_head_slogan): ?><div class="af-slogan"><?php echo sc_e($H['slogan']); ?></div><?php endif; ?>
+                    <div class="af-title"><?php echo sc_e(mb_strtoupper($H['card_title'])); ?><?php echo $term !== '' ? ' — ' . sc_e($term) : ''; ?><?php echo (!empty($S['show_session']) && $session !== '') ? ' (' . sc_e($session) . ')' : ''; ?></div>
                     <?php if ($subtitle_parts): ?><div class="af-sub"><?php echo sc_e(implode(' | ', $subtitle_parts)); ?></div><?php endif; ?>
                 </div>
-                <div class="af-head-spacer"></div>
+                <?php if ($show_head_logo): ?><div class="af-head-spacer"></div><?php endif; ?>
             </div>
 
-            <div class="af-upper">
+            <div class="af-upper"<?php echo !$show_right_col ? ' style="grid-template-columns:52% 48%;"' : ''; ?>>
                 <div class="af-col-left">
+                    <?php if (!empty($S['show_eiin'])): ?>
                     <div class="af-lrow">
                         <div class="af-lk">EIIN / Code :</div>
                         <div class="af-lv"><?php echo sc_e($eiin); ?></div>
                     </div>
+                    <?php endif; ?>
+                    <?php if (!empty($S['show_branch'])): ?>
                     <div class="af-lrow af-grow">
                         <div class="af-lk">Centre / Institute :</div>
-                        <div class="af-lv"><?php echo sc_e($centre_name); ?><?php if ($centre_addr !== ''): ?><br><span class="af-lv-reg"><?php echo nl2br(sc_e($centre_addr)); ?></span><?php endif; ?></div>
+                        <div class="af-lv"><?php echo sc_e($centre_name); ?><?php if (!empty($S['show_address']) && $centre_addr !== ''): ?><br><span class="af-lv-reg"><?php echo nl2br(sc_e($centre_addr)); ?></span><?php endif; ?></div>
                     </div>
+                    <?php endif; ?>
+                    <?php if (!empty($S['show_student_address'])): ?>
                     <div class="af-lrow af-grow">
                         <div class="af-lk">Candidate's Address :</div>
                         <div class="af-lv af-lv-reg"><?php echo nl2br(sc_e($cand_addr)); ?></div>
                     </div>
+                    <?php endif; ?>
                     <div class="af-lrow">
                         <div class="af-lk">Candidate's Name :</div>
                         <div class="af-lv" style="text-transform:uppercase;"><?php echo sc_e(trim((string) ($d['name'] ?? '')) ?: '—'); ?></div>
                     </div>
+                    <?php if (!empty($S['show_father_name'])): ?>
                     <div class="af-lrow">
                         <div class="af-lk">Father's Name :</div>
                         <div class="af-lv" style="text-transform:uppercase;"><?php echo sc_e(trim((string) ($d['father_name'] ?? '')) ?: '—'); ?></div>
                     </div>
+                    <?php endif; ?>
+                    <?php if (!empty($S['show_mother_name'])): ?>
                     <div class="af-lrow">
                         <div class="af-lk">Mother's Name :</div>
                         <div class="af-lv" style="text-transform:uppercase;"><?php echo sc_e(trim((string) ($d['mother_name'] ?? '')) ?: '—'); ?></div>
                     </div>
+                    <?php endif; ?>
                 </div>
 
-                <div class="af-col-mid">
-                    <div class="af-mgrid2">
-                        <div class="af-mcell">
-                            <div class="af-mlbl">Student ID / Reg. No.</div>
-                            <div class="af-mval af-mval-lg"><?php echo sc_e(trim((string) ($d['student_id'] ?? '')) ?: '—'); ?></div>
-                        </div>
-                        <div class="af-mcell">
-                            <div class="af-mlbl">Date of Birth</div>
-                            <div class="af-mval"><?php echo sc_e($dob_fmt); ?></div>
-                        </div>
-                    </div>
-                    <div class="af-mgrid3">
-                        <div class="af-mcell">
-                            <div class="af-mlbl">Gender</div>
-                            <div class="af-mval"><?php echo sc_e(trim((string) ($d['gender'] ?? '')) ?: '—'); ?></div>
-                        </div>
-                        <div class="af-mcell">
-                            <div class="af-mlbl">Religion</div>
-                            <div class="af-mval"><?php echo sc_e(trim((string) ($d['religion'] ?? '')) ?: '—'); ?></div>
-                        </div>
-                        <div class="af-mcell">
-                            <div class="af-mlbl">Blood Group</div>
-                            <div class="af-mval"><?php echo sc_e(trim((string) ($d['blood_group'] ?? '')) ?: '—'); ?></div>
-                        </div>
-                    </div>
-                    <div class="af-mgrid2">
-                        <div class="af-mcell">
-                            <div class="af-mlbl">Class</div>
-                            <div class="af-mval"><?php echo sc_e(trim((string) ($d['class'] ?? '')) ?: '—'); ?></div>
-                        </div>
-                        <div class="af-mcell">
-                            <div class="af-mlbl">Group</div>
-                            <div class="af-mval"><?php echo sc_e(trim((string) ($d['group'] ?? '')) ?: 'N/A'); ?></div>
-                        </div>
-                    </div>
-                    <div class="af-mgrid2">
-                        <div class="af-mcell">
-                            <div class="af-mlbl">Shift</div>
-                            <div class="af-mval"><?php echo sc_e(trim((string) ($d['shift'] ?? '')) ?: '—'); ?></div>
-                        </div>
-                        <div class="af-mcell">
-                            <div class="af-mlbl">Section</div>
-                            <div class="af-mval"><?php echo sc_e(trim((string) ($d['section'] ?? '')) ?: '—'); ?></div>
-                        </div>
-                    </div>
-                    <div class="af-mband-title">Academic &amp; Examination Details</div>
-                    <div class="af-mgrid2">
-                        <div class="af-mcell">
-                            <div class="af-mlbl">Session</div>
-                            <div class="af-mval"><?php echo sc_e($session ?: '—'); ?></div>
-                        </div>
-                        <div class="af-mcell">
-                            <div class="af-mlbl">Exam Part</div>
-                            <div class="af-mval"><?php echo sc_e(trim((string) ($d['part'] ?? '')) ?: 'Regular'); ?></div>
-                        </div>
-                    </div>
-                    <div class="af-mgrid3">
-                        <div class="af-mcell">
-                            <div class="af-mlbl">Exam Date</div>
-                            <div class="af-mval"><?php echo sc_e($exam_date); ?></div>
-                        </div>
-                        <div class="af-mcell">
-                            <div class="af-mlbl">Term</div>
-                            <div class="af-mval"><?php echo sc_e($term ?: '—'); ?></div>
-                        </div>
-                        <div class="af-mcell">
-                            <div class="af-mlbl">Timings</div>
-                            <div class="af-mval"><?php echo sc_e($exam_time); ?></div>
-                        </div>
-                    </div>
+                <div class="af-col-mid"<?php echo !$show_right_col ? ' style="border-right:0;"' : ''; ?>>
+                    <?php echo $render_band($band1); ?>
+                    <?php echo $render_band($band2); ?>
+                    <?php echo $render_band($band3); ?>
+                    <?php echo $render_band($band4); ?>
+                    <?php if ($band5 || $band6): ?>
+                        <div class="af-mband-title">Academic &amp; Examination Details</div>
+                        <?php echo $render_band($band5); ?>
+                        <?php echo $render_band($band6); ?>
+                    <?php endif; ?>
+                    <?php if (!empty($S['show_sig_principal'])): ?>
                     <div class="af-msig">
-                        <?php if ($sig_img !== ''): ?><img src="<?php echo sc_e($sig_img); ?>" alt="Authority Signature"><?php endif; ?>
-                        <div class="af-msig-lbl"><?php echo sc_e($sig_principal); ?></div>
+                        <?php if ($H['sig_p_img'] !== ''): ?><img src="<?php echo sc_e($H['sig_p_img']); ?>" alt="Authority Signature"><?php endif; ?>
+                        <?php if ($H['sig_p_name'] !== ''): ?><div class="af-msig-name"><?php echo sc_e($H['sig_p_name']); ?></div><?php endif; ?>
+                        <div class="af-msig-lbl"><?php echo sc_e($sig_principal_lbl); ?></div>
                     </div>
+                    <?php endif; ?>
                 </div>
 
+                <?php if ($show_right_col): ?>
                 <div class="af-col-right">
+                    <?php if (!empty($S['show_roll'])): ?>
                     <div class="af-roll-box">
                         <div class="af-roll-lbl">Roll No.</div>
                         <div class="af-roll-val"><?php echo sc_e(trim((string) ($d['roll'] ?? '')) ?: '—'); ?></div>
                     </div>
+                    <?php endif; ?>
+                    <?php if (!empty($S['show_photo'])): ?>
                     <div class="af-photo-wrap">
                         <div class="af-photo">
                             <?php if ($photo !== ''): ?><img src="<?php echo sc_e($photo); ?>" alt="Photo">
                             <?php else: ?>Photo<?php endif; ?>
                         </div>
                     </div>
+                    <?php endif; ?>
+                    <?php if (!empty($S['show_sig_candidate'])): ?>
                     <div class="af-cand-sig">
-                        <div class="af-cand-sig-lbl">Signature of the Candidate</div>
+                        <div class="af-cand-sig-lbl"><?php echo sc_e(trim((string) ($S['sig_candidate_label'] ?? '')) ?: 'Signature of the Candidate'); ?></div>
                     </div>
+                    <?php endif; ?>
                 </div>
+                <?php endif; ?>
             </div>
 
+            <?php if (!empty($S['show_instructions'])): ?>
             <div class="af-rules-sec">
                 <?php if ($note_text !== ''): ?>
                     <div class="af-note"><strong>বিশেষ দ্রষ্টব্য (NOTE):</strong> <?php echo nl2br(sc_e($note_text)); ?></div>
@@ -915,6 +1224,7 @@ if (!function_exists('ac_card_full')) {
                     <div class="af-strip"><strong class="af-strip-lbl">নিষিদ্ধ সামগ্রী (BARRED ITEMS):</strong> <?php echo sc_e($barred_text); ?></div>
                 <?php endif; ?>
             </div>
+            <?php endif; ?>
         </div></div>
         <?php
         return ob_get_clean();
@@ -934,48 +1244,82 @@ if (!function_exists('ac_card')) {
         if (($L['preset'] ?? '') === '1full') {
             return ac_card_full($d);
         }
-        $logo = !empty($d['logo']) ? '../' . ltrim($d['logo'], '/') : '';
+
+        $S = ac_cfg($d);
+        $H = ac_resolve_header($d, $S);
+        $logo = !empty($S['show_logo']) ? $H['logo'] : '';
         $wm = $logo !== '' ? "--ad-wm:url('" . sc_e($logo) . "');" : '';
+        $photo = !empty($S['show_photo']) ? ac_asset_url($d['photo'] ?? '') : '';
+
+        $sigs = [];
+        if (!empty($S['show_sig_secondary'])) {
+            $sigs[] = ['img' => $H['sig_s_img'], 'name' => $H['sig_s_name'], 'label' => $H['sig_s_label'] ?: 'Class Teacher'];
+        }
+        if (!empty($S['show_sig_principal'])) {
+            $sigs[] = ['img' => $H['sig_p_img'], 'name' => $H['sig_p_name'], 'label' => $H['sig_p_label'] ?: 'Head of Institute'];
+        }
+        $has_sig_img = false;
+        foreach ($sigs as $sg) { if ($sg['img'] !== '') { $has_sig_img = true; break; } }
+        $compact_note = (!empty($S['show_compact_note'])) ? trim((string) ($S['compact_note_text'] ?? '')) : '';
+
         ob_start(); ?>
         <div class="ac-cell"><div class="admitcard2 ac-<?php echo sc_e($L['mode']); ?>">
             <div class="ad-head">
+                <?php if (!empty($S['show_logo'])): ?>
                 <div class="ad-logo">
                     <?php if ($logo !== ''): ?><img src="<?php echo sc_e($logo); ?>" alt="Logo">
-                    <?php else: ?><span><?php echo sc_e(mb_substr(trim((string) $d['institute']), 0, 1)); ?></span><?php endif; ?>
+                    <?php else: ?><span><?php echo sc_e(mb_substr($H['inst'] !== '' ? $H['inst'] : 'A', 0, 1)); ?></span><?php endif; ?>
                 </div>
+                <?php endif; ?>
                 <div class="ad-inst">
-                    <b><?php echo sc_e($d['institute']); ?></b>
-                    <?php if (trim((string) ($d['address'] ?? '')) !== ''): ?><small><?php echo sc_e($d['address']); ?></small><?php endif; ?>
-                    <?php if (trim((string) ($d['website'] ?? '')) !== ''): ?><small class="web"><?php echo sc_e($d['website']); ?></small><?php endif; ?>
+                    <?php if (!empty($S['show_institute_name']) && $H['inst'] !== ''): ?><b><?php echo sc_e($H['inst']); ?></b><?php endif; ?>
+                    <?php if (!empty($S['show_slogan']) && $H['slogan'] !== ''): ?><small><?php echo sc_e($H['slogan']); ?></small><?php endif; ?>
+                    <?php if (!empty($S['show_address']) && $H['address'] !== ''): ?><small><?php echo sc_e($H['address']); ?></small><?php endif; ?>
+                    <?php if (!empty($S['show_website']) && $H['website'] !== ''): ?><small class="web"><?php echo sc_e($H['website']); ?></small><?php endif; ?>
                 </div>
             </div>
             <div class="ad-title">
-                <span class="pill">ADMIT CARD</span>
+                <span class="pill"><?php echo sc_e(mb_strtoupper($H['card_title'])); ?></span>
                 <span class="term"><?php echo sc_e(trim($d['term'] . ' - ' . $d['year'], ' -')); ?></span>
             </div>
             <div class="ad-body" style="<?php echo $wm; ?>">
-                <?php if (!empty($d['photo'])): ?>
-                    <img class="ad-photo" src="../<?php echo sc_e(ltrim($d['photo'], '/')); ?>" alt="Photo">
-                <?php else: ?>
-                    <div class="ad-photo">Photo</div>
+                <?php if (!empty($S['show_photo'])): ?>
+                    <?php if ($photo !== ''): ?>
+                        <img class="ad-photo" src="<?php echo sc_e($photo); ?>" alt="Photo">
+                    <?php else: ?>
+                        <div class="ad-photo">Photo</div>
+                    <?php endif; ?>
                 <?php endif; ?>
                 <div class="ad-info">
                     <div class="ad-name"><?php echo sc_e($d['name']); ?></div>
                     <div class="ad-grid">
-                        <div><span>Student ID</span><b><?php echo sc_e($d['student_id']); ?></b></div>
-                        <div><span>Roll No</span><b><?php echo sc_e($d['roll'] ?: '-'); ?></b></div>
-                        <div><span>Class</span><b><?php echo sc_e($d['class'] ?: '-'); ?></b></div>
-                        <div><span>Shift</span><b><?php echo sc_e($d['shift'] ?: '-'); ?></b></div>
-                        <div><span>Section</span><b><?php echo sc_e($d['section'] ?: '-'); ?></b></div>
+                        <?php if (!empty($S['show_student_id'])): ?><div><span>Student ID</span><b><?php echo sc_e($d['student_id']); ?></b></div><?php endif; ?>
+                        <?php if (!empty($S['show_roll'])): ?><div><span>Roll No</span><b><?php echo sc_e($d['roll'] ?: '-'); ?></b></div><?php endif; ?>
+                        <?php if (!empty($S['show_class'])): ?><div><span>Class</span><b><?php echo sc_e($d['class'] ?: '-'); ?></b></div><?php endif; ?>
+                        <?php if (!empty($S['show_shift'])): ?><div><span>Shift</span><b><?php echo sc_e($d['shift'] ?: '-'); ?></b></div><?php endif; ?>
+                        <?php if (!empty($S['show_section'])): ?><div><span>Section</span><b><?php echo sc_e($d['section'] ?: '-'); ?></b></div><?php endif; ?>
                     </div>
                 </div>
+                <?php if (!empty($S['show_qr'])): ?>
                 <div class="ad-qr" id="<?php echo sc_e($d['qr_id']); ?>" data-qr="<?php echo sc_e($d['student_id']); ?>"></div>
+                <?php endif; ?>
             </div>
-            <div class="ad-foot">
-                <div class="ad-sign">Class Teacher</div>
-                <div class="ad-sign">Head of Institute</div>
+            <?php if ($sigs): ?>
+            <div class="ad-foot<?php echo $has_sig_img ? ' has-sig-img' : ''; ?>">
+                <?php foreach ($sigs as $sg): ?>
+                <div class="ad-sign">
+                    <?php if ($has_sig_img): ?>
+                        <div class="ad-sign-img"><?php if ($sg['img'] !== ''): ?><img src="<?php echo sc_e($sg['img']); ?>" alt="Signature"><?php endif; ?></div>
+                    <?php endif; ?>
+                    <div class="ad-sign-line">
+                        <?php if ($sg['name'] !== ''): ?><div class="ad-sign-name"><?php echo sc_e($sg['name']); ?></div><?php endif; ?>
+                        <?php echo sc_e($sg['label']); ?>
+                    </div>
+                </div>
+                <?php endforeach; ?>
             </div>
-            <div class="ad-note">পরীক্ষার হলে এই কার্ডটি অবশ্যই সঙ্গে আনতে হবে।</div>
+            <?php endif; ?>
+            <?php if ($compact_note !== ''): ?><div class="ad-note"><?php echo sc_e($compact_note); ?></div><?php endif; ?>
         </div></div>
         <?php
         return ob_get_clean();
