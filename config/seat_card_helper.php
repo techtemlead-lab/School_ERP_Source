@@ -215,12 +215,110 @@ if (!function_exists('ac_calc_age')) {
     }
 }
 
+if (!function_exists('ac_format_phone')) {
+    /**
+     * অ্যাডমিট কার্ডে প্রদর্শিত প্রতিটি ফোন/মোবাইল নম্বরের আগে স্বয়ংক্রিয়ভাবে +88 যুক্ত করে (ডাবল না করে)।
+     */
+    function ac_format_phone(?string $raw): string
+    {
+        $s = trim((string) ($raw ?? ''));
+        if ($s === '' || $s === '—' || $s === '-') {
+            return '';
+        }
+        $parts = preg_split('/\s*([,|\/])\s*/', $s, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY);
+        if (!$parts) {
+            return '';
+        }
+        $out = '';
+        foreach ($parts as $p) {
+            $p = trim($p);
+            if ($p === '') {
+                continue;
+            }
+            if ($p === ',' || $p === '|' || $p === '/') {
+                $out .= ($p === ',' ? ', ' : ' ' . $p . ' ');
+                continue;
+            }
+            $compact = preg_replace('/[\s\-\(\)]+/', '', $p);
+            if (preg_match('/^\+88(.+)$/', $compact, $m)) {
+                $out .= '+88' . $m[1];
+            } elseif (strpos($compact, '+') === 0) {
+                $out .= $compact;
+            } elseif (preg_match('/^880\d+$/', $compact)) {
+                $out .= '+' . $compact;
+            } elseif (preg_match('/^0\d+$/', $compact)) {
+                $out .= '+88' . $compact;
+            } elseif (preg_match('/^1\d{9}$/', $compact)) {
+                $out .= '+880' . $compact;
+            } else {
+                $out .= '+88' . $compact;
+            }
+        }
+        return trim($out);
+    }
+}
+
+if (!function_exists('ac_normalize_type')) {
+    function ac_normalize_type(?string $type): string
+    {
+        return trim((string) ($type ?? '')) === 'admission' ? 'admission' : 'general';
+    }
+}
+
+if (!function_exists('ac_layout_labels')) {
+    function ac_layout_labels(): array
+    {
+        return [
+            '1full_modern'  => '১ টা / পাতা — টেম্পলেট ২ (Modern Routine & QR)',
+            '1full_classic' => '১ টা / পাতা — টেম্পলেট ১ (Classic Official Grid)',
+            '2half'         => '২ টা / পাতা — Half Page',
+            '3rect'         => '৩ টা / পাতা — Rectangular',
+            '4rect'         => '৪ টা / পাতা — Rectangular',
+            '4sq'           => '৪ টা / পাতা — Square',
+            'custom'        => 'Custom Layout (নিজে সাইজ ও অপশন বসাব)',
+        ];
+    }
+}
+
+if (!function_exists('ac_normalize_layout_key')) {
+    function ac_normalize_layout_key(?string $layout, ?string $full_template = 'modern'): string
+    {
+        $l = trim((string) ($layout ?? ''));
+        if ($l === '1full') {
+            return trim((string) ($full_template ?? 'modern')) === 'classic' ? '1full_classic' : '1full_modern';
+        }
+        $valid = ['1full_modern', '1full_classic', '2half', '3rect', '4rect', '4sq', 'custom'];
+        return in_array($l, $valid, true) ? $l : '1full_modern';
+    }
+}
+
 if (!function_exists('ac_default_instructions')) {
     /**
-     * মাধ্যমিক ও উচ্চ মাধ্যমিক শিক্ষা বোর্ড (বাংলাদেশ) অনুমোদিত পরীক্ষার সাধারণ নির্দেশাবলী (ডিফল্ট)।
+     * পরীক্ষার ধরন (general / admission) অনুযায়ী ডিফল্ট নির্দেশাবলী।
      */
-    function ac_default_instructions(): array
+    function ac_default_instructions(string $admit_type = 'general'): array
     {
+        $type = ac_normalize_type($admit_type);
+        if ($type === 'admission') {
+            $rules = implode("\n", [
+                '১. পরীক্ষার্থীকে ভর্তি পরীক্ষা শুরুর কমপক্ষে ৩০ (ত্রিশ) মিনিট পূর্বে নির্ধারিত পরীক্ষা কেন্দ্রে উপস্থিত হয়ে আসন গ্রহণ করতে হবে।',
+                '২. পরীক্ষার হলে মূল প্রবেশপত্র (Admission Admit Card) অবশ্যই সঙ্গে আনতে হবে; প্রবেশপত্র ব্যতীত পরীক্ষা কক্ষে প্রবেশ করতে দেওয়া হবে না।',
+                '৩. পরীক্ষার কক্ষে নিজস্ব কালো/নীল বলপয়েন্ট কলম, পেন্সিল, রাবার ও জ্যামিতি বক্স ছাড়া কোনো বই, খাতা, নোট বা কাগজ আনা যাবে না।',
+                '৪. মোবাইল ফোন, স্মার্টওয়াচ, ক্যালকুলেটর বা যেকোনো ইলেকট্রনিক ডিভাইস পরীক্ষার কক্ষে আনা সম্পূর্ণ নিষিদ্ধ।',
+                '৫. উত্তরপত্র ও হাজিরা শিটে ভর্তি রোল নম্বর সঠিকভাবে লিখতে হবে এবং কোনো প্রকার কাটাকাটি বা ঘষামাজা করা যাবে না।',
+                '৬. পরীক্ষা চলাকালীন অভিভাবকগণ পরীক্ষা কক্ষের বাইরে নির্ধারিত অপেক্ষাগারে অবস্থান করবেন এবং কক্ষ পরিদর্শকের নির্দেশনা মেনে চলবেন।',
+            ]);
+
+            return [
+                'note_text'   => 'ভর্তি প্রবেশপত্রে পরীক্ষার্থীর নাম, পিতা-মাতার নাম, শ্রেণি বা অন্য কোনো তথ্যে ভুল থাকলে ভর্তি পরীক্ষার পূর্বেই ভর্তি অফিসে যোগাযোগ করে সংশোধন করে নিতে হবে।',
+                'heading'     => 'ভর্তি পরীক্ষার পরীক্ষার্থীদের জন্য নির্দেশাবলী (ADMISSION EXAM DIRECTIONS)',
+                'rules_text'  => $rules,
+                'carry_text'  => 'মূল ভর্তি প্রবেশপত্র (Admission Admit Card), কালো/নীল বলপয়েন্ট কলম, পেন্সিল, রাবার ও স্কেল।',
+                'barred_text' => 'মোবাইল ফোন, স্মার্টওয়াচ, ক্যালকুলেটর বা যেকোনো ইলেকট্রনিক ডিভাইস, বই, খাতা ও নোট।',
+                'is_custom'   => false,
+            ];
+        }
+
         $rules = implode("\n", [
             '১. পরীক্ষার্থীকে পরীক্ষা শুরুর কমপক্ষে ৩০ (ত্রিশ) মিনিট পূর্বে পরীক্ষার কেন্দ্রে/কক্ষে উপস্থিত হয়ে নির্ধারিত আসনে বসতে হবে। পরীক্ষা শুরুর পর কোনো পরীক্ষার্থীকে কক্ষে প্রবেশ করতে দেওয়া হবে না।',
             '২. পরীক্ষার হলে মূল প্রবেশপত্র (Admit Card) এবং প্রযোজ্য ক্ষেত্রে রেজিস্ট্রেশন/আইডি কার্ড অবশ্যই সঙ্গে আনতে হবে। প্রবেশপত্র ব্যতীত কোনো পরীক্ষার্থীকে পরীক্ষায় অংশগ্রহণ করতে দেওয়া হবে না।',
@@ -252,29 +350,48 @@ if (!function_exists('ac_ensure_instructions_table')) {
             "CREATE TABLE IF NOT EXISTS admit_card_instructions (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 branch_id INT NOT NULL DEFAULT 0,
+                admit_type VARCHAR(20) NOT NULL DEFAULT 'general',
                 note_text TEXT NULL,
                 heading VARCHAR(255) NULL,
                 rules_text MEDIUMTEXT NULL,
                 carry_text TEXT NULL,
                 barred_text TEXT NULL,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                UNIQUE KEY uniq_branch (branch_id)
+                UNIQUE KEY uniq_branch_type (branch_id, admit_type)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
         );
+        try {
+            $col = $pdo->query("SHOW COLUMNS FROM admit_card_instructions LIKE 'admit_type'")->fetch();
+            if (!$col) {
+                $pdo->exec("ALTER TABLE admit_card_instructions ADD COLUMN admit_type VARCHAR(20) NOT NULL DEFAULT 'general' AFTER branch_id");
+            }
+            $idx_new = $pdo->query("SHOW INDEX FROM admit_card_instructions WHERE Key_name = 'uniq_branch_type'")->fetch();
+            if (!$idx_new) {
+                $idx_old = $pdo->query("SHOW INDEX FROM admit_card_instructions WHERE Key_name = 'uniq_branch'")->fetch();
+                if ($idx_old) {
+                    $pdo->exec("ALTER TABLE admit_card_instructions DROP INDEX uniq_branch, ADD UNIQUE KEY uniq_branch_type (branch_id, admit_type)");
+                } else {
+                    $pdo->exec("ALTER TABLE admit_card_instructions ADD UNIQUE KEY uniq_branch_type (branch_id, admit_type)");
+                }
+            }
+        } catch (Throwable $e) {
+            // মাইগ্রেশন এরর হলে উপেক্ষা
+        }
     }
 }
 
 if (!function_exists('ac_load_instructions')) {
-    function ac_load_instructions(PDO $pdo, ?int $branch_id = null): array
+    function ac_load_instructions(PDO $pdo, ?int $branch_id = null, string $admit_type = 'general'): array
     {
         $bid = $branch_id !== null ? max(0, (int) $branch_id) : 0;
+        $type = ac_normalize_type($admit_type);
         try {
             ac_ensure_instructions_table($pdo);
-            $stmt = $pdo->prepare("SELECT * FROM admit_card_instructions WHERE branch_id = ? LIMIT 1");
-            $stmt->execute([$bid]);
+            $stmt = $pdo->prepare("SELECT * FROM admit_card_instructions WHERE branch_id = ? AND admit_type = ? LIMIT 1");
+            $stmt->execute([$bid, $type]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row && $bid > 0) {
-                $stmt->execute([0]);
+                $stmt->execute([0, $type]);
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
             }
             if ($row) {
@@ -286,22 +403,25 @@ if (!function_exists('ac_load_instructions')) {
                     'barred_text'     => (string) ($row['barred_text'] ?? ''),
                     'is_custom'       => true,
                     'scope_branch_id' => (int) ($row['branch_id'] ?? $bid),
+                    'admit_type'      => $type,
                 ];
             }
         } catch (Throwable $e) {
-            // DB সমস্যা হলে নিরাপদে সরকারি ডিফল্ট রিটার্ন করবে
+            // DB সমস্যা হলে নিরাপদে ডিফল্ট রিটার্ন করবে
         }
-        $def = ac_default_instructions();
+        $def = ac_default_instructions($type);
         $def['scope_branch_id'] = $bid;
+        $def['admit_type'] = $type;
         return $def;
     }
 }
 
 if (!function_exists('ac_save_instructions')) {
-    function ac_save_instructions(PDO $pdo, ?int $branch_id, array $data): void
+    function ac_save_instructions(PDO $pdo, ?int $branch_id, array $data, string $admit_type = 'general'): void
     {
         ac_ensure_instructions_table($pdo);
         $bid = $branch_id !== null ? max(0, (int) $branch_id) : 0;
+        $type = ac_normalize_type($admit_type);
         $note   = trim((string) ($data['note_text'] ?? ''));
         $head   = mb_substr(trim((string) ($data['heading'] ?? '')), 0, 255);
         $rules  = trim((string) ($data['rules_text'] ?? ''));
@@ -309,8 +429,8 @@ if (!function_exists('ac_save_instructions')) {
         $barred = trim((string) ($data['barred_text'] ?? ''));
 
         $stmt = $pdo->prepare(
-            "INSERT INTO admit_card_instructions (branch_id, note_text, heading, rules_text, carry_text, barred_text)
-             VALUES (?, ?, ?, ?, ?, ?)
+            "INSERT INTO admit_card_instructions (branch_id, admit_type, note_text, heading, rules_text, carry_text, barred_text)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
                 note_text = VALUES(note_text),
                 heading = VALUES(heading),
@@ -318,34 +438,39 @@ if (!function_exists('ac_save_instructions')) {
                 carry_text = VALUES(carry_text),
                 barred_text = VALUES(barred_text)"
         );
-        $stmt->execute([$bid, $note, $head, $rules, $carry, $barred]);
+        $stmt->execute([$bid, $type, $note, $head, $rules, $carry, $barred]);
     }
 }
 
 if (!function_exists('ac_reset_instructions')) {
-    function ac_reset_instructions(PDO $pdo, ?int $branch_id = null): void
+    function ac_reset_instructions(PDO $pdo, ?int $branch_id = null, string $admit_type = 'general'): void
     {
         ac_ensure_instructions_table($pdo);
         $bid = $branch_id !== null ? max(0, (int) $branch_id) : 0;
-        $stmt = $pdo->prepare("DELETE FROM admit_card_instructions WHERE branch_id = ?");
-        $stmt->execute([$bid]);
+        $type = ac_normalize_type($admit_type);
+        $stmt = $pdo->prepare("DELETE FROM admit_card_instructions WHERE branch_id = ? AND admit_type = ?");
+        $stmt->execute([$bid, $type]);
     }
 }
 
 if (!function_exists('ac_default_settings')) {
     /**
-     * হোয়াইট-লেবেল অ্যাডমিট কার্ড কাস্টমাইজেশনের ডিফল্ট সেটিংস (কোনো নির্দিষ্ট স্কুলের হার্ডকোড ডাটা ছাড়া)।
+     * হোয়াইট-লেবেল অ্যাডমিট কার্ড কাস্টমাইজেশনের ডিফল্ট সেটিংস (ডিফল্ট: ১-পেজ Modern + QR, Color মোড)।
      */
-    function ac_default_settings(): array
+    function ac_default_settings(string $admit_type = 'general'): array
     {
+        $type = ac_normalize_type($admit_type);
         return [
-            'default_layout'        => '4rect',
+            'admit_type'            => $type,
+            'default_layout'        => '1full_modern',
             'default_ori'           => 'portrait',
             'default_w'             => 94.0,
             'default_h'             => 135.0,
-            'full_template'         => 'classic',
+            'default_gap'           => 4.0,
+            'full_template'         => 'modern',
+            'default_color_mode'    => 'color',
 
-            'card_title'            => 'Admit Card',
+            'card_title'            => $type === 'admission' ? 'Admission Admit Card' : 'Admit Card',
             'show_nb_note'          => 1,
             'nb_note_text'          => 'N.B: This Admit Card must be carried in the exam hall. Without this card no one will be allowed to sit for the exam.',
             'show_compact_note'     => 1,
@@ -409,7 +534,7 @@ if (!function_exists('ac_default_settings')) {
             'show_birth_reg'         => 1,
             'show_student_mobile'    => 1,
             'show_permanent_address' => 1,
-            'show_routine'           => 1,
+            'show_routine'           => $type === 'admission' ? 0 : 1,
             'routine_mode'           => 'auto_db',
             'custom_routine_rows'    => [],
             'schedule_exam_date'     => '',
@@ -428,50 +553,116 @@ if (!function_exists('ac_ensure_settings_table')) {
             "CREATE TABLE IF NOT EXISTS admit_card_settings (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 branch_id INT NOT NULL DEFAULT 0,
-                default_layout VARCHAR(30) NOT NULL DEFAULT '4rect',
+                admit_type VARCHAR(20) NOT NULL DEFAULT 'general',
+                default_layout VARCHAR(30) NOT NULL DEFAULT '1full_modern',
                 default_ori VARCHAR(15) NOT NULL DEFAULT 'portrait',
                 default_w DECIMAL(5,1) NOT NULL DEFAULT 94.0,
                 default_h DECIMAL(5,1) NOT NULL DEFAULT 135.0,
-                full_template VARCHAR(30) NOT NULL DEFAULT 'classic',
+                full_template VARCHAR(30) NOT NULL DEFAULT 'modern',
                 logo_path VARCHAR(255) NULL,
                 sig_principal_path VARCHAR(255) NULL,
                 sig_secondary_path VARCHAR(255) NULL,
                 config_json MEDIUMTEXT NULL,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                UNIQUE KEY uniq_branch (branch_id)
+                UNIQUE KEY uniq_branch_type (branch_id, admit_type)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
         );
+        try {
+            $col = $pdo->query("SHOW COLUMNS FROM admit_card_settings LIKE 'admit_type'")->fetch();
+            if (!$col) {
+                $pdo->exec("ALTER TABLE admit_card_settings ADD COLUMN admit_type VARCHAR(20) NOT NULL DEFAULT 'general' AFTER branch_id");
+            }
+            $idx_new = $pdo->query("SHOW INDEX FROM admit_card_settings WHERE Key_name = 'uniq_branch_type'")->fetch();
+            if (!$idx_new) {
+                $idx_old = $pdo->query("SHOW INDEX FROM admit_card_settings WHERE Key_name = 'uniq_branch'")->fetch();
+                if ($idx_old) {
+                    $pdo->exec("ALTER TABLE admit_card_settings DROP INDEX uniq_branch, ADD UNIQUE KEY uniq_branch_type (branch_id, admit_type)");
+                } else {
+                    $pdo->exec("ALTER TABLE admit_card_settings ADD UNIQUE KEY uniq_branch_type (branch_id, admit_type)");
+                }
+            }
+        } catch (Throwable $e) {
+            // মাইগ্রেশন এরর হলে উপেক্ষা
+        }
+    }
+}
+
+if (!function_exists('ac_is_asset_in_use')) {
+    function ac_is_asset_in_use(PDO $pdo, string $path, int $exclude_bid, string $exclude_type): bool
+    {
+        $p = trim($path);
+        if ($p === '') {
+            return false;
+        }
+        try {
+            $q = $pdo->prepare(
+                "SELECT COUNT(*) FROM admit_card_settings
+                 WHERE (logo_path = ? OR sig_principal_path = ? OR sig_secondary_path = ?)
+                   AND NOT (branch_id = ? AND admit_type = ?)"
+            );
+            $q->execute([$p, $p, $p, $exclude_bid, $exclude_type]);
+            return (int) $q->fetchColumn() > 0;
+        } catch (Throwable $e) {
+            return true;
+        }
     }
 }
 
 if (!function_exists('ac_load_settings')) {
-    function ac_load_settings(PDO $pdo, ?int $branch_id = null): array
+    function ac_load_settings(PDO $pdo, ?int $branch_id = null, string $admit_type = 'general'): array
     {
-        $def = ac_default_settings();
+        $type = ac_normalize_type($admit_type);
+        $def = ac_default_settings($type);
         $bid = $branch_id !== null ? max(0, (int) $branch_id) : 0;
         try {
             ac_ensure_settings_table($pdo);
-            $stmt = $pdo->prepare("SELECT * FROM admit_card_settings WHERE branch_id = ? LIMIT 1");
-            $stmt->execute([$bid]);
+            $stmt = $pdo->prepare("SELECT * FROM admit_card_settings WHERE branch_id = ? AND admit_type = ? LIMIT 1");
+            $stmt->execute([$bid, $type]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row && $bid > 0) {
-                $stmt->execute([0]);
+                $stmt->execute([0, $type]);
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
             }
             if ($row) {
                 $extra = json_decode((string) ($row['config_json'] ?? ''), true);
                 $cfg = is_array($extra) ? array_merge($def, $extra) : $def;
-                $cfg['default_layout']     = (string) ($row['default_layout'] ?? $def['default_layout']);
-                $cfg['default_ori']        = (string) ($row['default_ori'] ?? $def['default_ori']);
+                $raw_layout = (string) ($row['default_layout'] ?? $def['default_layout']);
+                $raw_ft     = (string) ($row['full_template'] ?? $def['full_template']);
+                $norm_layout = ac_normalize_layout_key($raw_layout, $raw_ft);
+                $cfg['admit_type']         = $type;
+                $cfg['default_layout']     = $norm_layout;
+                $cfg['default_ori']        = (($row['default_ori'] ?? 'portrait') === 'landscape') ? 'landscape' : 'portrait';
                 $cfg['default_w']          = (float) ($row['default_w'] ?? $def['default_w']);
                 $cfg['default_h']          = (float) ($row['default_h'] ?? $def['default_h']);
-                $cfg['full_template']      = (string) ($row['full_template'] ?? $def['full_template']);
+                $cfg['default_gap']        = max(0.0, min(30.0, (float) ($cfg['default_gap'] ?? $def['default_gap'])));
+                $cfg['full_template']      = $norm_layout === '1full_classic' ? 'classic' : ($norm_layout === '1full_modern' ? 'modern' : ($raw_ft === 'classic' ? 'classic' : 'modern'));
+                $cfg['default_color_mode'] = (($cfg['default_color_mode'] ?? 'color') === 'grayscale') ? 'grayscale' : 'color';
                 $cfg['logo_path']          = (string) ($row['logo_path'] ?? '');
                 $cfg['sig_principal_path'] = (string) ($row['sig_principal_path'] ?? '');
                 $cfg['sig_secondary_path'] = (string) ($row['sig_secondary_path'] ?? '');
                 $cfg['is_custom']          = true;
                 $cfg['scope_branch_id']    = (int) ($row['branch_id'] ?? $bid);
                 return $cfg;
+            }
+            // Admission টাইপের নিজস্ব সেভ করা সেটিংস না থাকলে General থেকে ব্র্যান্ডিং/লোগো/হেডার/সিগনেচার উত্তরাধিকার নেবে
+            if ($type === 'admission') {
+                $gen = ac_load_settings($pdo, $branch_id, 'general');
+                $shared_keys = [
+                    'default_layout', 'default_ori', 'default_w', 'default_h', 'default_gap',
+                    'full_template', 'default_color_mode',
+                    'show_logo', 'logo_path', 'show_institute_name', 'custom_institute_name',
+                    'show_slogan', 'custom_slogan', 'show_address', 'show_address_half', 'custom_address',
+                    'show_phone', 'custom_phone', 'show_email', 'custom_email', 'show_website', 'custom_website',
+                    'show_eiin', 'custom_eiin', 'show_issue_date',
+                    'show_sig_principal', 'sig_principal_path', 'sig_principal_name', 'sig_principal_label',
+                    'show_sig_secondary', 'sig_secondary_path', 'sig_secondary_name', 'sig_secondary_label',
+                    'show_sig_candidate', 'sig_candidate_label',
+                ];
+                foreach ($shared_keys as $sk) {
+                    if (array_key_exists($sk, $gen)) {
+                        $def[$sk] = $gen[$sk];
+                    }
+                }
             }
         } catch (Throwable $e) {
             // DB সমস্যা হলে নিরাপদ ডিফল্ট রিটার্ন করবে
@@ -482,20 +673,18 @@ if (!function_exists('ac_load_settings')) {
 }
 
 if (!function_exists('ac_save_settings')) {
-    function ac_save_settings(PDO $pdo, ?int $branch_id, array $in): void
+    function ac_save_settings(PDO $pdo, ?int $branch_id, array $in, string $admit_type = 'general'): void
     {
         ac_ensure_settings_table($pdo);
-        $def = ac_default_settings();
+        $type = ac_normalize_type($admit_type);
+        $def = ac_default_settings($type);
         $bid = $branch_id !== null ? max(0, (int) $branch_id) : 0;
 
-        $allowed_layouts = ['4rect', '4sq', '3rect', '2half', '1full', 'custom'];
-        $dl = (string) ($in['default_layout'] ?? $def['default_layout']);
-        if (!in_array($dl, $allowed_layouts, true)) { $dl = '4rect'; }
+        $dl = ac_normalize_layout_key((string) ($in['default_layout'] ?? $def['default_layout']), (string) ($in['full_template'] ?? 'modern'));
+        $ft = $dl === '1full_classic' ? 'classic' : 'modern';
         $ori = (($in['default_ori'] ?? 'portrait') === 'landscape') ? 'landscape' : 'portrait';
         $dw = max(50.0, min(287.0, (float) ($in['default_w'] ?? 94.0)));
         $dh = max(40.0, min(287.0, (float) ($in['default_h'] ?? 135.0)));
-        $ft = preg_replace('/[^a-z0-9_-]/i', '', (string) ($in['full_template'] ?? 'classic')) ?: 'classic';
-        if (!in_array($ft, ['classic', 'modern'], true)) { $ft = 'classic'; }
 
         $logo = trim((string) ($in['logo_path'] ?? ''));
         $sig_p = trim((string) ($in['sig_principal_path'] ?? ''));
@@ -503,10 +692,14 @@ if (!function_exists('ac_save_settings')) {
 
         $payload = [];
         foreach ($def as $k => $v) {
-            if (in_array($k, ['default_layout', 'default_ori', 'default_w', 'default_h', 'full_template', 'logo_path', 'sig_principal_path', 'sig_secondary_path', 'is_custom', 'scope_branch_id'], true)) {
+            if (in_array($k, ['admit_type', 'default_layout', 'default_ori', 'default_w', 'default_h', 'full_template', 'logo_path', 'sig_principal_path', 'sig_secondary_path', 'is_custom', 'scope_branch_id'], true)) {
                 continue;
             }
-            if ($k === 'routine_mode') {
+            if ($k === 'default_color_mode') {
+                $payload[$k] = (($in[$k] ?? 'color') === 'grayscale') ? 'grayscale' : 'color';
+            } elseif ($k === 'default_gap') {
+                $payload[$k] = max(0.0, min(30.0, (float) ($in[$k] ?? 4.0)));
+            } elseif ($k === 'routine_mode') {
                 $rm = trim((string) ($in[$k] ?? 'auto_db'));
                 $payload[$k] = in_array($rm, ['auto_db', 'custom_table', 'admission_schedule'], true) ? $rm : 'auto_db';
             } elseif (is_array($v)) {
@@ -533,8 +726,8 @@ if (!function_exists('ac_save_settings')) {
 
         $stmt = $pdo->prepare(
             "INSERT INTO admit_card_settings
-                (branch_id, default_layout, default_ori, default_w, default_h, full_template, logo_path, sig_principal_path, sig_secondary_path, config_json)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (branch_id, admit_type, default_layout, default_ori, default_w, default_h, full_template, logo_path, sig_principal_path, sig_secondary_path, config_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
                 default_layout = VALUES(default_layout),
                 default_ori = VALUES(default_ori),
@@ -546,35 +739,38 @@ if (!function_exists('ac_save_settings')) {
                 sig_secondary_path = VALUES(sig_secondary_path),
                 config_json = VALUES(config_json)"
         );
-        $stmt->execute([$bid, $dl, $ori, $dw, $dh, $ft, $logo ?: null, $sig_p ?: null, $sig_s ?: null, $json]);
+        $stmt->execute([$bid, $type, $dl, $ori, $dw, $dh, $ft, $logo ?: null, $sig_p ?: null, $sig_s ?: null, $json]);
     }
 }
 
 if (!function_exists('ac_reset_settings')) {
     /**
-     * কাস্টম সেটিংস মুছে পুরনো আপলোড করা ইমেজ পাথগুলো রিটার্ন করে।
+     * কাস্টম সেটিংস মুছে কেবল অন্য টাইপে ব্যবহৃত হচ্ছে না এমন ইমেজ পাথগুলো রিটার্ন করে।
      */
-    function ac_reset_settings(PDO $pdo, ?int $branch_id = null): array
+    function ac_reset_settings(PDO $pdo, ?int $branch_id = null, string $admit_type = 'general'): array
     {
         ac_ensure_settings_table($pdo);
         $bid = $branch_id !== null ? max(0, (int) $branch_id) : 0;
-        $q = $pdo->prepare("SELECT logo_path, sig_principal_path, sig_secondary_path FROM admit_card_settings WHERE branch_id = ? LIMIT 1");
-        $q->execute([$bid]);
+        $type = ac_normalize_type($admit_type);
+        $q = $pdo->prepare("SELECT logo_path, sig_principal_path, sig_secondary_path FROM admit_card_settings WHERE branch_id = ? AND admit_type = ? LIMIT 1");
+        $q->execute([$bid, $type]);
         $old = $q->fetch(PDO::FETCH_ASSOC) ?: [];
-        $del = $pdo->prepare("DELETE FROM admit_card_settings WHERE branch_id = ?");
-        $del->execute([$bid]);
-        return array_values(array_filter([
+        $del = $pdo->prepare("DELETE FROM admit_card_settings WHERE branch_id = ? AND admit_type = ?");
+        $del->execute([$bid, $type]);
+        $cands = array_values(array_filter([
             $old['logo_path'] ?? '',
             $old['sig_principal_path'] ?? '',
             $old['sig_secondary_path'] ?? '',
         ], static fn($v) => trim((string) $v) !== ''));
+        return array_values(array_filter($cands, static fn($p) => !ac_is_asset_in_use($pdo, (string) $p, $bid, $type)));
     }
 }
 
 if (!function_exists('ac_cfg')) {
     function ac_cfg(array $d): array
     {
-        $def = ac_default_settings();
+        $type = ac_normalize_type($d['admit_type'] ?? ($d['settings']['admit_type'] ?? 'general'));
+        $def = ac_default_settings($type);
         $in = is_array($d['settings'] ?? null) ? $d['settings'] : [];
         return array_merge($def, $in);
     }
@@ -596,7 +792,8 @@ if (!function_exists('ac_resolve_header')) {
         $address = $custom_addr !== '' ? $custom_addr : trim((string) ($d['address'] ?? ''));
 
         $custom_phone = trim((string) ($S['custom_phone'] ?? ''));
-        $phone = $custom_phone !== '' ? $custom_phone : trim((string) ($d['phone'] ?? ''));
+        $phone_raw = $custom_phone !== '' ? $custom_phone : trim((string) ($d['phone'] ?? ''));
+        $phone = ac_format_phone($phone_raw);
 
         $custom_email = trim((string) ($S['custom_email'] ?? ''));
         $email = $custom_email !== '' ? $custom_email : trim((string) ($d['email'] ?? ''));
@@ -633,35 +830,58 @@ if (!function_exists('ac_resolve_header')) {
 // ------------------------------------------------------------------
 if (!function_exists('ac_layout')) {
     /**
-     * Admit Card লেআউট: preset (4rect | 4sq | 3rect | 2half | 1full | custom) + custom হলে ori/w/h (mm)।
-     * A4, মার্জিন ৮mm, কার্ডের মাঝে ৪mm gap। রিটার্ন: ori, w, h (mm), cols, rows, per, gap, mode, dw (design px), k (scale)
+     * Admit Card লেআউট: preset (1full_modern | 1full_classic | 2half | 3rect | 4rect | 4sq | custom),
+     * paper (A4 | Letter | Legal), margin (normal | narrow | wide | none) এবং custom ori/w/h/gap।
      */
     function ac_layout(array $in = []): array
     {
         $presets = [
-            '4rect' => ['portrait', 94, 135],
-            '4sq'   => ['portrait', 94, 94],
-            '3rect' => ['portrait', 194, 90],
-            '2half' => ['portrait', 193, 118],
-            '1full' => ['portrait', 193, 278],
+            '1full_modern'  => ['portrait', 193, 278],
+            '1full_classic' => ['portrait', 193, 278],
+            '2half'         => ['portrait', 193, 118],
+            '3rect'         => ['portrait', 194, 90],
+            '4rect'         => ['portrait', 94, 135],
+            '4sq'           => ['portrait', 94, 94],
         ];
-        $preset = (string) ($in['preset'] ?? '4rect');
-        if ($preset !== 'custom' && !isset($presets[$preset])) { $preset = '4rect'; }
+        $preset = ac_normalize_layout_key((string) ($in['preset'] ?? '1full_modern'), (string) ($in['full_template'] ?? 'modern'));
         if ($preset === 'custom') {
             $ori = (($in['ori'] ?? 'portrait') === 'landscape') ? 'landscape' : 'portrait';
-            $w = (float) ($in['w'] ?? 94); $h = (float) ($in['h'] ?? 94);
+            $w = (float) ($in['w'] ?? 94);
+            $h = (float) ($in['h'] ?? 135);
+            $gap = max(0.0, min(30.0, (float) ($in['gap'] ?? 4)));
         } else {
             [$ori, $w, $h] = $presets[$preset];
+            $gap = ($preset === '2half') ? 28.0 : 4.0;
         }
-        $gap = ($preset === '2half') ? 28 : 4;
-        $margin_x = 8;
-        $margin_y = ($preset === '2half') ? 14 : 8;
-        $pw = ($ori === 'landscape' ? 297 : 210) - 2 * $margin_x;
-        $ph = ($ori === 'landscape' ? 210 : 297) - 2 * $margin_y;
+
+        $paper = in_array($in['paper'] ?? 'A4', ['A4', 'Letter', 'Legal'], true) ? (string) $in['paper'] : 'A4';
+        $paper_dims = [
+            'A4'     => [210.0, 297.0],
+            'Letter' => [215.9, 279.4],
+            'Legal'  => [215.9, 355.6],
+        ];
+        [$raw_w, $raw_h] = $paper_dims[$paper];
+        $page_w = ($ori === 'landscape') ? $raw_h : $raw_w;
+        $page_h = ($ori === 'landscape') ? $raw_w : $raw_h;
+
+        $margin = in_array($in['margin'] ?? 'normal', ['normal', 'narrow', 'wide', 'none'], true) ? (string) $in['margin'] : 'normal';
+        $margin_map = [
+            'normal' => [8, $preset === '2half' ? 14 : 8],
+            'narrow' => [4, $preset === '2half' ? 10 : 4],
+            'wide'   => [14, $preset === '2half' ? 18 : 14],
+            'none'   => [0, $preset === '2half' ? 8 : 0],
+        ];
+        [$margin_x, $margin_y] = $margin_map[$margin];
+
+        $pw = max(60.0, $page_w - 2 * $margin_x);
+        $ph = max(60.0, $page_h - 2 * $margin_y);
+        if ($preset === '2half') {
+            $h = min($h, max(95.0, floor(($ph - $gap) / 2)));
+        }
         $w = max(50.0, min((float) $pw, $w));
         $h = max(40.0, min((float) $ph, $h));
-        $cols = max(1, (int) floor(($pw + $gap) / ($w + $gap)));
-        $rows = max(1, (int) floor(($ph + $gap) / ($h + $gap)));
+        $cols = max(1, (int) floor(($pw + $gap + 0.01) / ($w + $gap)));
+        $rows = max(1, (int) floor(($ph + $gap + 0.01) / ($h + $gap)));
         $aspect = $w / $h;
         // কার্ডের ভেতরের কনটেন্টের ন্যূনতম ডিজাইন-উচ্চতা (H0) ও চওড়া (minDw) অনুযায়ী dw; যাতে কিছু কাটা না পড়ে
         if ($aspect >= 1.6)      { $mode = 'wide'; $h0 = 340; $min_dw = 760; }
@@ -670,8 +890,9 @@ if (!function_exists('ac_layout')) {
         $dw = (int) ceil(max($min_dw, $h0 * $aspect));
         $k = ($w * 3.7795) / $dw;
         return [
-            'preset' => $preset, 'ori' => $ori, 'w' => round($w, 1), 'h' => round($h, 1),
-            'cols' => $cols, 'rows' => $rows, 'per' => $cols * $rows, 'gap' => $gap,
+            'preset' => $preset, 'paper' => $paper, 'margin' => $margin,
+            'ori' => $ori, 'w' => round($w, 1), 'h' => round($h, 1),
+            'cols' => $cols, 'rows' => $rows, 'per' => $cols * $rows, 'gap' => round($gap, 1),
             'mx' => $margin_x, 'my' => $margin_y,
             'mode' => $mode, 'dw' => $dw, 'k' => $k, 'dh' => ($h * 3.7795) / $k,
         ];
@@ -1061,11 +1282,12 @@ if (!function_exists('ac_css')) {
 .ac-pages.ac-gray .admit-modern .am-pow-url { color: #111827 !important; border-color: #111827 !important; }
 </style>
 CSS;
-        $my = (int) ($L['my'] ?? 8);
-        $mx = (int) ($L['mx'] ?? 8);
-        $page = '@page { size: A4 ' . $L['ori'] . '; margin: 0; }';
+        $my = (float) ($L['my'] ?? 8);
+        $mx = (float) ($L['mx'] ?? 8);
+        $paper = in_array($L['paper'] ?? 'A4', ['A4', 'Letter', 'Legal'], true) ? (string) $L['paper'] : 'A4';
+        $page = '@page { size: ' . $paper . ' ' . $L['ori'] . '; margin: 0; }';
         $page_pad = ($L['preset'] === '2half') ? 'padding: ' . $my . 'mm ' . $mx . 'mm;' : '';
-        $dyn  = '.ac-page { grid-template-columns: repeat(' . (int) $L['cols'] . ', ' . $L['w'] . 'mm); gap: ' . (int) $L['gap'] . 'mm;' . $page_pad . ' }'
+        $dyn  = '.ac-page { grid-template-columns: repeat(' . (int) $L['cols'] . ', ' . $L['w'] . 'mm); gap: ' . (float) $L['gap'] . 'mm;' . $page_pad . ' }'
               . '.ac-cell { width: ' . $L['w'] . 'mm; height: ' . $L['h'] . 'mm; }'
               . '.admitcard2 { width: ' . $L['dw'] . 'px; height: ' . round($L['dh'], 2) . 'px; transform: scale(' . round($L['k'], 5) . '); }';
         $print_pad = '@media print { .ac-page { padding: ' . $my . 'mm ' . $mx . 'mm 0 ' . $mx . 'mm !important; } }';
@@ -1102,9 +1324,13 @@ if (!function_exists('ac_card_half')) {
         $show_head_addr = !empty($S['show_address']) && !empty($S['show_address_half']) && $H['address'] !== '';
         $show_header = $show_head_logo || $show_head_name || $show_head_sub || $show_head_addr || !empty($contact_parts);
 
+        $admit_type = ac_normalize_type($d['admit_type'] ?? ($S['admit_type'] ?? 'general'));
+        $is_admission = ($admit_type === 'admission');
+        $roll_lbl = $is_admission ? 'Admission Roll' : 'Roll No';
+
         $left_rows = [['Name', trim((string) ($d['name'] ?? '')) ?: '—']];
         if (!empty($S['show_student_id'])) { $left_rows[] = ['Student ID', trim((string) ($d['student_id'] ?? '')) ?: '—']; }
-        if (!empty($S['show_roll']))       { $left_rows[] = ['Roll No',    trim((string) ($d['roll'] ?? '')) ?: '—']; }
+        if (!empty($S['show_roll']))       { $left_rows[] = [$roll_lbl,    trim((string) ($d['roll'] ?? '')) ?: '—']; }
         if (!empty($S['show_class']))      { $left_rows[] = ['Class',      trim((string) ($d['class'] ?? '')) ?: '—']; }
         if (!empty($S['show_group']))      { $left_rows[] = ['Group',      trim((string) ($d['group'] ?? '')) ?: 'None']; }
         if (!empty($S['show_section']))    { $left_rows[] = ['Section',    trim((string) ($d['section'] ?? '')) ?: '—']; }
@@ -1254,19 +1480,26 @@ if (!function_exists('ac_card_full_modern')) {
         if (!empty($S['show_group']))    { $meta_cells[] = ['Group',    trim((string) ($d['group'] ?? '')) ?: '—']; }
         $meta_rows = array_chunk($meta_cells, 3);
 
+        $admit_type = ac_normalize_type($d['admit_type'] ?? ($S['admit_type'] ?? 'general'));
+        $is_admission = ($admit_type === 'admission');
+
         $dob_fmt = ac_fmt_date($d['dob'] ?? '', '—', 'F j, Y');
         $age_str = ac_calc_age($d['dob'] ?? '');
         $breg_val = trim((string) ($d['birth_reg_no'] ?? '')) ?: '—';
         $gender_val = trim((string) ($d['gender'] ?? '')) ?: '—';
-        $mob_val = trim((string) ($d['student_mobile'] ?? '')) ?: '—';
+        $mob_val = ac_format_phone($d['student_mobile'] ?? '') ?: '—';
         $pres_addr = trim((string) ($d['present_address'] ?? '')) ?: '—';
         $perm_addr = trim((string) ($d['permanent_address'] ?? '')) ?: '—';
 
-        $routine_rows_to_show = (!empty($S['show_routine']) && is_array($d['routine_rows'] ?? null))
+        $adm_exam_date = trim((string) ($d['admission_exam_date'] ?? ''));
+        $adm_venue = trim((string) ($d['admission_venue'] ?? ''));
+        $adm_result_date = trim((string) ($d['admission_result_date'] ?? ''));
+
+        $routine_rows_to_show = (!$is_admission && !empty($S['show_routine']) && is_array($d['routine_rows'] ?? null))
             ? $d['routine_rows']
             : [];
 
-        $instr = is_array($d['instructions'] ?? null) ? $d['instructions'] : ac_default_instructions();
+        $instr = is_array($d['instructions'] ?? null) ? $d['instructions'] : ac_default_instructions($admit_type);
         $note_text = trim((string) ($instr['note_text'] ?? ''));
         $heading_text = trim((string) ($instr['heading'] ?? ''));
         $rules_raw = trim((string) ($instr['rules_text'] ?? ''));
@@ -1317,7 +1550,7 @@ if (!function_exists('ac_card_full_modern')) {
                     <?php if (!empty($S['show_roll']) || !empty($S['show_student_id'])): ?>
                     <tr>
                         <?php if (!empty($S['show_roll'])): ?>
-                            <td class="am-mk">Roll</td>
+                            <td class="am-mk"><?php echo $is_admission ? 'Admission Roll' : 'Roll'; ?></td>
                             <td class="am-mv"><strong><?php echo sc_e(trim((string) ($d['roll'] ?? '')) ?: '—'); ?></strong></td>
                         <?php endif; ?>
                         <?php if (!empty($S['show_student_id'])): ?>
@@ -1411,7 +1644,16 @@ if (!function_exists('ac_card_full_modern')) {
                 <?php endif; ?>
             </div>
 
-            <?php if (!empty($S['show_routine'])): ?>
+            <?php if ($is_admission && ($adm_exam_date !== '' || $adm_venue !== '' || $adm_result_date !== '')): ?>
+            <div class="am-routine-box">
+                <div class="am-routine-title">Admission Exam Schedule</div>
+                <div class="am-sched-row">
+                    <?php if ($adm_exam_date !== ''): ?><div>Exam Date &amp; Time: <strong><?php echo sc_e($adm_exam_date); ?></strong></div><?php endif; ?>
+                    <?php if ($adm_venue !== ''): ?><div>Venue / Centre: <strong><?php echo sc_e($adm_venue); ?></strong></div><?php endif; ?>
+                    <?php if ($adm_result_date !== ''): ?><div>Result Date: <strong><?php echo sc_e($adm_result_date); ?></strong></div><?php endif; ?>
+                </div>
+            </div>
+            <?php elseif (!$is_admission && !empty($S['show_routine'])): ?>
             <div class="am-routine-box">
                 <div class="am-routine-title">Exam Routine</div>
                 <?php if ($routine_rows_to_show): ?>
@@ -1496,9 +1738,12 @@ if (!function_exists('ac_card_full')) {
     function ac_card_full(array $d): string
     {
         $S = ac_cfg($d);
-        if (($S['full_template'] ?? 'classic') === 'modern') {
+        $req_preset = ac_normalize_layout_key((string) ($d['layout']['preset'] ?? ''), (string) ($S['full_template'] ?? 'classic'));
+        if (($d['layout']['preset'] ?? '') === '1full' && $req_preset === '1full_modern') {
             return ac_card_full_modern($d);
         }
+        $admit_type = ac_normalize_type($d['admit_type'] ?? ($S['admit_type'] ?? 'general'));
+        $is_admission = ($admit_type === 'admission');
         $H = ac_resolve_header($d, $S);
         $photo = !empty($S['show_photo']) ? ac_asset_url($d['photo'] ?? '') : '';
         $inst = $H['inst'];
@@ -1546,7 +1791,7 @@ if (!function_exists('ac_card_full')) {
 
         $band5 = [];
         if (!empty($S['show_session']))       { $band5[] = ['Session', $session ?: '—', false]; }
-        if (!empty($S['show_exam_schedule'])) { $band5[] = ['Exam Part', trim((string) ($d['part'] ?? '')) ?: 'Regular', false]; }
+        if (!empty($S['show_exam_schedule'])) { $band5[] = ['Exam Part', trim((string) ($d['part'] ?? '')) ?: ($is_admission ? 'Admission Test' : 'Regular'), false]; }
 
         $band6 = [];
         if (!empty($S['show_exam_schedule'])) {
@@ -1566,7 +1811,7 @@ if (!function_exists('ac_card_full')) {
             return $out . '</div>';
         };
 
-        $instr = is_array($d['instructions'] ?? null) ? $d['instructions'] : ac_default_instructions();
+        $instr = is_array($d['instructions'] ?? null) ? $d['instructions'] : ac_default_instructions($admit_type);
         $note_text = trim((string) ($instr['note_text'] ?? ''));
         $heading_text = trim((string) ($instr['heading'] ?? ''));
         $rules_raw = trim((string) ($instr['rules_text'] ?? ''));
@@ -1663,7 +1908,7 @@ if (!function_exists('ac_card_full')) {
                 <div class="af-col-right">
                     <?php if (!empty($S['show_roll'])): ?>
                     <div class="af-roll-box">
-                        <div class="af-roll-lbl">Roll No.</div>
+                        <div class="af-roll-lbl"><?php echo $is_admission ? 'Admission Roll No.' : 'Roll No.'; ?></div>
                         <div class="af-roll-val"><?php echo sc_e(trim((string) ($d['roll'] ?? '')) ?: '—'); ?></div>
                     </div>
                     <?php endif; ?>
@@ -1740,14 +1985,20 @@ if (!function_exists('ac_card')) {
     function ac_card(array $d): string
     {
         $L = $d['layout'] ?? ac_layout();
-        if (($L['preset'] ?? '') === '2half') {
+        $S = ac_cfg($d);
+        $preset = ac_normalize_layout_key((string) ($L['preset'] ?? ''), (string) ($S['full_template'] ?? 'modern'));
+        if ($preset === '2half') {
             return ac_card_half($d);
         }
-        if (($L['preset'] ?? '') === '1full') {
+        if ($preset === '1full_classic') {
             return ac_card_full($d);
         }
+        if ($preset === '1full_modern') {
+            return ac_card_full_modern($d);
+        }
 
-        $S = ac_cfg($d);
+        $admit_type = ac_normalize_type($d['admit_type'] ?? ($S['admit_type'] ?? 'general'));
+        $is_admission = ($admit_type === 'admission');
         $H = ac_resolve_header($d, $S);
         $logo = !empty($S['show_logo']) ? $H['logo'] : '';
         $wm = $logo !== '' ? "--ad-wm:url('" . sc_e($logo) . "');" : '';
@@ -1796,7 +2047,7 @@ if (!function_exists('ac_card')) {
                     <div class="ad-name"><?php echo sc_e($d['name']); ?></div>
                     <div class="ad-grid">
                         <?php if (!empty($S['show_student_id'])): ?><div><span>Student ID</span><b><?php echo sc_e($d['student_id']); ?></b></div><?php endif; ?>
-                        <?php if (!empty($S['show_roll'])): ?><div><span>Roll No</span><b><?php echo sc_e($d['roll'] ?: '-'); ?></b></div><?php endif; ?>
+                        <?php if (!empty($S['show_roll'])): ?><div><span><?php echo $is_admission ? 'Adm. Roll' : 'Roll No'; ?></span><b><?php echo sc_e($d['roll'] ?: '-'); ?></b></div><?php endif; ?>
                         <?php if (!empty($S['show_class'])): ?><div><span>Class</span><b><?php echo sc_e($d['class'] ?: '-'); ?></b></div><?php endif; ?>
                         <?php if (!empty($S['show_shift'])): ?><div><span>Shift</span><b><?php echo sc_e($d['shift'] ?: '-'); ?></b></div><?php endif; ?>
                         <?php if (!empty($S['show_section'])): ?><div><span>Section</span><b><?php echo sc_e($d['section'] ?: '-'); ?></b></div><?php endif; ?>
