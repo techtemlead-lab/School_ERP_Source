@@ -24,7 +24,7 @@ function dac_layout_fields(array $L, array $opts_cfg = []): void
         '1full'  => '১ টা / পাতা — Full Page',
         'custom' => 'Custom (নিজে সাইজ বসাব)',
     ];
-    $can_edit = !empty($opts_cfg['can_edit_instr']);
+    $can_customize = !empty($opts_cfg['can_customize']);
     $is_custom_instr = !empty($opts_cfg['is_custom_instr']);
 
     echo '<select name="layout" id="dacLayout" data-ss="off" class="form-select form-select-sm" style="width:auto;" onchange="dacLayoutToggle()">';
@@ -37,11 +37,11 @@ function dac_layout_fields(array $L, array $opts_cfg = []): void
        . '<label class="small mb-0">চওড়া</label><input type="number" name="cw" id="dacCw" class="form-control form-control-sm" style="width:80px;" min="50" max="287" step="0.5" value="' . dacv($L['w']) . '" oninput="dacLayoutToggle()">'
        . '<label class="small mb-0">উচ্চতা</label><input type="number" name="ch" id="dacCh" class="form-control form-control-sm" style="width:80px;" min="40" max="287" step="0.5" value="' . dacv($L['h']) . '" oninput="dacLayoutToggle()"> <span class="small">mm</span>'
        . '</span> <span id="dacPer" class="badge bg-secondary"></span>';
-    if ($can_edit) {
-        echo ' <button type="button" id="dacInstrBtn" class="btn btn-sm btn-outline-primary fw-semibold align-items-center gap-1" style="display:none;" data-bs-toggle="modal" data-bs-target="#dacInstrModal">'
+    if ($can_customize) {
+        echo ' <a id="dacInstrBtn" href="index.php?page=result_admit_card_customize#dacRulesSection" class="btn btn-sm btn-outline-primary fw-semibold align-items-center gap-1" style="display:none;">'
            . '<i class="fa-solid fa-file-pen"></i> নিয়মকানুন এডিট করুন'
            . ($is_custom_instr ? ' <span class="badge bg-success">Custom</span>' : '')
-           . '</button>';
+           . '</a>';
     }
     echo '<script>function dacLayoutToggle(){var sel=document.getElementById("dacLayout");var val=sel?sel.value:"4rect";var c=val==="custom";'
        . 'var ce=document.getElementById("dacCustom");if(ce){ce.style.display=c?"inline-flex":"none";}'
@@ -78,7 +78,7 @@ if ($fr_bid2 !== null) {
 $addr_line = $branch ? ($branch['address'] . ', ' . $branch['city'] . '-' . $branch['zip_code']) : '';
 $inst_display_name = ($branch['branch_name'] ?? null) ?: ($institute['institute_name'] ?? '');
 $instr_branch_id = $fr_bid2;
-$can_edit_instr = !function_exists('perm_action_allowed') || perm_action_allowed($pdo, 'result_download_admit_card', 'edit');
+$can_customize = !function_exists('perm_page_allowed') || perm_page_allowed($pdo, 'result_admit_card_customize');
 
 // -----------------------------------------------------------
 // POST: ফর্ম সাবমিট -> ফিল্টার সেশনে রেখে output ভিউতে রিডাইরেক্ট
@@ -112,60 +112,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_admit_cards'
     exit();
 }
 
-// -----------------------------------------------------------
-// POST: ১-পেজ অ্যাডমিট কার্ডের নিয়মকানুন সেভ / ডিফল্টে রিসেট (CMS)
-// -----------------------------------------------------------
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['update_admit_instructions']) || isset($_POST['update_admit_instructions_reset']))) {
-    $go_output = (($_POST['return_view'] ?? '') === 'output' && !empty($_SESSION['dac_generate']));
-    $redir = $go_output
-        ? 'index.php?page=result_download_admit_card&view=output&layout=1full'
-        : 'index.php?page=result_download_admit_card';
+$ac_settings      = ac_load_settings($pdo, $instr_branch_id);
+$dac_instructions = ac_load_instructions($pdo, $instr_branch_id);
 
-    if (!csrf_verify($_POST['csrf_token'] ?? null)) {
-        $_SESSION['dac_err'] = 'ফর্মের মেয়াদ শেষ হয়ে গেছে, পেজ রিলোড করে আবার চেষ্টা করুন।';
-        header('Location: ' . $redir);
-        exit();
-    }
-    if (!$can_edit_instr) {
-        $_SESSION['dac_err'] = 'নিয়মকানুন পরিবর্তনের অনুমতি আপনার নেই।';
-        header('Location: ' . $redir);
-        exit();
-    }
-
-    $_SESSION['dac_layout'] = ac_layout(['preset' => '1full']);
-
-    if (isset($_POST['update_admit_instructions_reset'])) {
-        ac_reset_instructions($pdo, $instr_branch_id);
-        $_SESSION['dac_msg'] = 'সরকারি ডিফল্ট নিয়মকানুন পুনরায় চালু করা হয়েছে।';
-    } else {
-        $note_in   = trim((string) ($_POST['note_text'] ?? ''));
-        $head_in   = trim((string) ($_POST['heading'] ?? ''));
-        $rules_in  = trim((string) ($_POST['rules_text'] ?? ''));
-        $carry_in  = trim((string) ($_POST['carry_text'] ?? ''));
-        $barred_in = trim((string) ($_POST['barred_text'] ?? ''));
-
-        if ($note_in === '' && $head_in === '' && $rules_in === '' && $carry_in === '' && $barred_in === '') {
-            $_SESSION['dac_err'] = 'অন্তত একটি নিয়ম বা নির্দেশনা লিখুন অথবা সরকারি ডিফল্টে ফিরিয়ে আনুন।';
-        } else {
-            ac_save_instructions($pdo, $instr_branch_id, [
-                'note_text'   => $note_in,
-                'heading'     => $head_in,
-                'rules_text'  => $rules_in,
-                'carry_text'  => $carry_in,
-                'barred_text' => $barred_in,
-            ]);
-            $_SESSION['dac_msg'] = 'অ্যাডমিট কার্ডের নিয়মকানুন সফলভাবে সেভ হয়েছে।';
-        }
-    }
-    header('Location: ' . $redir);
-    exit();
+// সর্বশেষ বাছাই করা লেআউট (GET > SESSION > কাস্টমাইজেশন ডিফল্ট)
+if (isset($_GET['layout'])) {
+    $dac_layout_src = dac_layout_in($_GET);
+} elseif (!empty($_SESSION['dac_layout'])) {
+    $dac_layout_src = dac_layout_in($_SESSION['dac_layout']);
+} else {
+    $dac_layout_src = [
+        'preset' => $ac_settings['default_layout'] ?? '4rect',
+        'ori'    => $ac_settings['default_ori'] ?? 'portrait',
+        'w'      => $ac_settings['default_w'] ?? 94,
+        'h'      => $ac_settings['default_h'] ?? 135,
+    ];
 }
-
-$dac_instructions  = ac_load_instructions($pdo, $instr_branch_id);
-$dac_govt_defaults = ac_default_instructions();
-
-// সর্বশেষ বাছাই করা লেআউট (GET দিয়ে বদলানো যায়)
-$dac_layout = ac_layout(isset($_GET['layout']) ? dac_layout_in($_GET) : (dac_layout_in($_SESSION['dac_layout'] ?? [])));
+$dac_layout = ac_layout($dac_layout_src);
 $_SESSION['dac_layout'] = $dac_layout;
 
 $classes  = $pdo->query("SELECT id, class_name FROM academic_classes WHERE status = 'Active' ORDER BY rank ASC, class_name ASC")->fetchAll();
@@ -188,7 +151,7 @@ $all_students = $rdac_stmt->fetchAll();
 
 $view = $_GET['view'] ?? 'config';
 $dac_layout_opts_cfg = [
-    'can_edit_instr'  => $can_edit_instr,
+    'can_customize'   => $can_customize,
     'is_custom_instr' => !empty($dac_instructions['is_custom']),
 ];
 ?>
@@ -293,7 +256,14 @@ $dac_layout_opts_cfg = [
     <?php echo ac_css($dac_layout); ?>
 
     <div class="no-print d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-        <a href="index.php?page=result_download_admit_card" class="btn btn-secondary"><i class="fa-solid fa-arrow-left"></i> Back</a>
+        <div class="d-flex align-items-center gap-2">
+            <a href="index.php?page=result_download_admit_card" class="btn btn-secondary"><i class="fa-solid fa-arrow-left"></i> Back</a>
+            <?php if ($can_customize): ?>
+                <a href="index.php?page=result_admit_card_customize" class="btn btn-outline-primary btn-sm fw-semibold">
+                    <i class="fa-solid fa-sliders me-1"></i> Customize Admit Card
+                </a>
+            <?php endif; ?>
+        </div>
         <form method="GET" class="d-flex align-items-center gap-2 flex-wrap">
             <input type="hidden" name="page" value="result_download_admit_card">
             <input type="hidden" name="view" value="output">
@@ -326,24 +296,19 @@ $dac_layout_opts_cfg = [
                 $st_branch_short = trim((string) ($st['student_branch_short'] ?? '')) ?: trim((string) ($branch['short_name'] ?? ''));
                 $st_sig = trim((string) ($st['student_branch_sig'] ?? '')) ?: trim((string) ($branch['signature_path'] ?? ''));
 
-                $raw_slogan = trim((string) ($institute['slogan'] ?? ''));
-                $resolved_slogan = ($raw_slogan === '' || in_array(strtolower($raw_slogan), ['excellence in education', 'an enlightened generation, our promise'], true))
-                    ? 'An Enlightened Generation Is Our Commitment'
-                    : $raw_slogan;
+                $resolved_slogan = trim((string) ($institute['slogan'] ?? ''));
 
                 $resolved_phone = '';
                 foreach ([$institute['phone_number'] ?? '', $st['student_branch_phone'] ?? '', $branch['phone'] ?? ''] as $cand_phone) {
                     $cand_phone = trim((string) $cand_phone);
-                    if ($cand_phone !== '' && $cand_phone !== '01700000000') { $resolved_phone = $cand_phone; break; }
+                    if ($cand_phone !== '') { $resolved_phone = $cand_phone; break; }
                 }
-                if ($resolved_phone === '') { $resolved_phone = '+8801779802912'; }
 
                 $resolved_email = '';
                 foreach ([$institute['email'] ?? '', $st['student_branch_email'] ?? '', $branch['email'] ?? ''] as $cand_email) {
                     $cand_email = trim((string) $cand_email);
-                    if ($cand_email !== '' && $cand_email !== 'info@yourschool.com') { $resolved_email = $cand_email; break; }
+                    if ($cand_email !== '') { $resolved_email = $cand_email; break; }
                 }
-                if ($resolved_email === '') { $resolved_email = 'tawhaazinnurain@gmail.com'; }
                 ?>
                 <?php echo ac_card([
                     'institute'         => $inst_display_name,
@@ -386,12 +351,13 @@ $dac_layout_opts_cfg = [
                     'qr_id'             => 'acqr-' . (int) $i,
                     'layout'            => $dac_layout,
                     'instructions'      => $dac_instructions,
+                    'settings'          => $ac_settings,
                 ]); ?>
             <?php endforeach; ?>
         </div>
         <?php endforeach; ?>
         </div>
-        <?php echo sc_qr_script(); ?>
+        <?php if (!in_array($dac_layout['preset'], ['2half', '1full'], true) && !empty($ac_settings['show_qr'])) { echo sc_qr_script(); } ?>
     <?php endif; ?>
 
 <?php else: ?>
@@ -400,7 +366,14 @@ $dac_layout_opts_cfg = [
         <?php if ($dac_msg): ?><div class="alert alert-success py-2"><?php echo dacv($dac_msg); ?></div><?php endif; ?>
         <?php if ($dac_err): ?><div class="alert alert-danger py-2"><?php echo dacv($dac_err); ?></div><?php endif; ?>
 
-        <h6 class="text-muted mb-4">Generate Admit Card for Session : <?php echo dacv($current_session_name); ?></h6>
+        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+            <h6 class="text-muted mb-0">Generate Admit Card for Session : <?php echo dacv($current_session_name); ?></h6>
+            <?php if ($can_customize): ?>
+                <a href="index.php?page=result_admit_card_customize" class="btn btn-outline-primary btn-sm fw-semibold">
+                    <i class="fa-solid fa-sliders me-1"></i> Customize Admit Card
+                </a>
+            <?php endif; ?>
+        </div>
 
         <form method="POST" action="index.php?page=result_download_admit_card">
             <?php echo csrf_field(); ?>
@@ -508,79 +481,4 @@ $dac_layout_opts_cfg = [
         }
         filterDacSections();
     </script>
-<?php endif; ?>
-
-<?php if ($can_edit_instr): ?>
-<div class="modal fade no-print" id="dacInstrModal" tabindex="-1" aria-labelledby="dacInstrModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-scrollable">
-        <form method="POST" action="index.php?page=result_download_admit_card" class="modal-content">
-            <?php echo csrf_field(); ?>
-            <input type="hidden" name="return_view" value="<?php echo dacv($view === 'output' ? 'output' : 'config'); ?>">
-            <div class="modal-header bg-primary text-white">
-                <h5 class="modal-title fs-6 d-flex align-items-center gap-2 flex-wrap" id="dacInstrModalLabel">
-                    <span><i class="fa-solid fa-file-pen me-1"></i> অ্যাডমিট কার্ডের নিয়মকানুন এডিট করুন (১ পেজ লেআউট)</span>
-                    <?php if (!empty($dac_instructions['is_custom'])): ?>
-                        <span class="badge bg-warning text-dark">কাস্টম নিয়ম চালু আছে</span>
-                    <?php else: ?>
-                        <span class="badge bg-light text-primary">সরকারি ডিফল্ট চালু আছে</span>
-                    <?php endif; ?>
-                </h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <div class="alert alert-info py-2 small mb-3">
-                    এখানে পরিবর্তন করে সেভ করলে ১-পেজ (Full Page) অ্যাডমিট কার্ডে ডিফল্ট সরকারি নিয়মকানুন বাদ দিয়ে আপনার লেখা নিয়মকানুন প্রদর্শিত হবে। কোনো অংশ ফাঁকা রাখলে কার্ডে ওই অংশটি দেখাবে না।
-                </div>
-                <div class="mb-3">
-                    <label for="dacInstrNote" class="form-label fw-bold small mb-1">বিশেষ দ্রষ্টব্য / Warning Note (লাল অংশ)</label>
-                    <textarea name="note_text" id="dacInstrNote" rows="2" class="form-control form-control-sm"><?php echo dacv($dac_instructions['note_text'] ?? ''); ?></textarea>
-                </div>
-                <div class="mb-3">
-                    <label for="dacInstrHeading" class="form-label fw-bold small mb-1">নির্দেশাবলীর শিরোনাম (Heading)</label>
-                    <input type="text" name="heading" id="dacInstrHeading" maxlength="255" class="form-control form-control-sm" value="<?php echo dacv($dac_instructions['heading'] ?? ''); ?>">
-                </div>
-                <div class="mb-3">
-                    <label for="dacInstrRules" class="form-label fw-bold small mb-1">পরীক্ষার নিয়মকানুন (প্রতি লাইনে একটি করে নিয়ম লিখুন)</label>
-                    <textarea name="rules_text" id="dacInstrRules" rows="10" class="form-control form-control-sm"><?php echo dacv($dac_instructions['rules_text'] ?? ''); ?></textarea>
-                </div>
-                <div class="mb-3">
-                    <label for="dacInstrCarry" class="form-label fw-bold small mb-1">পরীক্ষার হলে যা সঙ্গে আনতে হবে (Must Carry)</label>
-                    <textarea name="carry_text" id="dacInstrCarry" rows="2" class="form-control form-control-sm"><?php echo dacv($dac_instructions['carry_text'] ?? ''); ?></textarea>
-                </div>
-                <div class="mb-0">
-                    <label for="dacInstrBarred" class="form-label fw-bold small mb-1">পরীক্ষার হলে নিষিদ্ধ সামগ্রী (Barred Items)</label>
-                    <textarea name="barred_text" id="dacInstrBarred" rows="2" class="form-control form-control-sm"><?php echo dacv($dac_instructions['barred_text'] ?? ''); ?></textarea>
-                </div>
-            </div>
-            <div class="modal-footer justify-content-between flex-wrap gap-2">
-                <div class="d-flex gap-2 flex-wrap">
-                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="dacFillGovtDefaults()">
-                        <i class="fa-solid fa-wand-magic-sparkles me-1"></i> সরকারি ডিফল্ট লোড করুন
-                    </button>
-                    <?php if (!empty($dac_instructions['is_custom']) && ($dac_instructions['scope_branch_id'] ?? 0) === (int) ($instr_branch_id ?? 0)): ?>
-                        <button type="submit" name="update_admit_instructions_reset" value="1" class="btn btn-outline-danger btn-sm" onclick="return confirm('কাস্টম নিয়মকানুন মুছে সরকারি ডিফল্ট নিয়ম ফিরিয়ে আনবেন?')">
-                            <i class="fa-solid fa-rotate-left me-1"></i> ডিফল্ট ফিরিয়ে আনুন
-                        </button>
-                    <?php endif; ?>
-                </div>
-                <div class="d-flex gap-2">
-                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">বাতিল</button>
-                    <button type="submit" name="update_admit_instructions" value="1" class="btn btn-primary btn-sm fw-bold">
-                        <i class="fa-solid fa-floppy-disk me-1"></i> সেভ করুন
-                    </button>
-                </div>
-            </div>
-        </form>
-    </div>
-</div>
-<script>
-function dacFillGovtDefaults() {
-    var d = <?php echo json_encode($dac_govt_defaults, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
-    document.getElementById('dacInstrNote').value = d.note_text || '';
-    document.getElementById('dacInstrHeading').value = d.heading || '';
-    document.getElementById('dacInstrRules').value = d.rules_text || '';
-    document.getElementById('dacInstrCarry').value = d.carry_text || '';
-    document.getElementById('dacInstrBarred').value = d.barred_text || '';
-}
-</script>
 <?php endif; ?>
