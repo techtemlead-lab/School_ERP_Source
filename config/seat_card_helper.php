@@ -9,68 +9,84 @@ if (!function_exists('sc_css')) {
     {
         return <<<'CSS'
 <style>
-@page { size: A4; margin: 8mm; }
+@page { size: A4 portrait; margin: 0; }
 @media print {
-    /* অ্যাডমিন লেআউট (সাইডবার/টপবার/ব্রেডক্রাম্ব) প্রিন্টে বাদ — শুধু কার্ড ছাপা হবে */
+    /* অ্যাডমিন/স্টুডেন্ট লেআউট ও ব্রাউজার হেডার-ফুটার প্রিন্টে বাদ — শুধু সিট কার্ড ছাপা হবে */
     .no-print, .sidebar, .sticky-top-area, .top-navbar, .breadcrumb-bar, footer, .sidebar-overlay { display: none !important; }
     html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; height: auto !important; overflow: visible !important; }
     .main-wrapper, .main-wrapper.expanded { margin-left: 0 !important; width: 100% !important; min-height: 0 !important; padding: 0 !important; }
     .content-body { padding: 0 !important; margin: 0 !important; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .sc-grid { display: grid !important; grid-template-columns: repeat(2, 92mm); justify-content: center; gap: 4mm !important; }
-    .sc-grid .seatcard { width: 92mm !important; box-shadow: none !important; }
+    .sc-grid { display: grid !important; grid-template-columns: repeat(2, 93mm); justify-content: center; gap: 5mm !important; padding: 8mm !important; }
+    .sc-grid .seatcard { width: 93mm !important; box-shadow: none !important; }
 }
-.sc-grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; }
+.sc-grid { display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch; gap: 16px; }
 .seatcard {
     position: relative; width: 390px; max-width: 100%; background: #fff; overflow: hidden;
-    border: 1.5px solid #1e3a8a; border-radius: 12px; font-family: 'Segoe UI', Arial, sans-serif;
-    box-shadow: 0 2px 10px rgba(30,58,138,.12); page-break-inside: avoid; break-inside: avoid; text-align: left;
+    border: 1.4px solid #cbd5e1; border-radius: 10px; padding: 14px 16px 12px;
+    display: flex; flex-direction: column; box-sizing: border-box;
+    font-family: 'Segoe UI', 'Noto Sans Bengali', Arial, sans-serif; color: #111827;
+    box-shadow: 0 3px 14px rgba(15,23,42,.08); page-break-inside: avoid; break-inside: avoid; text-align: left;
 }
 .seatcard .sc-head {
-    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
-    background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); color: #fff;
+    display: flex; align-items: center; gap: 12px; margin-bottom: 10px;
 }
 .seatcard .sc-logo {
-    width: 52px; height: 52px; flex: 0 0 52px; border-radius: 50%; background: #fff; padding: 3px;
+    width: 62px; height: 62px; flex: 0 0 62px;
     display: flex; align-items: center; justify-content: center; overflow: hidden;
 }
 .seatcard .sc-logo img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; image-rendering: -webkit-optimize-contrast; }
-.seatcard .sc-logo span { color: #1e3a8a; font-weight: 800; font-size: 20px; }
+.seatcard .sc-logo span {
+    width: 50px; height: 50px; border-radius: 50%; border: 2px solid #1e3a8a; color: #1e3a8a;
+    font-weight: 800; font-size: 21px; display: flex; align-items: center; justify-content: center;
+}
 .seatcard .sc-inst { flex: 1; min-width: 0; text-align: center; }
-.seatcard .sc-inst b { display: block; font-size: 14.5px; line-height: 1.25; letter-spacing: .2px; }
-.seatcard .sc-inst small { display: block; font-size: 11px; opacity: .92; margin-top: 2px; }
-.seatcard .sc-room {
-    flex: 0 0 auto; background: #fbbf24; color: #1e293b; border-radius: 8px; padding: 4px 9px; text-align: center; line-height: 1.1;
+.seatcard .sc-inst b { display: block; font-size: 15.5px; font-weight: 800; color: #1e3a8a; line-height: 1.2; letter-spacing: .15px; overflow-wrap: break-word; }
+.seatcard .sc-inst small { display: block; font-size: 12.5px; font-weight: 500; color: #475569; margin-top: 3px; line-height: 1.25; }
+.seatcard .sc-room-pill {
+    display: inline-block; margin-top: 4px; padding: 1px 9px; border-radius: 999px;
+    background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .3px;
 }
-.seatcard .sc-room small { display: block; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
-.seatcard .sc-room b { font-size: 18px; }
 .seatcard .sc-ribbon {
-    text-align: center; background: #eef2ff; color: #1e3a8a; font-weight: 800; font-size: 12.5px;
-    letter-spacing: 1.2px; text-transform: uppercase; padding: 5px 8px; border-bottom: 1px dashed #93c5fd;
+    text-align: center; font-weight: 800; font-size: 13.5px; letter-spacing: 1px;
+    text-transform: uppercase; color: #1e293b; padding: 2px 4px 10px;
 }
-.seatcard .sc-ribbon em { font-style: normal; color: #b45309; }
-.seatcard .sc-body { display: flex; gap: 12px; padding: 12px; position: relative; }
-.seatcard .sc-body::before {
-    content: ''; position: absolute; inset: 0; background: var(--sc-wm) center/55% no-repeat; opacity: .06; pointer-events: none;
+.seatcard .sc-ribbon em { font-style: normal; color: #0f766e; }
+.seatcard .sc-body {
+    flex: 1 1 auto; display: flex; align-items: flex-start; justify-content: center; gap: 14px; padding: 2px 8px 10px;
 }
+.seatcard .sc-body.sc-no-photo .sc-info { width: 100%; max-width: 260px; margin: 0 auto; }
 .seatcard .sc-photo {
-    width: 84px; height: 100px; flex: 0 0 84px; object-fit: cover; border: 2px solid #1e3a8a; border-radius: 8px; background: #f1f5f9;
-    display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 11px;
+    width: 76px; height: 92px; flex: 0 0 76px; object-fit: cover; border: 1.5px solid #cbd5e1; border-radius: 6px; background: #f8fafc;
+    display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 10.5px;
 }
-.seatcard .sc-info { flex: 1; min-width: 0; font-size: 12.5px; position: relative; }
-.seatcard .sc-name { font-size: 15px; font-weight: 800; color: #0f172a; margin-bottom: 5px; line-height: 1.25; word-break: break-word; }
-.seatcard .sc-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; }
-.seatcard .sc-grid2 div { line-height: 1.5; }
-.seatcard .sc-grid2 span { display: block; font-size: 9.5px; color: #64748b; text-transform: uppercase; letter-spacing: .4px; }
-.seatcard .sc-grid2 b { color: #0f172a; font-size: 13px; }
+.seatcard .sc-info { flex: 1; min-width: 0; }
+.seatcard .sc-name { font-size: 16.5px; font-weight: 800; color: #0f172a; margin-bottom: 9px; line-height: 1.2; word-break: break-word; }
+.seatcard .sc-body.sc-with-photo .sc-name { font-size: 15.5px; margin-bottom: 7px; }
+.seatcard .sc-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; }
+.seatcard .sc-grid2 div { min-width: 0; }
+.seatcard .sc-grid2 span { display: block; font-size: 9.5px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .5px; line-height: 1.2; }
+.seatcard .sc-grid2 b { display: block; color: #0f172a; font-size: 14px; font-weight: 800; line-height: 1.25; margin-top: 1px; overflow-wrap: break-word; }
 .seatcard .sc-foot {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    padding: 8px 12px; background: #f8fafc; border-top: 1px solid #e2e8f0;
+    margin-top: auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 10px;
+    padding-top: 8px; border-top: 1px solid #f1f5f9;
 }
-.seatcard .sc-sid span { display: block; font-size: 9.5px; color: #64748b; text-transform: uppercase; letter-spacing: .4px; }
-.seatcard .sc-sid b { font-size: 16px; color: #1e3a8a; letter-spacing: .5px; }
-.seatcard .sc-qr { width: 62px; height: 62px; background: #fff; padding: 2px; border: 1px solid #cbd5e1; border-radius: 6px; }
-.seatcard .sc-qr img, .seatcard .sc-qr canvas { width: 100% !important; height: 100% !important; }
+.seatcard .sc-sid span { display: block; font-size: 9.5px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .5px; line-height: 1.2; }
+.seatcard .sc-sid b { display: block; font-size: 17px; font-weight: 800; color: #1e3a8a; letter-spacing: .4px; line-height: 1.15; margin-top: 1px; }
+.seatcard .sc-brand { text-align: right; line-height: 1.1; flex: 0 0 auto; }
+.seatcard .sc-pow-lbl { display: block; font-size: 7.5px; font-style: italic; color: #64748b; }
+.seatcard .sc-pow-logo { height: 15px; width: auto; display: block; margin: 2px 0 0 auto; }
+/* ====== Grayscale Print Mode (.sc-grid.sc-gray) ====== */
+.sc-grid.sc-gray img { filter: grayscale(100%); -webkit-filter: grayscale(100%); }
+.sc-grid.sc-gray .seatcard { border-color: #1f2937 !important; }
+.sc-grid.sc-gray .seatcard .sc-logo span,
+.sc-grid.sc-gray .seatcard .sc-inst b,
+.sc-grid.sc-gray .seatcard .sc-ribbon,
+.sc-grid.sc-gray .seatcard .sc-ribbon em,
+.sc-grid.sc-gray .seatcard .sc-sid b { color: #111827 !important; border-color: #111827 !important; }
+.sc-grid.sc-gray .seatcard .sc-room-pill { background: #f3f4f6 !important; border-color: #4b5563 !important; color: #111827 !important; }
+.sc-grid.sc-gray .seatcard .sc-photo { border-color: #374151 !important; }
 </style>
 CSS;
     }
@@ -78,48 +94,57 @@ CSS;
 
 /**
  * একটা Seat Card এর HTML রিটার্ন করে।
- * $d: institute, logo, room, term, part, year, name, class, shift, section, roll, student_id, photo, qr_id (DOM id)
+ * $d: institute, logo, room, term, part, year, name, class, shift, section, roll, student_id, photo, show_photo
  */
 if (!function_exists('sc_card')) {
     function sc_card(array $d): string
     {
-        $logo = !empty($d['logo']) ? '../' . ltrim($d['logo'], '/') : '';
-        $wm = $logo !== '' ? "--sc-wm:url('" . sc_e($logo) . "');" : '';
+        $logo = ac_asset_url($d['logo'] ?? '');
+        $photo = ac_asset_url($d['photo'] ?? '');
+        $inst = trim((string) ($d['institute'] ?? ''));
+        $room = trim((string) ($d['room'] ?? ''));
+        $part = trim((string) ($d['part'] ?? ''));
+        $show_photo = !empty($d['show_photo']);
         ob_start(); ?>
         <div class="seatcard">
             <div class="sc-head">
                 <div class="sc-logo">
                     <?php if ($logo !== ''): ?><img src="<?php echo sc_e($logo); ?>" alt="Logo">
-                    <?php else: ?><span><?php echo sc_e(mb_substr(trim((string) $d['institute']), 0, 1)); ?></span><?php endif; ?>
+                    <?php else: ?><span><?php echo sc_e(mb_substr($inst !== '' ? $inst : 'A', 0, 1)); ?></span><?php endif; ?>
                 </div>
                 <div class="sc-inst">
-                    <b><?php echo sc_e($d['institute']); ?></b>
-                    <small><?php echo sc_e($d['term']); ?></small>
+                    <b><?php echo sc_e($inst); ?></b>
+                    <small><?php echo sc_e($d['term'] ?? ''); ?></small>
+                    <?php if ($room !== ''): ?>
+                        <div class="sc-room-pill">Room: <?php echo sc_e($room); ?></div>
+                    <?php endif; ?>
                 </div>
-                <?php if (trim((string) $d['room']) !== ''): ?>
-                    <div class="sc-room"><small>Room</small><b><?php echo sc_e($d['room']); ?></b></div>
-                <?php endif; ?>
             </div>
-            <div class="sc-ribbon">Seat Layout - <?php echo sc_e($d['year']); ?><?php echo $d['part'] !== '' ? ' <em>(' . sc_e($d['part']) . ')</em>' : ''; ?></div>
-            <div class="sc-body" style="<?php echo $wm; ?>">
-                <?php if (!empty($d['photo'])): ?>
-                    <img class="sc-photo" src="../<?php echo sc_e(ltrim($d['photo'], '/')); ?>" alt="Photo">
-                <?php else: ?>
-                    <div class="sc-photo">Photo</div>
+            <div class="sc-ribbon">Seat Layout - <?php echo sc_e($d['year'] ?? ''); ?><?php echo $part !== '' ? ' <em>(' . sc_e($part) . ')</em>' : ''; ?></div>
+            <div class="sc-body <?php echo $show_photo ? 'sc-with-photo' : 'sc-no-photo'; ?>">
+                <?php if ($show_photo): ?>
+                    <?php if ($photo !== ''): ?>
+                        <img class="sc-photo" src="<?php echo sc_e($photo); ?>" alt="Photo">
+                    <?php else: ?>
+                        <div class="sc-photo">Photo</div>
+                    <?php endif; ?>
                 <?php endif; ?>
                 <div class="sc-info">
-                    <div class="sc-name"><?php echo sc_e($d['name']); ?></div>
+                    <div class="sc-name"><?php echo sc_e($d['name'] ?? ''); ?></div>
                     <div class="sc-grid2">
-                        <div><span>Class</span><b><?php echo sc_e($d['class'] ?: '-'); ?></b></div>
-                        <div><span>Roll No</span><b><?php echo sc_e($d['roll'] ?: '-'); ?></b></div>
-                        <div><span>Shift</span><b><?php echo sc_e($d['shift'] ?: '-'); ?></b></div>
-                        <div><span>Section</span><b><?php echo sc_e($d['section'] ?: '-'); ?></b></div>
+                        <div><span>Class</span><b><?php echo sc_e(($d['class'] ?? '') !== '' ? $d['class'] : '-'); ?></b></div>
+                        <div><span>Roll No</span><b><?php echo sc_e(($d['roll'] ?? '') !== '' ? $d['roll'] : '-'); ?></b></div>
+                        <div><span>Shift</span><b><?php echo sc_e(($d['shift'] ?? '') !== '' ? $d['shift'] : '-'); ?></b></div>
+                        <div><span>Section</span><b><?php echo sc_e(($d['section'] ?? '') !== '' ? $d['section'] : '-'); ?></b></div>
                     </div>
                 </div>
             </div>
             <div class="sc-foot">
-                <div class="sc-sid"><span>Student ID</span><b><?php echo sc_e($d['student_id']); ?></b></div>
-                <div class="sc-qr" id="<?php echo sc_e($d['qr_id']); ?>" data-qr="<?php echo sc_e($d['student_id']); ?>"></div>
+                <div class="sc-sid"><span>Student ID</span><b><?php echo sc_e($d['student_id'] ?? ''); ?></b></div>
+                <div class="sc-brand">
+                    <span class="sc-pow-lbl">Powered by</span>
+                    <img class="sc-pow-logo" src="../assets/techteam-logo.svg" alt="TechTeam">
+                </div>
             </div>
         </div>
         <?php
@@ -905,16 +930,26 @@ if (!function_exists('ac_css')) {
     width: 92%; text-align: center; padding-top: 2px;
 }
 .admit-full .af-rules-sec {
-    flex: 1 1 auto; padding: 6px 10px 7px; display: flex; flex-direction: column; gap: 4px;
-    overflow: hidden; font-size: 9.3px; line-height: 1.34; color: #1f2937;
+    flex: 1 1 auto; padding: 5px 10px 5px; display: flex; flex-direction: column; gap: 3px;
+    overflow: hidden; font-size: 9px; line-height: 1.3; color: #1f2937;
 }
-.admit-full .af-note { color: #b91c1c; font-size: 9px; line-height: 1.32; text-align: justify; }
-.admit-full .af-rules-title { font-size: 10px; font-weight: 800; color: #111827; margin-top: 2px; }
-.admit-full .af-rule-item { margin-bottom: 2px; text-align: justify; }
+.admit-full .af-note { color: #b91c1c; font-size: 8.8px; line-height: 1.28; text-align: justify; }
+.admit-full .af-rules-title { font-size: 9.6px; font-weight: 800; color: #111827; margin-top: 1px; }
+.admit-full .af-rule-item { margin-bottom: 1.5px; text-align: justify; }
 .admit-full .af-rules-ol { margin: 0; padding-left: 16px; }
-.admit-full .af-rules-ol li { margin-bottom: 2px; text-align: justify; }
-.admit-full .af-strip { font-size: 9px; line-height: 1.32; text-align: justify; }
+.admit-full .af-rules-ol li { margin-bottom: 1.5px; text-align: justify; }
+.admit-full .af-strip { font-size: 8.8px; line-height: 1.28; text-align: justify; }
 .admit-full .af-strip-lbl { color: #b91c1c; font-weight: 800; }
+.admit-full .af-foot {
+    margin-top: auto; flex-shrink: 0; border-top: 1px solid #cbd5e1; padding: 4px 10px 5px;
+    display: flex; justify-content: space-between; align-items: flex-end; gap: 10px;
+    font-size: 9px; color: #374151; background: #fff;
+}
+.admit-full .af-foot-left { text-align: left; line-height: 1.3; }
+.admit-full .af-foot-right { text-align: right; line-height: 1.1; }
+.admit-full .af-pow-lbl { font-size: 8px; font-style: italic; color: #475569; }
+.admit-full .af-pow-logo { height: 15px; width: auto; display: block; margin: 1px 0 1px auto; }
+.admit-full .af-pow-url { font-size: 8px; font-weight: 600; color: #16285B; }
 
 /* ====== ১ টা / পাতা — Template 2: Modern Routine & QR (193mm x 278mm) ====== */
 .admit-modern {
@@ -1001,6 +1036,28 @@ if (!function_exists('ac_css')) {
 .admit-modern .am-pow-lbl { font-size: 8.5px; font-style: italic; color: #475569; }
 .admit-modern .am-pow-logo { height: 16px; width: auto; display: block; margin: 2px 0 1px auto; }
 .admit-modern .am-pow-url { font-size: 8.5px; font-weight: 600; color: #16285B; }
+
+/* ====== Grayscale / B&W Print Mode (.ac-pages.ac-gray) ====== */
+.ac-pages.ac-gray img,
+.ac-pages.ac-gray canvas { filter: grayscale(100%); -webkit-filter: grayscale(100%); }
+.ac-pages.ac-gray .admitcard2 { border-color: #111827 !important; box-shadow: none !important; }
+.ac-pages.ac-gray .admitcard2 .ad-head { background: #fff !important; color: #111827 !important; border-bottom: 1.5px solid #111827 !important; }
+.ac-pages.ac-gray .admitcard2 .ad-logo { border: 1px solid #cbd5e1; }
+.ac-pages.ac-gray .admitcard2 .ad-logo span,
+.ac-pages.ac-gray .admitcard2 .ad-inst .web,
+.ac-pages.ac-gray .admitcard2 .ad-title .term { color: #111827 !important; }
+.ac-pages.ac-gray .admitcard2 .ad-title { background: #f3f4f6 !important; border-bottom-color: #6b7280 !important; }
+.ac-pages.ac-gray .admitcard2 .ad-title .pill { background: #fff !important; color: #111827 !important; border: 1px solid #111827 !important; }
+.ac-pages.ac-gray .admitcard2 .ad-photo { border-color: #374151 !important; }
+.ac-pages.ac-gray .admit-half .ah-inst-name,
+.ac-pages.ac-gray .admit-half .ah-logo span,
+.ac-pages.ac-gray .admit-full .af-logo span,
+.ac-pages.ac-gray .admit-full .af-note,
+.ac-pages.ac-gray .admit-full .af-strip-lbl,
+.ac-pages.ac-gray .admit-full .af-pow-url,
+.ac-pages.ac-gray .admit-modern .am-logo span,
+.ac-pages.ac-gray .admit-modern .am-rules-note,
+.ac-pages.ac-gray .admit-modern .am-pow-url { color: #111827 !important; border-color: #111827 !important; }
 </style>
 CSS;
         $my = (int) ($L['my'] ?? 8);
@@ -1486,6 +1543,7 @@ if (!function_exists('ac_card_full')) {
         $exam_date = trim((string) ($d['exam_date'] ?? '')) ?: (trim((string) ($d['issue_date'] ?? '')) ?: date('d/m/Y'));
         $exam_time = trim((string) ($d['exam_time'] ?? '')) ?: (trim((string) ($d['shift'] ?? '')) ?: '—');
         $sig_principal_lbl = $H['sig_p_label'] ?: 'Head of Institute';
+        $print_date = date('d-m-Y');
 
         $show_head_logo = !empty($S['show_logo']);
         $show_head_name = !empty($S['show_institute_name']) && $inst !== '';
@@ -1680,6 +1738,18 @@ if (!function_exists('ac_card_full')) {
                 <?php endif; ?>
             </div>
             <?php endif; ?>
+
+            <div class="af-foot">
+                <div class="af-foot-left">
+                    <div>Printing Date: <strong><?php echo sc_e($print_date); ?></strong></div>
+                    <?php if ($inst !== ''): ?><div style="font-style:italic;">This admit card is the official property of <?php echo sc_e($inst); ?></div><?php endif; ?>
+                </div>
+                <div class="af-foot-right">
+                    <div class="af-pow-lbl">Powered by</div>
+                    <img class="af-pow-logo" src="../assets/techteam-logo.svg" alt="TechTeam">
+                    <div class="af-pow-url">techteamlead.com</div>
+                </div>
+            </div>
         </div></div>
         <?php
         return ob_get_clean();
