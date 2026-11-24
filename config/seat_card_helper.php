@@ -301,43 +301,37 @@ if (!function_exists('ac_default_instructions')) {
         $type = ac_normalize_type($admit_type);
         if ($type === 'admission') {
             $rules = implode("\n", [
-                '১. পরীক্ষার্থীকে ভর্তি পরীক্ষা শুরুর কমপক্ষে ৩০ (ত্রিশ) মিনিট পূর্বে নির্ধারিত পরীক্ষা কেন্দ্রে উপস্থিত হয়ে আসন গ্রহণ করতে হবে।',
-                '২. পরীক্ষার হলে মূল প্রবেশপত্র (Admission Admit Card) অবশ্যই সঙ্গে আনতে হবে; প্রবেশপত্র ব্যতীত পরীক্ষা কক্ষে প্রবেশ করতে দেওয়া হবে না।',
-                '৩. পরীক্ষার কক্ষে নিজস্ব কালো/নীল বলপয়েন্ট কলম, পেন্সিল, রাবার ও জ্যামিতি বক্স ছাড়া কোনো বই, খাতা, নোট বা কাগজ আনা যাবে না।',
-                '৪. মোবাইল ফোন, স্মার্টওয়াচ, ক্যালকুলেটর বা যেকোনো ইলেকট্রনিক ডিভাইস পরীক্ষার কক্ষে আনা সম্পূর্ণ নিষিদ্ধ।',
-                '৫. উত্তরপত্র ও হাজিরা শিটে ভর্তি রোল নম্বর সঠিকভাবে লিখতে হবে এবং কোনো প্রকার কাটাকাটি বা ঘষামাজা করা যাবে না।',
-                '৬. পরীক্ষা চলাকালীন অভিভাবকগণ পরীক্ষা কক্ষের বাইরে নির্ধারিত অপেক্ষাগারে অবস্থান করবেন এবং কক্ষ পরিদর্শকের নির্দেশনা মেনে চলবেন।',
+                '১) নির্ধারিত তারিখ ও সময়ে ভর্তি পরীক্ষা অনুষ্ঠিত হবে। ভর্তি পরীক্ষা সংক্রান্ত তথ্যাদি প্রতিষ্ঠানের ওয়েবসাইট ও নোটিশ বোর্ডে জানিয়ে দেওয়া হবে।',
+                '২) ভর্তি পরীক্ষায় উত্তীর্ণ শিক্ষার্থীদের নির্ধারিত তারিখের মধ্যে ভর্তি ফি পরিশোধ করে ভর্তি সম্পন্ন করতে হবে।',
+                '৩) ভর্তি পরীক্ষা গ্রহণের সময় শিক্ষার্থীর সাথে অভিভাবক হিসেবে অবশ্যই পিতা/মাতাকে (যেকোনো একজন) প্রয়োজনীয় কাগজপত্রসহ উপস্থিত থাকতে হবে।',
+                '৪) অবশ্যই প্রবেশপত্র সাথে নিয়ে পরীক্ষার হলে প্রবেশ করতে হবে (অনলাইন কপি)।',
+                '৫) জন্ম সনদ ও পিতা-মাতার জাতীয় পরিচয়পত্র অনুযায়ী (আবেদন ফরমসহ) যাবতীয় সঠিক তথ্য প্রদান করতে হবে।',
             ]);
 
             return [
-                'note_text'   => 'ভর্তি প্রবেশপত্রে পরীক্ষার্থীর নাম, পিতা-মাতার নাম, শ্রেণি বা অন্য কোনো তথ্যে ভুল থাকলে ভর্তি পরীক্ষার পূর্বেই ভর্তি অফিসে যোগাযোগ করে সংশোধন করে নিতে হবে।',
-                'heading'     => 'ভর্তি পরীক্ষার পরীক্ষার্থীদের জন্য নির্দেশাবলী (ADMISSION EXAM DIRECTIONS)',
+                'note_text'   => '',
+                'heading'     => 'নির্দেশিকা:',
                 'rules_text'  => $rules,
-                'carry_text'  => 'মূল ভর্তি প্রবেশপত্র (Admission Admit Card), কালো/নীল বলপয়েন্ট কলম, পেন্সিল, রাবার ও স্কেল।',
-                'barred_text' => 'মোবাইল ফোন, স্মার্টওয়াচ, ক্যালকুলেটর বা যেকোনো ইলেকট্রনিক ডিভাইস, বই, খাতা ও নোট।',
+                'carry_text'  => '',
+                'barred_text' => '',
                 'is_custom'   => false,
             ];
         }
 
         $rules = implode("\n", [
-            '১. পরীক্ষার্থীকে পরীক্ষা শুরুর কমপক্ষে ৩০ (ত্রিশ) মিনিট পূর্বে পরীক্ষার কেন্দ্রে/কক্ষে উপস্থিত হয়ে নির্ধারিত আসনে বসতে হবে। পরীক্ষা শুরুর পর কোনো পরীক্ষার্থীকে কক্ষে প্রবেশ করতে দেওয়া হবে না।',
-            '২. পরীক্ষার হলে মূল প্রবেশপত্র (Admit Card) এবং প্রযোজ্য ক্ষেত্রে রেজিস্ট্রেশন/আইডি কার্ড অবশ্যই সঙ্গে আনতে হবে। প্রবেশপত্র ব্যতীত কোনো পরীক্ষার্থীকে পরীক্ষায় অংশগ্রহণ করতে দেওয়া হবে না।',
-            '৩. উত্তরপত্র ও ওএমআর (OMR) ফরমে রোল নম্বর, রেজিস্ট্রেশন/আইডি নম্বর ও বিষয় কোড সঠিকভাবে লিখে কেবল কালো বা নীল বলপয়েন্ট কলম দিয়ে নির্ধারিত বৃত্ত ভরাট করতে হবে।',
-            '৪. উত্তরপত্র ও ওএমআর (OMR) শিটে পেন্সিল, হোয়াইট ফ্লুইড (সাদা কালি) বা কোনো প্রকার কাটাকাটি করা সম্পূর্ণ নিষিদ্ধ এবং কোনো অবস্থাতেই উত্তরপত্র বা ওএমআর শিট ভাঁজ করা যাবে না।',
-            '৫. পরীক্ষার কক্ষে নিজস্ব কালো/নীল বলপয়েন্ট কলম, পেন্সিল, জ্যামিতি বক্স এবং কেবল অনুমোদিত সাধারণ সায়েন্টিফিক ক্যালকুলেটর (নন-প্রোগ্রামেবল) ব্যবহার করা যাবে।',
-            '৬. পরীক্ষার প্রশ্নপত্র ও উত্তরপত্রের পৃষ্ঠা সংখ্যা ঠিক আছে কিনা তা লেখার পূর্বেই যাচাই করে নিতে হবে এবং উত্তরপত্রের কোনো পৃষ্ঠা ছেঁড়া বা নষ্ট করা যাবে না।',
-            '৭. পরীক্ষার কক্ষে কোনো পরীক্ষার্থী অন্যের সাথে কথা বলা, বই-খাতা, নোট বা কোনো অসদুপায় অবলম্বন করতে পারবে না।',
-            '৮. হাজিরা খাতায় স্বাক্ষর না করে এবং কক্ষ পরিদর্শকের নিকট উত্তরপত্র ও ওএমআর শিট জমা না দিয়ে কোনো পরীক্ষার্থী পরীক্ষার কক্ষ ত্যাগ করতে পারবে না।',
-            '৯. পরীক্ষা শেষ না হওয়া পর্যন্ত এবং পরিদর্শকের অনুমতি ব্যতীত পরীক্ষার কক্ষের বাইরে যাওয়া যাবে না; পরীক্ষা চলাকালীন পূর্ণ শৃঙ্খলা বজায় রাখতে হবে।',
-            '১০. পরীক্ষায় কোনো প্রকার অসদুপায় অবলম্বন করলে বা নিষিদ্ধ সামগ্রী পাওয়া গেলে সংশ্লিষ্ট বিষয়ের বা সম্পূর্ণ পরীক্ষা বাতিলসহ সরকারি ও প্রাতিষ্ঠানিক বিধি মোতাবেক শাস্তিমূলক ব্যবস্থা গ্রহণ করা হবে।',
+            '১) পরীক্ষা শুরুর কমপক্ষে ৩০ মিনিট পূর্বে নির্ধারিত পরীক্ষা কক্ষে উপস্থিত হয়ে আসন গ্রহণ করতে হবে।',
+            '২) অবশ্যই মূল প্রবেশপত্র (Admit Card) সাথে নিয়ে পরীক্ষার হলে প্রবেশ করতে হবে। প্রবেশপত্র ব্যতীত পরীক্ষায় অংশগ্রহণ করা যাবে না।',
+            '৩) পরীক্ষা চলাকালীন মোবাইল ফোন, স্মার্টওয়াচ বা যেকোনো ইলেকট্রনিক ডিভাইস ও অননুমোদিত কাগজপত্র সাথে রাখা সম্পূর্ণ নিষিদ্ধ।',
+            '৪) উত্তরপত্রে রোল নম্বর, আইডি নম্বর ও অন্যান্য তথ্য সঠিকভাবে লিখতে হবে এবং কোনো প্রকার অসদুপায় অবলম্বন করা যাবে না।',
+            '৫) পরীক্ষা সংক্রান্ত যাবতীয় নির্দেশনা ও তথ্য প্রতিষ্ঠানের নোটিশ বোর্ড এবং ওয়েবসাইটে জানিয়ে দেওয়া হবে।',
         ]);
 
         return [
-            'note_text'   => 'প্রবেশপত্রে পরীক্ষার্থীর নাম, পিতা-মাতার নাম, রোল নম্বর, শ্রেণি, শাখা, ছবি বা অন্য কোনো তথ্যে কোনো অসঙ্গতি বা ভুল পরিলক্ষিত হলে পরীক্ষা শুরুর পূর্বেই প্রতিষ্ঠান প্রধান / পরীক্ষা নিয়ন্ত্রকের নিকট আবেদন করে তা সংশোধন করে নিতে হবে। ছবি ও স্বাক্ষরবিহীন প্রবেশপত্র গ্রহণযোগ্য হবে না।',
-            'heading'     => 'পরীক্ষার্থীদের জন্য গুরুত্বপূর্ণ নির্দেশাবলী (IMPORTANT DIRECTIONS FOR CANDIDATES)',
+            'note_text'   => '',
+            'heading'     => 'নির্দেশিকা:',
             'rules_text'  => $rules,
-            'carry_text'  => 'মূল প্রবেশপত্র (Admit Card), শিক্ষার্থী আইডি/রেজিস্ট্রেশন কার্ড (প্রযোজ্য ক্ষেত্রে), কালো/নীল বলপয়েন্ট কলম, পেন্সিল, রাবার, স্কেল ও অনুমোদিত সাধারণ ক্যালকুলেটর।',
-            'barred_text' => 'মোবাইল ফোন, স্মার্টওয়াচ, ব্লুটুথ বা যেকোনো ইলেকট্রনিক ডিভাইস, প্রোগ্রামেবল ক্যালকুলেটর, ডিজিটাল ঘড়ি, বই, খাতা, নোট, কাগজের টুকরো ও কোনো প্রকার অসদুপায়ের সামগ্রী পরীক্ষার কক্ষে আনা সম্পূর্ণ নিষিদ্ধ।',
+            'carry_text'  => '',
+            'barred_text' => '',
             'is_custom'   => false,
         ];
     }
@@ -865,17 +859,29 @@ if (!function_exists('ac_layout')) {
         $page_h = ($ori === 'landscape') ? $raw_w : $raw_h;
 
         $margin = in_array($in['margin'] ?? 'normal', ['normal', 'narrow', 'wide', 'none'], true) ? (string) $in['margin'] : 'normal';
-        $margin_map = [
-            'normal' => [8, $preset === '2half' ? 14 : 8],
-            'narrow' => [4, $preset === '2half' ? 10 : 4],
-            'wide'   => [14, $preset === '2half' ? 18 : 14],
-            'none'   => [0, $preset === '2half' ? 8 : 0],
-        ];
+        if ($preset === '1full_modern') {
+            $margin_map = [
+                'normal' => [16, 16],
+                'narrow' => [10, 10],
+                'wide'   => [22, 20],
+                'none'   => [4, 4],
+            ];
+        } else {
+            $margin_map = [
+                'normal' => [8, $preset === '2half' ? 14 : 8],
+                'narrow' => [4, $preset === '2half' ? 10 : 4],
+                'wide'   => [14, $preset === '2half' ? 18 : 14],
+                'none'   => [0, $preset === '2half' ? 8 : 0],
+            ];
+        }
         [$margin_x, $margin_y] = $margin_map[$margin];
 
         $pw = max(60.0, $page_w - 2 * $margin_x);
         $ph = max(60.0, $page_h - 2 * $margin_y);
-        if ($preset === '2half') {
+        if ($preset === '1full_modern') {
+            $w = $pw;
+            $h = $ph;
+        } elseif ($preset === '2half') {
             $h = min($h, max(95.0, floor(($ph - $gap) / 2)));
         }
         $w = max(50.0, min((float) $pw, $w));
@@ -1172,49 +1178,49 @@ if (!function_exists('ac_css')) {
 .admit-full .af-pow-logo { height: 15px; width: auto; display: block; margin: 1px 0 1px auto; }
 .admit-full .af-pow-url { font-size: 8px; font-weight: 600; color: #16285B; }
 
-/* ====== ১ টা / পাতা — Template 2: Modern Routine & QR (193mm x 278mm) ====== */
+/* ====== ১ টা / পাতা — Template 2: Modern Routine & QR ====== */
 .admit-modern {
     width: 100%; height: 100%; box-sizing: border-box; background: #fff;
-    padding: 10px 14px 8px; display: flex; flex-direction: column;
+    padding: 0; display: flex; flex-direction: column;
     font-family: 'Segoe UI', 'Noto Sans Bengali', Arial, sans-serif;
     color: #111827; text-align: left; overflow: hidden; page-break-inside: avoid; break-inside: avoid;
 }
 .admit-modern .am-head {
-    display: flex; align-items: flex-start; gap: 12px; margin-bottom: 5px;
+    display: flex; align-items: center; gap: 14px; margin-bottom: 6px;
 }
 .admit-modern .am-logo {
-    width: 58px; height: 58px; flex: 0 0 58px; display: flex; align-items: center; justify-content: center; overflow: hidden;
+    width: 74px; height: 74px; flex: 0 0 74px; display: flex; align-items: center; justify-content: center; overflow: hidden;
 }
 .admit-modern .am-logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .admit-modern .am-logo span {
-    width: 48px; height: 48px; border-radius: 50%; border: 2px solid #16285B; color: #16285B;
-    font-weight: 800; font-size: 20px; display: flex; align-items: center; justify-content: center;
+    width: 62px; height: 62px; border-radius: 50%; border: 2px solid #16285B; color: #16285B;
+    font-weight: 800; font-size: 24px; display: flex; align-items: center; justify-content: center;
 }
 .admit-modern .am-inst { flex: 1; min-width: 0; }
-.admit-modern .am-inst-name { font-size: 19.5px; font-weight: 600; color: #111827; line-height: 1.18; margin-bottom: 2px; }
+.admit-modern .am-inst-name { font-size: 20px; font-weight: 600; color: #111827; line-height: 1.2; margin-bottom: 3px; }
 .admit-modern .am-inst-slogan { font-size: 11px; font-style: italic; color: #374151; line-height: 1.25; }
 .admit-modern .am-inst-addr { font-size: 10.5px; color: #374151; line-height: 1.3; }
 .admit-modern .am-inst-contact { font-size: 10.5px; color: #1f2937; line-height: 1.3; margin-top: 1px; }
-.admit-modern .am-qr-box { flex: 0 0 66px; text-align: center; }
-.admit-modern .am-qr-box .ad-qr { width: 60px; height: 60px; margin: 0 auto; padding: 2px; background: #fff; border: 1px solid #cbd5e1; }
+.admit-modern .am-qr-box { flex: 0 0 74px; text-align: center; }
+.admit-modern .am-qr-box .ad-qr { width: 68px; height: 68px; margin: 0 auto; padding: 2px; background: #fff; border: 1px solid #cbd5e1; }
 .admit-modern .am-qr-box .ad-qr img, .admit-modern .am-qr-box .ad-qr canvas { width: 100% !important; height: 100% !important; }
 .admit-modern .am-qr-cap { font-size: 8px; color: #64748b; margin-top: 2px; }
-.admit-modern .am-title { text-align: center; font-size: 15px; font-weight: 700; color: #0f172a; margin: 3px 0 6px; }
+.admit-modern .am-title { text-align: center; font-size: 17px; font-weight: 800; color: #0f172a; letter-spacing: .2px; margin: 12px 0 9px; }
 .admit-modern .am-exam-box {
-    border: 1.1px solid #374151; background: #f3f4f6; padding: 5px 10px 6px; margin-bottom: 8px;
+    border: 1.1px solid #374151; background: #f3f4f6; padding: 7px 12px 8px; margin-bottom: 12px;
 }
-.admit-modern .am-exam-banner { text-align: center; font-size: 13px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
-.admit-modern .am-meta-grid { width: 100%; border-collapse: collapse; font-size: 11px; }
-.admit-modern .am-meta-grid td { padding: 2px 4px; vertical-align: top; line-height: 1.3; }
+.admit-modern .am-exam-banner { text-align: center; font-size: 13.5px; font-weight: 700; color: #0f172a; margin-bottom: 5px; }
+.admit-modern .am-meta-grid { width: 100%; border-collapse: collapse; font-size: 11.2px; }
+.admit-modern .am-meta-grid td { padding: 2.5px 4px; vertical-align: top; line-height: 1.3; }
 .admit-modern .am-mk { font-weight: 700; color: #1f2937; white-space: nowrap; width: 12%; }
 .admit-modern .am-mv { color: #111827; font-weight: 500; width: 21%; overflow-wrap: break-word; }
 .admit-modern .am-cand-wrap {
-    display: flex; align-items: flex-start; gap: 12px; background: #f8fafc; padding: 7px 10px;
-    margin-bottom: 8px; border: 1px solid #e5e7eb;
+    display: flex; align-items: flex-start; gap: 14px; background: #f8fafc; padding: 10px 12px;
+    margin-bottom: 24px; border: 1px solid #e5e7eb;
 }
-.admit-modern .am-cand-tbl { flex: 1; width: 100%; border-collapse: collapse; font-size: 11px; }
-.admit-modern .am-cand-tbl td { padding: 2.2px 4px; vertical-align: top; line-height: 1.3; }
-.admit-modern .am-ck { font-weight: 700; color: #1f2937; width: 114px; white-space: nowrap; }
+.admit-modern .am-cand-tbl { flex: 1; width: 100%; border-collapse: collapse; font-size: 11.2px; }
+.admit-modern .am-cand-tbl td { padding: 2.8px 4px; vertical-align: top; line-height: 1.32; }
+.admit-modern .am-ck { font-weight: 700; color: #1f2937; width: 116px; white-space: nowrap; }
 .admit-modern .am-ck2 { font-weight: 700; color: #1f2937; width: 58px; white-space: nowrap; padding-left: 10px; }
 .admit-modern .am-photo {
     width: 96px; height: 112px; flex: 0 0 96px; border: 1px solid #cbd5e1; background: #fff;
@@ -1222,37 +1228,38 @@ if (!function_exists('ac_css')) {
 }
 .admit-modern .am-photo img { width: 100%; height: 100%; object-fit: cover; }
 .admit-modern .am-routine-box {
-    border: 1.1px solid #374151; background: #f8fafc; padding: 6px 10px; margin-bottom: 8px;
+    border: 1.1px solid #374151; background: #f8fafc; padding: 10px 14px; margin-bottom: 24px;
 }
-.admit-modern .am-routine-title { text-align: center; font-size: 12px; font-weight: 700; color: #0f172a; margin-bottom: 5px; }
-.admit-modern .am-routine-tbl { width: 100%; border-collapse: collapse; font-size: 10px; background: #fff; }
-.admit-modern .am-routine-tbl th, .admit-modern .am-routine-tbl td { border: 1px solid #9ca3af; padding: 3px 6px; text-align: left; }
+.admit-modern .am-routine-title { text-align: center; font-size: 12.5px; font-weight: 700; color: #0f172a; margin-bottom: 6px; }
+.admit-modern .am-routine-tbl { width: 100%; border-collapse: collapse; font-size: 10.5px; background: #fff; }
+.admit-modern .am-routine-tbl th, .admit-modern .am-routine-tbl td { border: 1px solid #9ca3af; padding: 3.5px 6px; text-align: left; }
 .admit-modern .am-routine-tbl th { background: #e5e7eb; font-weight: 700; color: #111827; }
 .admit-modern .am-routine-tbl .am-rc { text-align: center; }
-.admit-modern .am-routine-empty { min-height: 28px; }
+.admit-modern .am-routine-empty { min-height: 32px; }
 .admit-modern .am-sched-row {
-    display: flex; justify-content: space-around; align-items: center; gap: 12px; font-size: 11px; padding: 3px 0; flex-wrap: wrap;
+    display: flex; justify-content: space-around; align-items: center; gap: 12px; font-size: 11.2px; padding: 3px 0; flex-wrap: wrap;
 }
-.admit-modern .am-rules { flex: 0 1 auto; font-size: 9.8px; line-height: 1.38; color: #111827; margin-bottom: 6px; overflow: hidden; }
-.admit-modern .am-rules-head { font-weight: 700; font-size: 11px; margin-bottom: 3px; color: #0f172a; }
-.admit-modern .am-rules-note { color: #b91c1c; font-size: 9.3px; margin-bottom: 3px; text-align: justify; }
-.admit-modern .am-rule-item { margin-bottom: 2px; text-align: justify; }
+.admit-modern .am-rules { flex: 0 1 auto; font-size: 11px; line-height: 1.52; color: #111827; margin-bottom: 16px; overflow: hidden; }
+.admit-modern .am-rules-head { font-weight: 700; font-size: 12px; margin-bottom: 5px; color: #0f172a; }
+.admit-modern .am-rules-note { color: #b91c1c; font-size: 9.8px; margin-bottom: 4px; text-align: left; }
+.admit-modern .am-rule-item { margin-bottom: 3.5px; text-align: left; }
 .admit-modern .am-rules-ol { margin: 0; padding-left: 18px; }
-.admit-modern .am-rules-ol li { margin-bottom: 2px; text-align: justify; }
-.admit-modern .am-rules-strip { font-size: 9.3px; margin-top: 3px; text-align: justify; }
+.admit-modern .am-rules-ol li { margin-bottom: 3.5px; text-align: left; }
+.admit-modern .am-rules-strip { font-size: 9.8px; margin-top: 4px; text-align: left; }
 .admit-modern .am-sig-row {
-    display: flex; justify-content: flex-end; margin-top: 4px; margin-bottom: 6px; padding-right: 12px;
+    display: flex; justify-content: flex-end; margin-top: auto; padding-top: 28px; margin-bottom: 36px; padding-right: 10px;
 }
 .admit-modern .am-sig-box { width: 155px; text-align: center; }
-.admit-modern .am-sig-img { height: 32px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: 2px; }
-.admit-modern .am-sig-img img { max-height: 30px; max-width: 145px; object-fit: contain; }
+.admit-modern .am-sig-img { height: 34px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: 2px; }
+.admit-modern .am-sig-img img { max-height: 32px; max-width: 145px; object-fit: contain; }
 .admit-modern .am-sig-line { border-top: 1.2px solid #111827; padding-top: 2px; font-size: 11px; font-weight: 700; color: #0f172a; }
 .admit-modern .am-sig-name { font-size: 10.5px; font-weight: 700; color: #0f172a; line-height: 1.15; }
 .admit-modern .am-sig-role { font-size: 10px; font-weight: 600; color: #374151; line-height: 1.15; }
 .admit-modern .am-foot {
-    margin-top: auto; border-top: 1px solid #cbd5e1; padding-top: 5px;
+    margin-top: auto; border-top: 1px solid #cbd5e1; padding-top: 6px;
     display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; font-size: 9.5px; color: #374151;
 }
+.admit-modern .am-sig-row + .am-foot { margin-top: 0; }
 .admit-modern .am-foot-left { text-align: left; line-height: 1.35; }
 .admit-modern .am-foot-right { text-align: right; line-height: 1.15; }
 .admit-modern .am-pow-lbl { font-size: 8.5px; font-style: italic; color: #475569; }
@@ -1286,7 +1293,9 @@ CSS;
         $mx = (float) ($L['mx'] ?? 8);
         $paper = in_array($L['paper'] ?? 'A4', ['A4', 'Letter', 'Legal'], true) ? (string) $L['paper'] : 'A4';
         $page = '@page { size: ' . $paper . ' ' . $L['ori'] . '; margin: 0; }';
-        $page_pad = ($L['preset'] === '2half') ? 'padding: ' . $my . 'mm ' . $mx . 'mm;' : '';
+        $page_pad = in_array($L['preset'], ['2half', '1full_modern'], true)
+            ? 'padding: ' . $my . 'mm ' . $mx . 'mm; width: fit-content; background: #fff;'
+            : '';
         $dyn  = '.ac-page { grid-template-columns: repeat(' . (int) $L['cols'] . ', ' . $L['w'] . 'mm); gap: ' . (float) $L['gap'] . 'mm;' . $page_pad . ' }'
               . '.ac-cell { width: ' . $L['w'] . 'mm; height: ' . $L['h'] . 'mm; }'
               . '.admitcard2 { width: ' . $L['dw'] . 'px; height: ' . round($L['dh'], 2) . 'px; transform: scale(' . round($L['k'], 5) . '); }';
