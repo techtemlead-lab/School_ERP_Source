@@ -176,6 +176,7 @@ $dac_layout_opts_cfg = [
 
     $sql = "SELECT students.*,
                    academic_classes.class_name,
+                   academic_mediums.medium_name AS class_medium_name,
                    academic_sections.section_name,
                    academic_shifts.shift_name,
                    academic_groups.group_name,
@@ -190,6 +191,7 @@ $dac_layout_opts_cfg = [
                    branches.signature_path AS student_branch_sig
             FROM students
             LEFT JOIN academic_classes ON academic_classes.id = students.class_id
+            LEFT JOIN academic_mediums ON academic_mediums.id = academic_classes.medium_id
             LEFT JOIN academic_sections ON academic_sections.id = students.section_id
             LEFT JOIN academic_shifts ON academic_shifts.id = students.shift_id
             LEFT JOIN academic_groups ON academic_groups.id = students.group_id
@@ -200,6 +202,18 @@ $dac_layout_opts_cfg = [
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $students = $stmt->fetchAll();
+
+    $school_version = 'All';
+    try {
+        $med_list = $pdo->query("SELECT DISTINCT medium_name FROM academic_mediums WHERE status = 'Active' AND medium_name IS NOT NULL AND medium_name != '' ORDER BY id ASC")->fetchAll(PDO::FETCH_COLUMN);
+        if (count($med_list) === 1) {
+            $school_version = trim((string) $med_list[0]);
+        } elseif (count($med_list) > 1) {
+            $school_version = implode(' & ', array_map('trim', $med_list));
+        }
+    } catch (Throwable $e) {
+        $school_version = 'All';
+    }
 
     $term_name = '';
     if (!empty($g['term_id'])) {
@@ -226,25 +240,47 @@ $dac_layout_opts_cfg = [
         // exam_result_settings না থাকলে ডিফল্ট লেবেল থাকবে
     }
 
+    $exam_routine_rows = [];
     $exam_date_str = '';
     $exam_time_str = '';
     try {
-        $er_where = ['class_id = ?', 'term_id = ?', "status = 'Active'", 'exam_date IS NOT NULL'];
+        $er_where = ['er.class_id = ?', 'er.term_id = ?', "er.status = 'Active'"];
         $er_params = [(int) $g['class_id'], (int) $g['term_id']];
-        if (!empty($g['shift_id']))   { $er_where[] = 'shift_id = ?';   $er_params[] = (int) $g['shift_id']; }
-        if (!empty($g['section_id'])) { $er_where[] = 'section_id = ?'; $er_params[] = (int) $g['section_id']; }
-        if (!empty($g['part_id']))    { $er_where[] = 'part_id = ?';    $er_params[] = (int) $g['part_id']; }
-        $er_stmt = $pdo->prepare("SELECT exam_date, start_time, end_time FROM exam_routines WHERE " . implode(' AND ', $er_where) . " ORDER BY exam_date ASC, start_time ASC LIMIT 1");
+        if (!empty($g['shift_id']))   { $er_where[] = 'er.shift_id = ?';   $er_params[] = (int) $g['shift_id']; }
+        if (!empty($g['section_id'])) { $er_where[] = 'er.section_id = ?'; $er_params[] = (int) $g['section_id']; }
+        if (!empty($g['part_id']))    { $er_where[] = 'er.part_id = ?';    $er_params[] = (int) $g['part_id']; }
+        $er_stmt = $pdo->prepare(
+            "SELECT er.exam_date, er.start_time, er.end_time,
+                    s.subject_name, s.full_marks
+             FROM exam_routines er
+             LEFT JOIN academic_subjects s ON s.id = er.subject_id
+             WHERE " . implode(' AND ', $er_where) . "
+             ORDER BY (er.exam_date IS NULL) ASC, er.exam_date ASC, er.start_time ASC"
+        );
         $er_stmt->execute($er_params);
-        if ($er_row = $er_stmt->fetch(PDO::FETCH_ASSOC)) {
-            $exam_date_str = ac_fmt_date($er_row['exam_date'] ?? '', '');
+        foreach ($er_stmt->fetchAll(PDO::FETCH_ASSOC) as $er_row) {
             $st_t = !empty($er_row['start_time']) ? strtotime($er_row['start_time']) : false;
             $en_t = !empty($er_row['end_time']) ? strtotime($er_row['end_time']) : false;
+            $t_str = '';
             if ($st_t !== false && $en_t !== false) {
-                $exam_time_str = date('g:i A', $st_t) . ' - ' . date('g:i A', $en_t);
+                $t_str = date('g:i A', $st_t) . ' - ' . date('g:i A', $en_t);
             } elseif ($st_t !== false) {
-                $exam_time_str = date('g:i A', $st_t);
+                $t_str = date('g:i A', $st_t);
             }
+            $d_raw = trim((string) ($er_row['exam_date'] ?? ''));
+            $d_disp = ($d_raw !== '' && $d_raw !== '0000-00-00' && strtotime($d_raw) !== false)
+                ? date('d M Y (D)', strtotime($d_raw))
+                : '—';
+            if ($exam_date_str === '' && $d_raw !== '') {
+                $exam_date_str = ac_fmt_date($d_raw, '');
+                $exam_time_str = $t_str;
+            }
+            $exam_routine_rows[] = [
+                'date'       => $d_disp,
+                'time'       => $t_str ?: '—',
+                'subject'    => trim((string) ($er_row['subject_name'] ?? '')) ?: '—',
+                'full_marks' => isset($er_row['full_marks']) && $er_row['full_marks'] !== null ? (string) $er_row['full_marks'] : '',
+            ];
         }
     } catch (Throwable $e) {
         // exam_routines না থাকলে নিরাপদে স্কিপ করবে
@@ -336,12 +372,15 @@ $dac_layout_opts_cfg = [
                     'father_name'       => $st['father_name'] ?? '',
                     'mother_name'       => $st['mother_name'] ?? '',
                     'dob'               => $st['dob'] ?? '',
+                    'birth_reg_no'      => $st['birth_reg_no'] ?? '',
+                    'student_mobile'    => trim((string) (($st['guardian_phone'] ?? '') ?: ($st['mobile'] ?? ''))),
                     'gender'            => $st['gender'] ?? '',
                     'religion'          => $st['religion'] ?? '',
                     'blood_group'       => $st['blood_group'] ?? '',
                     'present_address'   => $st['present_address'] ?? '',
                     'permanent_address' => $st['permanent_address'] ?? '',
                     'class'             => $st['class_name'] ?? '',
+                    'version'           => trim((string) ($st['class_medium_name'] ?? '')) ?: $school_version,
                     'group'             => $st['group_name'] ?? '',
                     'shift'             => $st['shift_name'] ?? '',
                     'section'           => $st['section_name'] ?? '',
@@ -350,6 +389,7 @@ $dac_layout_opts_cfg = [
                     'photo'             => $st['photo_path'] ?? '',
                     'qr_id'             => 'acqr-' . (int) $i,
                     'layout'            => $dac_layout,
+                    'routine_rows'      => $exam_routine_rows,
                     'instructions'      => $dac_instructions,
                     'settings'          => $ac_settings,
                 ]); ?>
@@ -357,7 +397,13 @@ $dac_layout_opts_cfg = [
         </div>
         <?php endforeach; ?>
         </div>
-        <?php if (!in_array($dac_layout['preset'], ['2half', '1full'], true) && !empty($ac_settings['show_qr'])) { echo sc_qr_script(); } ?>
+        <?php
+        $needs_qr = !empty($ac_settings['show_qr']) && (
+            !in_array($dac_layout['preset'], ['2half', '1full'], true)
+            || ($dac_layout['preset'] === '1full' && ($ac_settings['full_template'] ?? 'classic') === 'modern')
+        );
+        if ($needs_qr) { echo sc_qr_script(); }
+        ?>
     <?php endif; ?>
 
 <?php else: ?>
