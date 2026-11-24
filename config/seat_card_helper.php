@@ -158,14 +158,35 @@ if (!function_exists('ac_asset_url')) {
 }
 
 if (!function_exists('ac_fmt_date')) {
-    function ac_fmt_date(?string $raw, string $fallback = '—'): string
+    function ac_fmt_date(?string $raw, string $fallback = '—', string $fmt = 'd/m/Y'): string
     {
         $v = trim((string) ($raw ?? ''));
         if ($v === '' || $v === '0000-00-00') {
             return $fallback;
         }
         $ts = strtotime($v);
-        return $ts !== false ? date('d/m/Y', $ts) : $v;
+        return $ts !== false ? date($fmt, $ts) : $v;
+    }
+}
+
+if (!function_exists('ac_calc_age')) {
+    function ac_calc_age(?string $dob): string
+    {
+        $v = trim((string) ($dob ?? ''));
+        if ($v === '' || $v === '0000-00-00') {
+            return '—';
+        }
+        try {
+            $b = new DateTime($v);
+            $now = new DateTime('today');
+            if ($b > $now) {
+                return '—';
+            }
+            $diff = $b->diff($now);
+            return $diff->y . ' years ' . $diff->m . ' months';
+        } catch (Throwable $e) {
+            return '—';
+        }
     }
 }
 
@@ -355,6 +376,20 @@ if (!function_exists('ac_default_settings')) {
             'show_exam_schedule'    => 1,
             'show_instructions'     => 1,
 
+            'show_version'           => 1,
+            'custom_version'         => '',
+            'show_category'          => 1,
+            'custom_category'        => 'General',
+            'show_age'               => 1,
+            'show_birth_reg'         => 1,
+            'show_student_mobile'    => 1,
+            'show_permanent_address' => 1,
+            'show_routine'           => 1,
+            'routine_mode'           => 'auto_db',
+            'custom_routine_rows'    => [],
+            'schedule_exam_date'     => '',
+            'schedule_result_date'   => '',
+
             'is_custom'             => false,
             'scope_branch_id'       => 0,
         ];
@@ -435,6 +470,7 @@ if (!function_exists('ac_save_settings')) {
         $dw = max(50.0, min(287.0, (float) ($in['default_w'] ?? 94.0)));
         $dh = max(40.0, min(287.0, (float) ($in['default_h'] ?? 135.0)));
         $ft = preg_replace('/[^a-z0-9_-]/i', '', (string) ($in['full_template'] ?? 'classic')) ?: 'classic';
+        if (!in_array($ft, ['classic', 'modern'], true)) { $ft = 'classic'; }
 
         $logo = trim((string) ($in['logo_path'] ?? ''));
         $sig_p = trim((string) ($in['sig_principal_path'] ?? ''));
@@ -445,7 +481,24 @@ if (!function_exists('ac_save_settings')) {
             if (in_array($k, ['default_layout', 'default_ori', 'default_w', 'default_h', 'full_template', 'logo_path', 'sig_principal_path', 'sig_secondary_path', 'is_custom', 'scope_branch_id'], true)) {
                 continue;
             }
-            if (is_int($v)) {
+            if ($k === 'routine_mode') {
+                $rm = trim((string) ($in[$k] ?? 'auto_db'));
+                $payload[$k] = in_array($rm, ['auto_db', 'custom_table', 'admission_schedule'], true) ? $rm : 'auto_db';
+            } elseif (is_array($v)) {
+                $rows_in = is_array($in[$k] ?? null) ? $in[$k] : [];
+                $clean_rows = [];
+                foreach ($rows_in as $rr) {
+                    if (!is_array($rr)) { continue; }
+                    $r_date  = mb_substr(trim((string) ($rr['date'] ?? '')), 0, 100);
+                    $r_time  = mb_substr(trim((string) ($rr['time'] ?? '')), 0, 100);
+                    $r_subj  = mb_substr(trim((string) ($rr['subject'] ?? '')), 0, 120);
+                    $r_marks = mb_substr(trim((string) ($rr['full_marks'] ?? '')), 0, 40);
+                    if ($r_date === '' && $r_time === '' && $r_subj === '' && $r_marks === '') { continue; }
+                    $clean_rows[] = ['date' => $r_date, 'time' => $r_time, 'subject' => $r_subj, 'full_marks' => $r_marks];
+                    if (count($clean_rows) >= 20) { break; }
+                }
+                $payload[$k] = $clean_rows;
+            } elseif (is_int($v)) {
                 $payload[$k] = !empty($in[$k]) ? 1 : 0;
             } else {
                 $payload[$k] = mb_substr(trim((string) ($in[$k] ?? $v)), 0, 500);
@@ -862,6 +915,92 @@ if (!function_exists('ac_css')) {
 .admit-full .af-rules-ol li { margin-bottom: 2px; text-align: justify; }
 .admit-full .af-strip { font-size: 9px; line-height: 1.32; text-align: justify; }
 .admit-full .af-strip-lbl { color: #b91c1c; font-weight: 800; }
+
+/* ====== ১ টা / পাতা — Template 2: Modern Routine & QR (193mm x 278mm) ====== */
+.admit-modern {
+    width: 100%; height: 100%; box-sizing: border-box; background: #fff;
+    padding: 10px 14px 8px; display: flex; flex-direction: column;
+    font-family: 'Segoe UI', 'Noto Sans Bengali', Arial, sans-serif;
+    color: #111827; text-align: left; overflow: hidden; page-break-inside: avoid; break-inside: avoid;
+}
+.admit-modern .am-head {
+    display: flex; align-items: flex-start; gap: 12px; margin-bottom: 5px;
+}
+.admit-modern .am-logo {
+    width: 58px; height: 58px; flex: 0 0 58px; display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.admit-modern .am-logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.admit-modern .am-logo span {
+    width: 48px; height: 48px; border-radius: 50%; border: 2px solid #16285B; color: #16285B;
+    font-weight: 800; font-size: 20px; display: flex; align-items: center; justify-content: center;
+}
+.admit-modern .am-inst { flex: 1; min-width: 0; }
+.admit-modern .am-inst-name { font-size: 19.5px; font-weight: 600; color: #111827; line-height: 1.18; margin-bottom: 2px; }
+.admit-modern .am-inst-slogan { font-size: 11px; font-style: italic; color: #374151; line-height: 1.25; }
+.admit-modern .am-inst-addr { font-size: 10.5px; color: #374151; line-height: 1.3; }
+.admit-modern .am-inst-contact { font-size: 10.5px; color: #1f2937; line-height: 1.3; margin-top: 1px; }
+.admit-modern .am-qr-box { flex: 0 0 66px; text-align: center; }
+.admit-modern .am-qr-box .ad-qr { width: 60px; height: 60px; margin: 0 auto; padding: 2px; background: #fff; border: 1px solid #cbd5e1; }
+.admit-modern .am-qr-box .ad-qr img, .admit-modern .am-qr-box .ad-qr canvas { width: 100% !important; height: 100% !important; }
+.admit-modern .am-qr-cap { font-size: 8px; color: #64748b; margin-top: 2px; }
+.admit-modern .am-title { text-align: center; font-size: 15px; font-weight: 700; color: #0f172a; margin: 3px 0 6px; }
+.admit-modern .am-exam-box {
+    border: 1.1px solid #374151; background: #f3f4f6; padding: 5px 10px 6px; margin-bottom: 8px;
+}
+.admit-modern .am-exam-banner { text-align: center; font-size: 13px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.admit-modern .am-meta-grid { width: 100%; border-collapse: collapse; font-size: 11px; }
+.admit-modern .am-meta-grid td { padding: 2px 4px; vertical-align: top; line-height: 1.3; }
+.admit-modern .am-mk { font-weight: 700; color: #1f2937; white-space: nowrap; width: 12%; }
+.admit-modern .am-mv { color: #111827; font-weight: 500; width: 21%; overflow-wrap: break-word; }
+.admit-modern .am-cand-wrap {
+    display: flex; align-items: flex-start; gap: 12px; background: #f8fafc; padding: 7px 10px;
+    margin-bottom: 8px; border: 1px solid #e5e7eb;
+}
+.admit-modern .am-cand-tbl { flex: 1; width: 100%; border-collapse: collapse; font-size: 11px; }
+.admit-modern .am-cand-tbl td { padding: 2.2px 4px; vertical-align: top; line-height: 1.3; }
+.admit-modern .am-ck { font-weight: 700; color: #1f2937; width: 114px; white-space: nowrap; }
+.admit-modern .am-ck2 { font-weight: 700; color: #1f2937; width: 58px; white-space: nowrap; padding-left: 10px; }
+.admit-modern .am-photo {
+    width: 96px; height: 112px; flex: 0 0 96px; border: 1px solid #cbd5e1; background: #fff;
+    overflow: hidden; display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 11px;
+}
+.admit-modern .am-photo img { width: 100%; height: 100%; object-fit: cover; }
+.admit-modern .am-routine-box {
+    border: 1.1px solid #374151; background: #f8fafc; padding: 6px 10px; margin-bottom: 8px;
+}
+.admit-modern .am-routine-title { text-align: center; font-size: 12px; font-weight: 700; color: #0f172a; margin-bottom: 5px; }
+.admit-modern .am-routine-tbl { width: 100%; border-collapse: collapse; font-size: 10px; background: #fff; }
+.admit-modern .am-routine-tbl th, .admit-modern .am-routine-tbl td { border: 1px solid #9ca3af; padding: 3px 6px; text-align: left; }
+.admit-modern .am-routine-tbl th { background: #e5e7eb; font-weight: 700; color: #111827; }
+.admit-modern .am-routine-tbl .am-rc { text-align: center; }
+.admit-modern .am-sched-row {
+    display: flex; justify-content: space-around; align-items: center; gap: 12px; font-size: 11px; padding: 3px 0; flex-wrap: wrap;
+}
+.admit-modern .am-rules { flex: 0 1 auto; font-size: 9.8px; line-height: 1.38; color: #111827; margin-bottom: 6px; overflow: hidden; }
+.admit-modern .am-rules-head { font-weight: 700; font-size: 11px; margin-bottom: 3px; color: #0f172a; }
+.admit-modern .am-rules-note { color: #b91c1c; font-size: 9.3px; margin-bottom: 3px; text-align: justify; }
+.admit-modern .am-rule-item { margin-bottom: 2px; text-align: justify; }
+.admit-modern .am-rules-ol { margin: 0; padding-left: 18px; }
+.admit-modern .am-rules-ol li { margin-bottom: 2px; text-align: justify; }
+.admit-modern .am-rules-strip { font-size: 9.3px; margin-top: 3px; text-align: justify; }
+.admit-modern .am-sig-row {
+    display: flex; justify-content: flex-end; margin-top: 4px; margin-bottom: 6px; padding-right: 12px;
+}
+.admit-modern .am-sig-box { width: 155px; text-align: center; }
+.admit-modern .am-sig-img { height: 32px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: 2px; }
+.admit-modern .am-sig-img img { max-height: 30px; max-width: 145px; object-fit: contain; }
+.admit-modern .am-sig-line { border-top: 1.2px solid #111827; padding-top: 2px; font-size: 11px; font-weight: 700; color: #0f172a; }
+.admit-modern .am-sig-name { font-size: 10.5px; font-weight: 700; color: #0f172a; line-height: 1.15; }
+.admit-modern .am-sig-role { font-size: 10px; font-weight: 600; color: #374151; line-height: 1.15; }
+.admit-modern .am-foot {
+    margin-top: auto; border-top: 1px solid #cbd5e1; padding-top: 5px;
+    display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; font-size: 9.5px; color: #374151;
+}
+.admit-modern .am-foot-left { text-align: left; line-height: 1.35; }
+.admit-modern .am-foot-right { text-align: right; line-height: 1.15; }
+.admit-modern .am-pow-lbl { font-size: 8.5px; font-style: italic; color: #475569; }
+.admit-modern .am-pow-logo { height: 16px; width: auto; display: block; margin: 2px 0 1px auto; }
+.admit-modern .am-pow-url { font-size: 8.5px; font-weight: 600; color: #16285B; }
 </style>
 CSS;
         $my = (int) ($L['my'] ?? 8);
@@ -1006,10 +1145,326 @@ if (!function_exists('ac_card_half')) {
     }
 }
 
+if (!function_exists('ac_card_full_modern')) {
+    function ac_card_full_modern(array $d): string
+    {
+        $S = ac_cfg($d);
+        $H = ac_resolve_header($d, $S);
+        $photo = !empty($S['show_photo']) ? ac_asset_url($d['photo'] ?? '') : '';
+        $inst = $H['inst'];
+        $term = trim((string) ($d['term'] ?? ''));
+        $part = trim((string) ($d['part'] ?? ''));
+        $session = trim((string) ($d['session'] ?? '')) ?: trim((string) ($d['year'] ?? ''));
+
+        $show_head_logo = !empty($S['show_logo']);
+        $show_head_name = !empty($S['show_institute_name']) && $inst !== '';
+        $show_head_slogan = !empty($S['show_slogan']) && $H['slogan'] !== '';
+        $show_head_addr = !empty($S['show_address']) && $H['address'] !== '';
+        $show_qr = !empty($S['show_qr']);
+        $qr_id = trim((string) ($d['qr_id'] ?? '')) ?: 'acqr-m';
+        $qr_val = trim((string) ($d['student_id'] ?? '')) ?: trim((string) ($d['roll'] ?? ''));
+
+        $contact_spans = [];
+        if (!empty($S['show_phone']) && $H['phone'] !== '') {
+            $contact_spans[] = 'Phone <strong>' . sc_e($H['phone']) . '</strong>';
+        }
+        if (!empty($S['show_website']) && $H['website'] !== '') {
+            $contact_spans[] = 'Website <strong>' . sc_e($H['website']) . '</strong>';
+        }
+        if (!empty($S['show_email']) && $H['email'] !== '') {
+            $contact_spans[] = 'Email <strong>' . sc_e($H['email']) . '</strong>';
+        }
+
+        $exam_banner_parts = [];
+        if ($term !== '') { $exam_banner_parts[] = $term; }
+        if ($part !== '') { $exam_banner_parts[] = '(' . $part . ')'; }
+        $exam_banner = implode(' ', $exam_banner_parts);
+        if ($session !== '') {
+            $exam_banner .= ($exam_banner !== '' ? ' - ' : '') . $session;
+        }
+
+        $ver_custom = trim((string) ($S['custom_version'] ?? ''));
+        $version_val = $ver_custom !== '' ? $ver_custom : (trim((string) ($d['version'] ?? '')) ?: 'All');
+        $cat_val = trim((string) ($S['custom_category'] ?? '')) ?: 'General';
+
+        $meta_cells = [];
+        if (!empty($S['show_class']))    { $meta_cells[] = ['Class',    trim((string) ($d['class'] ?? '')) ?: '—']; }
+        if (!empty($S['show_version']))  { $meta_cells[] = ['Version',  $version_val]; }
+        if (!empty($S['show_category'])) { $meta_cells[] = ['Category', $cat_val]; }
+        if (!empty($S['show_session']))  { $meta_cells[] = ['Session',  $session ?: '—']; }
+        if (!empty($S['show_shift']))    { $meta_cells[] = ['Shift',    trim((string) ($d['shift'] ?? '')) ?: '—']; }
+        if (!empty($S['show_group']))    { $meta_cells[] = ['Group',    trim((string) ($d['group'] ?? '')) ?: '—']; }
+        $meta_rows = array_chunk($meta_cells, 3);
+
+        $dob_fmt = ac_fmt_date($d['dob'] ?? '', '—', 'F j, Y');
+        $age_str = ac_calc_age($d['dob'] ?? '');
+        $breg_val = trim((string) ($d['birth_reg_no'] ?? '')) ?: '—';
+        $gender_val = trim((string) ($d['gender'] ?? '')) ?: '—';
+        $mob_val = trim((string) ($d['student_mobile'] ?? '')) ?: '—';
+        $pres_addr = trim((string) ($d['present_address'] ?? '')) ?: '—';
+        $perm_addr = trim((string) ($d['permanent_address'] ?? '')) ?: '—';
+
+        $rmode = (string) ($S['routine_mode'] ?? 'auto_db');
+        $db_rows = is_array($d['routine_rows'] ?? null) ? $d['routine_rows'] : [];
+        $cust_rows = is_array($S['custom_routine_rows'] ?? null) ? $S['custom_routine_rows'] : [];
+        $sched_exam = trim((string) ($S['schedule_exam_date'] ?? ''));
+        $sched_res = trim((string) ($S['schedule_result_date'] ?? ''));
+
+        $routine_rows_to_show = [];
+        $show_sched_box = false;
+        if (!empty($S['show_routine'])) {
+            if ($rmode === 'admission_schedule') {
+                if ($sched_exam === '' && !empty($db_rows[0])) {
+                    $sched_exam = trim((string) (($db_rows[0]['date'] ?? '') . ' ' . ($db_rows[0]['time'] ?? '')));
+                }
+                if ($sched_exam !== '' || $sched_res !== '') {
+                    $show_sched_box = true;
+                }
+            } else {
+                $routine_rows_to_show = ($rmode === 'custom_table') ? $cust_rows : ($db_rows ?: $cust_rows);
+                if (!$routine_rows_to_show && ($sched_exam !== '' || $sched_res !== '')) {
+                    $show_sched_box = true;
+                }
+            }
+        }
+
+        $instr = is_array($d['instructions'] ?? null) ? $d['instructions'] : ac_default_instructions();
+        $note_text = trim((string) ($instr['note_text'] ?? ''));
+        $heading_text = trim((string) ($instr['heading'] ?? ''));
+        $rules_raw = trim((string) ($instr['rules_text'] ?? ''));
+        $carry_text = trim((string) ($instr['carry_text'] ?? ''));
+        $barred_text = trim((string) ($instr['barred_text'] ?? ''));
+        $rules_lines = $rules_raw !== ''
+            ? array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $rules_raw) ?: []), static fn($l) => $l !== ''))
+            : [];
+        $has_prefix = false;
+        foreach ($rules_lines as $rl) {
+            if (preg_match('/^(?:[\d০-৯]+[\.\)\-:]|[•\-\*])\s*/u', $rl)) {
+                $has_prefix = true;
+                break;
+            }
+        }
+
+        $sig_principal_lbl = $H['sig_p_label'] ?: 'Principal';
+        $print_date = date('d-m-Y');
+
+        ob_start(); ?>
+        <div class="ac-cell ac-cell-full"><div class="admit-modern">
+            <div class="am-head">
+                <?php if ($show_head_logo): ?>
+                <div class="am-logo">
+                    <?php if ($H['logo'] !== ''): ?><img src="<?php echo sc_e($H['logo']); ?>" alt="Logo">
+                    <?php else: ?><span><?php echo sc_e(mb_substr($inst !== '' ? $inst : 'A', 0, 1)); ?></span><?php endif; ?>
+                </div>
+                <?php endif; ?>
+                <div class="am-inst">
+                    <?php if ($show_head_name): ?><div class="am-inst-name"><?php echo sc_e($inst); ?></div><?php endif; ?>
+                    <?php if ($show_head_slogan): ?><div class="am-inst-slogan"><?php echo sc_e($H['slogan']); ?></div><?php endif; ?>
+                    <?php if ($show_head_addr): ?><div class="am-inst-addr"><?php echo sc_e($H['address']); ?></div><?php endif; ?>
+                    <?php if ($contact_spans): ?><div class="am-inst-contact"><?php echo implode(', ', $contact_spans); ?></div><?php endif; ?>
+                </div>
+                <?php if ($show_qr && $qr_val !== ''): ?>
+                <div class="am-qr-box">
+                    <div class="ad-qr" id="<?php echo sc_e($qr_id); ?>" data-qr="<?php echo sc_e($qr_val); ?>"></div>
+                    <div class="am-qr-cap">Scan to verify</div>
+                </div>
+                <?php endif; ?>
+            </div>
+
+            <div class="am-title"><?php echo sc_e($H['card_title']); ?></div>
+
+            <div class="am-exam-box">
+                <?php if ($exam_banner !== ''): ?><div class="am-exam-banner"><?php echo sc_e($exam_banner); ?></div><?php endif; ?>
+                <table class="am-meta-grid">
+                    <?php if (!empty($S['show_roll']) || !empty($S['show_student_id'])): ?>
+                    <tr>
+                        <?php if (!empty($S['show_roll'])): ?>
+                            <td class="am-mk">Roll</td>
+                            <td class="am-mv"><strong><?php echo sc_e(trim((string) ($d['roll'] ?? '')) ?: '—'); ?></strong></td>
+                        <?php endif; ?>
+                        <?php if (!empty($S['show_student_id'])): ?>
+                            <td class="am-mk">Student ID</td>
+                            <td class="am-mv"<?php echo empty($S['show_roll']) ? ' colspan="5"' : ' colspan="3"'; ?>><?php echo sc_e(trim((string) ($d['student_id'] ?? '')) ?: '—'); ?></td>
+                        <?php elseif (!empty($S['show_roll'])): ?>
+                            <td colspan="4"></td>
+                        <?php endif; ?>
+                    </tr>
+                    <?php endif; ?>
+                    <?php foreach ($meta_rows as $mr): ?>
+                    <tr>
+                        <?php foreach ($mr as [$mk, $mv]): ?>
+                            <td class="am-mk"><?php echo sc_e($mk); ?></td>
+                            <td class="am-mv"><?php echo sc_e($mv); ?></td>
+                        <?php endforeach; ?>
+                        <?php for ($pad = count($mr); $pad < 3; $pad++): ?>
+                            <td class="am-mk"></td><td class="am-mv"></td>
+                        <?php endfor; ?>
+                    </tr>
+                    <?php endforeach; ?>
+                </table>
+            </div>
+
+            <div class="am-cand-wrap">
+                <table class="am-cand-tbl">
+                    <tr>
+                        <td class="am-ck">Name</td>
+                        <td colspan="3"><strong><?php echo sc_e(trim((string) ($d['name'] ?? '')) ?: '—'); ?></strong></td>
+                    </tr>
+                    <?php if (!empty($S['show_father_name'])): ?>
+                    <tr>
+                        <td class="am-ck">Father's Name</td>
+                        <td colspan="3"><?php echo sc_e(trim((string) ($d['father_name'] ?? '')) ?: '—'); ?></td>
+                    </tr>
+                    <?php endif; ?>
+                    <?php if (!empty($S['show_mother_name'])): ?>
+                    <tr>
+                        <td class="am-ck">Mother's Name</td>
+                        <td colspan="3"><?php echo sc_e(trim((string) ($d['mother_name'] ?? '')) ?: '—'); ?></td>
+                    </tr>
+                    <?php endif; ?>
+                    <?php if (!empty($S['show_dob']) || !empty($S['show_age'])): ?>
+                    <tr>
+                        <?php if (!empty($S['show_dob'])): ?>
+                            <td class="am-ck">Date of Birth</td>
+                            <td<?php echo empty($S['show_age']) ? ' colspan="3"' : ''; ?>><?php echo sc_e($dob_fmt); ?></td>
+                        <?php endif; ?>
+                        <?php if (!empty($S['show_age'])): ?>
+                            <td class="<?php echo !empty($S['show_dob']) ? 'am-ck2' : 'am-ck'; ?>">Age</td>
+                            <td<?php echo empty($S['show_dob']) ? ' colspan="3"' : ''; ?>><?php echo sc_e($age_str); ?></td>
+                        <?php endif; ?>
+                    </tr>
+                    <?php endif; ?>
+                    <?php if (!empty($S['show_birth_reg']) || !empty($S['show_gender'])): ?>
+                    <tr>
+                        <?php if (!empty($S['show_birth_reg'])): ?>
+                            <td class="am-ck">Birth Reg. No.</td>
+                            <td<?php echo empty($S['show_gender']) ? ' colspan="3"' : ''; ?>><?php echo sc_e($breg_val); ?></td>
+                        <?php endif; ?>
+                        <?php if (!empty($S['show_gender'])): ?>
+                            <td class="<?php echo !empty($S['show_birth_reg']) ? 'am-ck2' : 'am-ck'; ?>">Gender</td>
+                            <td<?php echo empty($S['show_birth_reg']) ? ' colspan="3"' : ''; ?>><?php echo sc_e($gender_val); ?></td>
+                        <?php endif; ?>
+                    </tr>
+                    <?php endif; ?>
+                    <?php if (!empty($S['show_student_mobile'])): ?>
+                    <tr>
+                        <td class="am-ck">Mobile</td>
+                        <td colspan="3"><?php echo sc_e($mob_val); ?></td>
+                    </tr>
+                    <?php endif; ?>
+                    <?php if (!empty($S['show_student_address'])): ?>
+                    <tr>
+                        <td class="am-ck">Present Address</td>
+                        <td colspan="3"><?php echo sc_e($pres_addr); ?></td>
+                    </tr>
+                    <?php endif; ?>
+                    <?php if (!empty($S['show_permanent_address'])): ?>
+                    <tr>
+                        <td class="am-ck">Permanent Address</td>
+                        <td colspan="3"><?php echo sc_e($perm_addr); ?></td>
+                    </tr>
+                    <?php endif; ?>
+                </table>
+                <?php if (!empty($S['show_photo'])): ?>
+                <div class="am-photo">
+                    <?php if ($photo !== ''): ?><img src="<?php echo sc_e($photo); ?>" alt="Photo">
+                    <?php else: ?>Photo<?php endif; ?>
+                </div>
+                <?php endif; ?>
+            </div>
+
+            <?php if ($routine_rows_to_show): ?>
+            <div class="am-routine-box">
+                <div class="am-routine-title">Exam Routine</div>
+                <table class="am-routine-tbl">
+                    <thead>
+                        <tr>
+                            <th style="width:22%;">Date</th>
+                            <th style="width:22%;">Time</th>
+                            <th>Subject</th>
+                            <th class="am-rc" style="width:13%;">Full Marks</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($routine_rows_to_show as $rr): ?>
+                        <tr>
+                            <td><?php echo sc_e($rr['date'] ?? '—'); ?></td>
+                            <td><?php echo sc_e($rr['time'] ?? '—'); ?></td>
+                            <td><?php echo sc_e($rr['subject'] ?? '—'); ?></td>
+                            <td class="am-rc"><?php echo sc_e(($rr['full_marks'] ?? '') !== '' ? $rr['full_marks'] : '—'); ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <?php elseif ($show_sched_box): ?>
+            <div class="am-routine-box">
+                <div class="am-routine-title">Exam Schedule</div>
+                <div class="am-sched-row">
+                    <?php if ($sched_exam !== ''): ?><div>Written Exam Date: <strong><?php echo sc_e($sched_exam); ?></strong></div><?php endif; ?>
+                    <?php if ($sched_res !== ''): ?><div>Result Date: <strong><?php echo sc_e($sched_res); ?></strong></div><?php endif; ?>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <?php if (!empty($S['show_instructions'])): ?>
+            <div class="am-rules">
+                <div class="am-rules-head"><?php echo sc_e($heading_text !== '' ? $heading_text : 'নির্দেশিকা:'); ?></div>
+                <?php if ($note_text !== ''): ?><div class="am-rules-note"><?php echo nl2br(sc_e($note_text)); ?></div><?php endif; ?>
+                <?php if ($rules_lines): ?>
+                    <?php if ($has_prefix): ?>
+                        <?php foreach ($rules_lines as $rl): ?><div class="am-rule-item"><?php echo sc_e($rl); ?></div><?php endforeach; ?>
+                    <?php else: ?>
+                        <ol class="am-rules-ol"><?php foreach ($rules_lines as $rl): ?><li><?php echo sc_e($rl); ?></li><?php endforeach; ?></ol>
+                    <?php endif; ?>
+                <?php endif; ?>
+                <?php if ($carry_text !== ''): ?><div class="am-rules-strip"><strong>সঙ্গে আনতে হবে:</strong> <?php echo sc_e($carry_text); ?></div><?php endif; ?>
+                <?php if ($barred_text !== ''): ?><div class="am-rules-strip"><strong>নিষিদ্ধ সামগ্রী:</strong> <?php echo sc_e($barred_text); ?></div><?php endif; ?>
+            </div>
+            <?php endif; ?>
+
+            <?php if (!empty($S['show_sig_principal'])): ?>
+            <div class="am-sig-row">
+                <div class="am-sig-box">
+                    <div class="am-sig-img">
+                        <?php if ($H['sig_p_img'] !== ''): ?><img src="<?php echo sc_e($H['sig_p_img']); ?>" alt="Principal Signature"><?php endif; ?>
+                    </div>
+                    <?php if ($H['sig_p_name'] !== ''): ?>
+                        <div class="am-sig-line">
+                            <div class="am-sig-name"><?php echo sc_e($H['sig_p_name']); ?></div>
+                            <div class="am-sig-role"><?php echo sc_e($sig_principal_lbl); ?></div>
+                        </div>
+                    <?php else: ?>
+                        <div class="am-sig-line"><?php echo sc_e($sig_principal_lbl); ?></div>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <div class="am-foot">
+                <div class="am-foot-left">
+                    <div>Printing Date: <strong><?php echo sc_e($print_date); ?></strong></div>
+                    <?php if ($inst !== ''): ?><div style="font-style:italic;">This admit card is the official property of <?php echo sc_e($inst); ?></div><?php endif; ?>
+                </div>
+                <div class="am-foot-right">
+                    <div class="am-pow-lbl">Powered by</div>
+                    <img class="am-pow-logo" src="../assets/techteam-logo.svg" alt="TechTeam">
+                    <div class="am-pow-url">techteamlead.com</div>
+                </div>
+            </div>
+        </div></div>
+        <?php
+        return ob_get_clean();
+    }
+}
+
 if (!function_exists('ac_card_full')) {
     function ac_card_full(array $d): string
     {
         $S = ac_cfg($d);
+        if (($S['full_template'] ?? 'classic') === 'modern') {
+            return ac_card_full_modern($d);
+        }
         $H = ac_resolve_header($d, $S);
         $photo = !empty($S['show_photo']) ? ac_asset_url($d['photo'] ?? '') : '';
         $inst = $H['inst'];
