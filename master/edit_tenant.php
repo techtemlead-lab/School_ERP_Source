@@ -1,14 +1,20 @@
 <?php
 require_once __DIR__ . '/_guard.php';
 require_once __DIR__ . '/_features.php';
+require_once __DIR__ . '/../config/branding_policy.php';
 masterRequireAccess($pdo_master, 'client_list', 'edit');
 ensureTenantBlockedStatus($pdo_master);
+ensureTenantBrandingPolicyColumn($pdo_master);
 
 $id = (int) ($_GET['id'] ?? 0);
 $stmt = $pdo_master->prepare("SELECT * FROM tenants WHERE id=?");
 $stmt->execute([$id]);
 $tenant = $stmt->fetch();
 if (!$tenant) { header('Location: client_list.php'); exit; }
+
+$branding_surfaces = erp_branding_surfaces();
+$branding_policies = erp_branding_policies();
+$branding_policy   = erp_branding_decode_policy($tenant['branding_policy_json'] ?? null);
 
 $errors = [];
 $success = false;
@@ -45,13 +51,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if (!$errors) {
-            $pdo_master->prepare("UPDATE tenants SET school_name=?, subdomain=?, custom_domain=?, plan=?, status=?, contact_name=?, contact_phone=?, contact_email=?, trial_ends_at=?, subscription_ends_at=? WHERE id=?")
-                ->execute([$school_name, $subdomain, $custom_domain, $plan, $status, $contact_name, $contact_phone, $contact_email, $trial_ends_at, $subscription_ends_at, $id]);
+            $bp_in = ['default' => (string) ($_POST['branding_default'] ?? 'allow')];
+            $bp_post = is_array($_POST['branding_surface'] ?? null) ? $_POST['branding_surface'] : [];
+            foreach ($branding_surfaces as $sk => $_smeta) {
+                $bp_in[$sk] = (string) ($bp_post[$sk] ?? $bp_in['default']);
+            }
+            $branding_json = erp_branding_encode_policy($bp_in);
+
+            $pdo_master->prepare("UPDATE tenants SET school_name=?, subdomain=?, custom_domain=?, plan=?, status=?, contact_name=?, contact_phone=?, contact_email=?, branding_policy_json=?, trial_ends_at=?, subscription_ends_at=? WHERE id=?")
+                ->execute([$school_name, $subdomain, $custom_domain, $plan, $status, $contact_name, $contact_phone, $contact_email, $branding_json, $trial_ends_at, $subscription_ends_at, $id]);
 
             logActivity($pdo_master, $id, 'tenant_updated', $school_name);
 
             $stmt->execute([$id]);
             $tenant = $stmt->fetch();
+            $branding_policy = erp_branding_decode_policy($tenant['branding_policy_json'] ?? null);
             $success = true;
         }
     }
@@ -132,6 +146,60 @@ require_once __DIR__ . '/_layout_top.php';
                     </div>
                 </div>
 
+                <div id="brandingPolicy" class="p-3 rounded mb-4" style="background: var(--sidebar-bg); border: 1px solid var(--sidebar-border);">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                        <h6 class="fw-bold mb-0" style="color: var(--body-text);">"Powered by TechTeam" ব্র্যান্ডিং কন্ট্রোল (প্রতিটি টেম্পলেট / সেকশন অনুযায়ী)</h6>
+                        <div class="d-flex flex-wrap gap-1">
+                            <button type="button" class="btn btn-sm btn-outline-success" onclick="setAllBrandingPolicy('allow')">সবগুলো Allow (ডিফল্ট)</button>
+                            <button type="button" class="btn btn-sm btn-outline-warning" onclick="setAllBrandingPolicy('force_on')">সবগুলো Force ON (লক)</button>
+                            <button type="button" class="btn btn-sm btn-outline-info" onclick="setAllBrandingPolicy('force_off')">সবগুলো Force OFF (White-label)</button>
+                        </div>
+                    </div>
+                    <p class="small mb-3" style="color: var(--sidebar-text);">
+                        প্রতিটি টেম্পলেট বা সেকশনের জন্য আলাদাভাবে ঠিক করুন স্কুল অ্যাডমিন নিজেরা ব্র্যান্ডিং অন/অফ করতে পারবে কি না। বাই ডিফল্ট সবগুলো <strong>Allow</strong> থাকে। পরিবর্তন করলে শেয়ার্ড মোডে তাৎক্ষণিক এবং আইসোলেটেড স্কুলে ~১ মিনিটের মধ্যে প্রোফাইল সিঙ্ক (`tenant.json`) হয়ে কার্যকর হবে।
+                    </p>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>সেকশন / টেম্পলেট</th>
+                                    <th style="min-width: 260px;">পলিসি</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($branding_surfaces as $sk => $smeta): ?>
+                                <tr>
+                                    <td>
+                                        <div class="fw-semibold small" style="color: var(--body-text);"><?php echo htmlspecialchars($smeta['label']); ?></div>
+                                        <div style="font-size: 11.5px; color: var(--sidebar-text);"><?php echo htmlspecialchars($smeta['desc']); ?></div>
+                                    </td>
+                                    <td>
+                                        <select name="branding_surface[<?php echo htmlspecialchars($sk); ?>]" class="form-select form-select-sm branding-policy-sel">
+                                            <?php foreach ($branding_policies as $pk => $plbl): ?>
+                                            <option value="<?php echo htmlspecialchars($pk); ?>" <?php echo ($branding_policy[$sk] ?? 'allow') === $pk ? 'selected' : ''; ?>><?php echo htmlspecialchars($plbl); ?></option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                                <tr>
+                                    <td>
+                                        <div class="fw-semibold small" style="color: var(--body-text);">নতুন/ভবিষ্যৎ টেম্পলেটের ডিফল্ট পলিসি</div>
+                                        <div style="font-size: 11.5px; color: var(--sidebar-text);">ভবিষ্যতে যুক্ত নতুন কোনো সেকশনের ক্ষেত্রে অটো প্রযোজ্য হবে</div>
+                                    </td>
+                                    <td>
+                                        <select name="branding_default" class="form-select form-select-sm branding-policy-sel">
+                                            <?php foreach ($branding_policies as $pk => $plbl): ?>
+                                            <option value="<?php echo htmlspecialchars($pk); ?>" <?php echo ($branding_policy['default'] ?? 'allow') === $pk ? 'selected' : ''; ?>><?php echo htmlspecialchars($plbl); ?></option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <div class="alert alert-secondary" style="font-size:12px;">
                     DB Host: <code><?php echo htmlspecialchars($tenant['db_host']); ?></code> ·
                     DB Name: <code><?php echo htmlspecialchars($tenant['db_name']); ?></code>
@@ -168,4 +236,10 @@ document.querySelectorAll('.phone-11').forEach(function (input) {
     input.addEventListener('input', checkPhone11);
     input.addEventListener('blur', checkPhone11);
 });
+
+function setAllBrandingPolicy(val) {
+    document.querySelectorAll('.branding-policy-sel').forEach(function (sel) {
+        sel.value = val;
+    });
+}
 </script>

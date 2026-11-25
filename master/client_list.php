@@ -1,9 +1,11 @@
 <?php
 require_once __DIR__ . '/_guard.php';
 require_once __DIR__ . '/_features.php';
+require_once __DIR__ . '/../config/branding_policy.php';
 masterRequireAccess($pdo_master, 'client_list', 'view');
 ensureTenantTrashColumns($pdo_master);
 ensureTenantBlockedStatus($pdo_master);
+ensureTenantBrandingPolicyColumn($pdo_master);
 
 $search = trim($_GET['q'] ?? '');
 $fPlan  = trim($_GET['plan'] ?? '');
@@ -83,18 +85,20 @@ require_once __DIR__ . '/_layout_top.php';
                         <th>Subdomain / Domain</th>
                         <th>Plan</th>
                         <th>Status</th>
+                        <th>Branding</th>
                         <th>যোগাযোগ</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                 <?php if (!$tenants): ?>
-                    <tr><td colspan="7" class="text-center py-4" style="color:var(--sidebar-text)">কিছু পাওয়া যায়নি।</td></tr>
+                    <tr><td colspan="8" class="text-center py-4" style="color:var(--sidebar-text)">কিছু পাওয়া যায়নি।</td></tr>
                 <?php endif; ?>
                 <?php foreach ($tenants as $t): ?>
                     <?php
                         $badgeClass = ['Active' => 'badge-active', 'Suspended' => 'badge-suspended', 'Blocked' => 'badge-blocked', 'Cancelled' => 'badge-cancelled'][$t['status']] ?? 'badge-active';
                         $statusIcon = ['Active' => '✅', 'Suspended' => '⏸️', 'Blocked' => '🚫', 'Cancelled' => '🗑️'][$t['status']] ?? '';
+                        $brandSummary = erp_branding_summary(erp_branding_decode_policy($t['branding_policy_json'] ?? null));
                     ?>
                     <tr>
                         <td>#<?php echo $t['id']; ?></td>
@@ -102,6 +106,7 @@ require_once __DIR__ . '/_layout_top.php';
                         <td><code><?php echo htmlspecialchars($t['subdomain'] ?: ($t['custom_domain'] ?: '-')); ?></code></td>
                         <td><span class="badge bg-secondary"><?php echo htmlspecialchars($t['plan']); ?></span></td>
                         <td><span class="badge <?php echo $badgeClass; ?>"><?php echo $statusIcon; ?> <?php echo htmlspecialchars($t['status']); ?></span></td>
+                        <td><a href="edit_tenant.php?id=<?php echo (int) $t['id']; ?>#brandingPolicy" class="badge text-decoration-none <?php echo htmlspecialchars($brandSummary['badge']); ?>" title="Powered by TechTeam কন্ট্রোল এডিট করো"><?php echo htmlspecialchars($brandSummary['label']); ?></a></td>
                         <td><small><?php echo htmlspecialchars($t['contact_name'] ?: '-'); ?><br><?php echo htmlspecialchars($t['contact_phone'] ?: ''); ?></small></td>
                         <td>
                             <div class="d-flex flex-wrap gap-1">
