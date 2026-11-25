@@ -886,6 +886,7 @@ if (!function_exists('ac_default_settings')) {
                 'permanent_address' => 2,
             ],
             'show_routine'           => $type === 'admission' ? 0 : 1,
+            'routine_cols'           => 2,
             'routine_mode'           => 'auto_db',
             'custom_routine_rows'    => [],
             'schedule_exam_date'     => '',
@@ -996,6 +997,7 @@ if (!function_exists('ac_load_settings')) {
                     $norm_cmap[$fk] = ((int) ($raw_cmap[$fk] ?? $fm['default_col']) === 2) ? 2 : 1;
                 }
                 $cfg['student_info_col_map'] = $norm_cmap;
+                $cfg['routine_cols']       = ((int) ($cfg['routine_cols'] ?? 2) === 1) ? 1 : 2;
                 $cfg['logo_path']          = (string) ($row['logo_path'] ?? '');
                 $cfg['sig_principal_path'] = (string) ($row['sig_principal_path'] ?? '');
                 $cfg['sig_secondary_path'] = (string) ($row['sig_secondary_path'] ?? '');
@@ -1061,6 +1063,8 @@ if (!function_exists('ac_save_settings')) {
                 $payload[$k] = (($in[$k] ?? 'below') === 'above') ? 'above' : 'below';
             } elseif ($k === 'student_info_cols') {
                 $payload[$k] = ((int) ($in[$k] ?? 1) === 2) ? 2 : 1;
+            } elseif ($k === 'routine_cols') {
+                $payload[$k] = ((int) ($in[$k] ?? 2) === 1) ? 1 : 2;
             } elseif ($k === 'student_info_col_map') {
                 $cmap_in = is_array($in[$k] ?? null) ? $in[$k] : [];
                 $cmap_out = [];
@@ -1610,8 +1614,8 @@ if (!function_exists('ac_css')) {
 .admit-modern .am-mk { font-weight: 700; color: #1f2937; white-space: nowrap; width: 12%; }
 .admit-modern .am-mv { color: #111827; font-weight: 500; width: 21%; overflow-wrap: break-word; }
 .admit-modern .am-cand-wrap {
-    display: flex; align-items: flex-start; gap: 14px; background: #f8fafc; padding: 10px 12px;
-    margin-bottom: 24px; border: 1px solid #e5e7eb;
+    display: flex; align-items: flex-start; gap: 14px; background: #f8fafc; padding: 9px 12px;
+    margin-bottom: 14px; border: 1px solid #e5e7eb;
 }
 .admit-modern .am-cand-tbl { flex: 1; width: 100%; border-collapse: collapse; font-size: 11.2px; }
 .admit-modern .am-cand-tbl td { padding: 2.8px 4px; vertical-align: top; line-height: 1.32; }
@@ -1626,26 +1630,30 @@ if (!function_exists('ac_css')) {
 }
 .admit-modern .am-photo img { width: 100%; height: 100%; object-fit: cover; }
 .admit-modern .am-routine-box {
-    border: 1.1px solid #374151; background: #f8fafc; padding: 10px 14px; margin-bottom: 24px;
+    border: 1.1px solid #374151; background: #f8fafc; padding: 8px 11px; margin-bottom: 14px;
 }
-.admit-modern .am-routine-title { text-align: center; font-size: 12.5px; font-weight: 700; color: #0f172a; margin-bottom: 6px; }
-.admit-modern .am-routine-tbl { width: 100%; border-collapse: collapse; font-size: 10.5px; background: #fff; }
-.admit-modern .am-routine-tbl th, .admit-modern .am-routine-tbl td { border: 1px solid #9ca3af; padding: 3.5px 6px; text-align: left; }
+.admit-modern .am-routine-title { text-align: center; font-size: 12.5px; font-weight: 700; color: #0f172a; margin-bottom: 5px; }
+.admit-modern .am-routine-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: start; }
+.admit-modern .am-routine-tbl { width: 100%; border-collapse: collapse; font-size: 10.2px; background: #fff; }
+.admit-modern .am-routine-tbl th, .admit-modern .am-routine-tbl td { border: 1px solid #9ca3af; padding: 3px 5px; text-align: left; }
 .admit-modern .am-routine-tbl th { background: #e5e7eb; font-weight: 700; color: #111827; }
+.admit-modern .am-routine-grid2 .am-routine-tbl { font-size: 8.6px; }
+.admit-modern .am-routine-grid2 .am-routine-tbl th,
+.admit-modern .am-routine-grid2 .am-routine-tbl td { padding: 2.4px 4px; line-height: 1.25; }
 .admit-modern .am-routine-tbl .am-rc { text-align: center; }
 .admit-modern .am-routine-empty { min-height: 32px; }
 .admit-modern .am-sched-row {
     display: flex; justify-content: space-around; align-items: center; gap: 12px; font-size: 11.2px; padding: 3px 0; flex-wrap: wrap;
 }
-.admit-modern .am-rules { flex: 0 1 auto; font-size: 11px; line-height: 1.52; color: #111827; margin-bottom: 16px; overflow: hidden; }
-.admit-modern .am-rules-head { font-weight: 700; font-size: 12px; margin-bottom: 5px; color: #0f172a; }
+.admit-modern .am-rules { flex: 0 1 auto; font-size: 10.6px; line-height: 1.42; color: #111827; margin-bottom: 8px; }
+.admit-modern .am-rules-head { font-weight: 700; font-size: 11.8px; margin-bottom: 4px; color: #0f172a; }
 .admit-modern .am-rules-note { color: #b91c1c; font-size: 9.8px; margin-bottom: 4px; text-align: left; }
-.admit-modern .am-rule-item { margin-bottom: 3.5px; text-align: left; }
+.admit-modern .am-rule-item { margin-bottom: 3px; text-align: left; }
 .admit-modern .am-rules-ol { margin: 0; padding-left: 18px; }
-.admit-modern .am-rules-ol li { margin-bottom: 3.5px; text-align: left; }
+.admit-modern .am-rules-ol li { margin-bottom: 3px; text-align: left; }
 .admit-modern .am-rules-strip { font-size: 9.8px; margin-top: 4px; text-align: left; }
 .admit-modern .am-sig-row {
-    display: flex; justify-content: flex-end; margin-top: auto; padding-top: 28px; margin-bottom: 36px; padding-right: 10px;
+    display: flex; justify-content: flex-end; margin-top: auto; padding-top: 16px; margin-bottom: 12px; padding-right: 10px;
 }
 .admit-modern .am-sig-box { width: 155px; text-align: center; }
 .admit-modern .am-sig-img { height: 34px; display: flex; align-items: flex-end; justify-content: center; margin-bottom: 2px; }
@@ -2110,26 +2118,61 @@ if (!function_exists('ac_card_full_modern')) {
             <div class="am-routine-box">
                 <div class="am-routine-title">Exam Routine</div>
                 <?php if ($routine_rows_to_show): ?>
-                <table class="am-routine-tbl">
-                    <thead>
-                        <tr>
-                            <th style="width:22%;">Date</th>
-                            <th style="width:22%;">Time</th>
-                            <th>Subject</th>
-                            <th class="am-rc" style="width:13%;">Full Marks</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($routine_rows_to_show as $rr): ?>
-                        <tr>
-                            <td><?php echo sc_e($rr['date'] ?? '—'); ?></td>
-                            <td><?php echo sc_e($rr['time'] ?? '—'); ?></td>
-                            <td><?php echo sc_e($rr['subject'] ?? '—'); ?></td>
-                            <td class="am-rc"><?php echo sc_e(($rr['full_marks'] ?? '') !== '' ? $rr['full_marks'] : '—'); ?></td>
-                        </tr>
+                    <?php
+                    $r_cols = ((int) ($S['routine_cols'] ?? 2) === 1) ? 1 : 2;
+                    if ($r_cols === 2 && count($routine_rows_to_show) > 1):
+                        $half_n = (int) ceil(count($routine_rows_to_show) / 2);
+                        $r_chunks = [
+                            array_slice($routine_rows_to_show, 0, $half_n),
+                            array_slice($routine_rows_to_show, $half_n),
+                        ];
+                    ?>
+                    <div class="am-routine-grid2">
+                        <?php foreach ($r_chunks as $rc): ?>
+                        <table class="am-routine-tbl">
+                            <thead>
+                                <tr>
+                                    <th style="width:28%;">Date</th>
+                                    <th style="width:26%;">Time</th>
+                                    <th>Subject</th>
+                                    <th class="am-rc" style="width:13%;">Marks</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($rc as $rr): ?>
+                                <tr>
+                                    <td><?php echo sc_e($rr['date'] ?? '—'); ?></td>
+                                    <td><?php echo sc_e($rr['time'] ?? '—'); ?></td>
+                                    <td><?php echo sc_e($rr['subject'] ?? '—'); ?></td>
+                                    <td class="am-rc"><?php echo sc_e(($rr['full_marks'] ?? '') !== '' ? $rr['full_marks'] : '—'); ?></td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
                         <?php endforeach; ?>
-                    </tbody>
-                </table>
+                    </div>
+                    <?php else: ?>
+                    <table class="am-routine-tbl">
+                        <thead>
+                            <tr>
+                                <th style="width:22%;">Date</th>
+                                <th style="width:22%;">Time</th>
+                                <th>Subject</th>
+                                <th class="am-rc" style="width:13%;">Full Marks</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($routine_rows_to_show as $rr): ?>
+                            <tr>
+                                <td><?php echo sc_e($rr['date'] ?? '—'); ?></td>
+                                <td><?php echo sc_e($rr['time'] ?? '—'); ?></td>
+                                <td><?php echo sc_e($rr['subject'] ?? '—'); ?></td>
+                                <td class="am-rc"><?php echo sc_e(($rr['full_marks'] ?? '') !== '' ? $rr['full_marks'] : '—'); ?></td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                    <?php endif; ?>
                 <?php else: ?>
                 <div class="am-routine-empty"></div>
                 <?php endif; ?>

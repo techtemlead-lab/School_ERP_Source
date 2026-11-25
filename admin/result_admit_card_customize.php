@@ -232,6 +232,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['update_admit_card_se
         'student_info_cols'      => ((int) ($_POST['student_info_cols'] ?? 1) === 2) ? 2 : 1,
         'student_info_col_map'   => is_array($_POST['student_info_col_map'] ?? null) ? $_POST['student_info_col_map'] : [],
         'show_routine'           => ($admit_type === 'general' && isset($_POST['show_routine'])) ? 1 : 0,
+        'routine_cols'           => ((int) ($_POST['routine_cols'] ?? 2) === 1) ? 1 : 2,
     ];
 
     ac_save_settings($pdo, $fr_bid, $new_cfg, $admit_type);
@@ -845,6 +846,19 @@ $student_toggles = [
             </div>
         </div>
         <div class="acc-panel-bd">
+            <?php $cur_r_cols = ((int) ($S['routine_cols'] ?? 2) === 1) ? 1 : 2; ?>
+            <div class="border rounded p-2 px-3 mb-3 bg-light d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div>
+                    <div class="fw-bold small">রুটিন টেবিলের ধরন (Exam Routine Layout)</div>
+                    <div class="text-muted" style="font-size:11.5px;">বেশি বিষয় থাকলে ২ কলাম (Side-by-Side) ব্যবহার করলে সব নির্দেশিকা ও স্বাক্ষর এক পাতায় সুন্দরভাবে ধরে।</div>
+                </div>
+                <div class="btn-group btn-group-sm" role="group" aria-label="Exam Routine Layout">
+                    <input type="radio" class="btn-check" name="routine_cols" id="rt_cols_2" value="2"<?php echo $cur_r_cols === 2 ? ' checked' : ''; ?>>
+                    <label class="btn btn-outline-primary" for="rt_cols_2">2 Columns (২ কলাম)</label>
+                    <input type="radio" class="btn-check" name="routine_cols" id="rt_cols_1" value="1"<?php echo $cur_r_cols === 1 ? ' checked' : ''; ?>>
+                    <label class="btn btn-outline-primary" for="rt_cols_1">1 Column (১ কলাম)</label>
+                </div>
+            </div>
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
                 <p class="small text-muted mb-0" style="max-width:740px;">
                     চালু থাকলে <strong>Result Module &gt; Exam Procedure &gt; Exam Routine</strong> মডিউলে সংরক্ষিত রুটিন স্বয়ংক্রিয়ভাবে অ্যাডমিট কার্ডে যুক্ত হবে। কোনো শ্রেণি বা পরীক্ষার রুটিন যুক্ত করা না থাকলে অ্যাডমিট কার্ড জেনারেট ব্লক থাকবে — রুটিন যুক্ত করার পর অথবা এই অপশনটি অফ (OFF) করলে পুনরায় জেনারেট করা যাবে।
