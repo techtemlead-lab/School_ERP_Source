@@ -175,9 +175,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['update_admit_card_se
         'custom_institute_name'  => (string) ($_POST['custom_institute_name'] ?? ''),
         'show_slogan'            => isset($_POST['show_slogan']) ? 1 : 0,
         'custom_slogan'          => (string) ($_POST['custom_slogan'] ?? ''),
+        'slogan_position'        => (($_POST['slogan_position'] ?? 'below') === 'above') ? 'above' : 'below',
         'show_address'           => isset($_POST['show_address']) ? 1 : 0,
         'show_address_half'      => isset($_POST['show_address_half']) ? 1 : 0,
         'custom_address'         => (string) ($_POST['custom_address'] ?? ''),
+        'address_english_only'   => isset($_POST['address_english_only']) ? 1 : 0,
         'show_phone'             => isset($_POST['show_phone']) ? 1 : 0,
         'custom_phone'           => (string) ($_POST['custom_phone'] ?? ''),
         'show_email'             => isset($_POST['show_email']) ? 1 : 0,
@@ -609,6 +611,24 @@ $student_toggles = [
                             </td>
                             <td>
                                 <input type="text" name="<?php echo $txt_key; ?>" maxlength="255" class="form-control form-control-sm" value="<?php echo accv($S[$txt_key] ?? ''); ?>" placeholder="<?php echo accv($hint); ?>">
+                                <?php if ($sw_key === 'show_slogan'): ?>
+                                    <?php $cur_sp = (($S['slogan_position'] ?? 'below') === 'above') ? 'above' : 'below'; ?>
+                                    <div class="mt-2 d-flex align-items-center gap-2 flex-wrap">
+                                        <span class="small fw-semibold text-muted">ট্যাগলাইন অবস্থান:</span>
+                                        <div class="btn-group btn-group-sm" role="group" aria-label="Tagline Position">
+                                            <input type="radio" class="btn-check" name="slogan_position" id="sp_below" value="below"<?php echo $cur_sp === 'below' ? ' checked' : ''; ?>>
+                                            <label class="btn btn-outline-primary py-0 px-2" for="sp_below">স্কুলের নামের নিচে (Below)</label>
+                                            <input type="radio" class="btn-check" name="slogan_position" id="sp_above" value="above"<?php echo $cur_sp === 'above' ? ' checked' : ''; ?>>
+                                            <label class="btn btn-outline-primary py-0 px-2" for="sp_above">স্কুলের নামের উপরে (Above)</label>
+                                        </div>
+                                    </div>
+                                <?php elseif ($sw_key === 'show_address'): ?>
+                                    <div class="mt-2 form-check form-switch mb-0">
+                                        <input class="form-check-input" type="checkbox" role="switch" id="sw_address_english_only" name="address_english_only"<?php echo (!isset($S['address_english_only']) || !empty($S['address_english_only'])) ? ' checked' : ''; ?>>
+                                        <label class="form-check-label small fw-semibold" for="sw_address_english_only">সব ঠিকানা (প্রতিষ্ঠান ও শিক্ষার্থীর Present/Permanent Address) ইংরেজিতে দেখাবে (বাংলা ঠিকানা স্বয়ংক্রিয়ভাবে ইংরেজি হবে)</label>
+                                    </div>
+                                    <div class="text-muted" style="font-size:11px;">চাইলে উপরের ঘরে নিজস্ব নির্ভুল ইংরেজি ঠিকানাও সরাসরি লিখে দিতে পারবেন।</div>
+                                <?php endif; ?>
                             </td>
                         </tr>
                         <?php endforeach; ?>

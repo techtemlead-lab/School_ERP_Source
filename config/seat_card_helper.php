@@ -263,6 +263,298 @@ if (!function_exists('ac_format_phone')) {
     }
 }
 
+if (!function_exists('ac_bn_word_to_latin')) {
+    /**
+     * Converts a single Bengali script word into readable Latin script for address transliteration.
+     */
+    function ac_bn_word_to_latin(string $word): string
+    {
+        if ($word === '' || !preg_match('/[\x{0980}-\x{09FF}]/u', $word)) {
+            return $word;
+        }
+        $vowels = [
+            'অ' => 'o',  'আ' => 'a',  'ই' => 'i',  'ঈ' => 'i',
+            'উ' => 'u',  'ঊ' => 'u',  'ঋ' => 'ri', 'এ' => 'e',
+            'ঐ' => 'oi', 'ও' => 'o',  'ঔ' => 'ou',
+        ];
+        $matras = [
+            'া' => 'a',  'ি' => 'i',  'ী' => 'i',  'ু' => 'u',
+            'ূ' => 'u',  'ৃ' => 'ri', 'ে' => 'e',  'ৈ' => 'oi',
+            'ো' => 'o',  'ৌ' => 'ou',
+        ];
+        $cons = [
+            'ক' => 'k',  'খ' => 'kh', 'গ' => 'g',  'ঘ' => 'gh', 'ঙ' => 'ng',
+            'চ' => 'ch', 'ছ' => 'chh','জ' => 'j',  'ঝ' => 'jh', 'ঞ' => 'n',
+            'ট' => 't',  'ঠ' => 'th', 'ড' => 'd',  'ঢ' => 'dh', 'ণ' => 'n',
+            'ত' => 't',  'থ' => 'th', 'দ' => 'd',  'ধ' => 'dh', 'ন' => 'n',
+            'প' => 'p',  'ফ' => 'f',  'ব' => 'b',  'ভ' => 'bh', 'ম' => 'm',
+            'য' => 'j',  'র' => 'r',  'ল' => 'l',  'শ' => 'sh', 'ষ' => 'sh',
+            'স' => 's',  'হ' => 'h',  'ড়' => 'r',  'ঢ়' => 'rh', 'য়' => 'y',
+            'ৎ' => 't',
+        ];
+        $signs = ['ং' => 'ng', 'ঃ' => 'h', 'ঁ' => 'n', 'ঽ' => ''];
+
+        $chars = preg_split('//u', $word, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $n = count($chars);
+        $out = '';
+        for ($i = 0; $i < $n; $i++) {
+            $ch = $chars[$i];
+            if (isset($vowels[$ch])) {
+                $out .= $vowels[$ch];
+                continue;
+            }
+            if (isset($signs[$ch])) {
+                $out .= $signs[$ch];
+                continue;
+            }
+            if ($ch === '্') {
+                continue;
+            }
+            if (!isset($cons[$ch])) {
+                $out .= $ch;
+                continue;
+            }
+
+            $nxt = $chars[$i + 1] ?? '';
+            if ($ch === 'ক' && $nxt === '্' && ($chars[$i + 2] ?? '') === 'ষ') {
+                $out .= ($i === 0) ? 'kh' : 'ksh';
+                $i += 2;
+                $nxt = $chars[$i + 1] ?? '';
+                if (isset($matras[$nxt])) {
+                    $out .= $matras[$nxt];
+                    $i++;
+                } elseif ($nxt !== '্' && $i + 1 < $n) {
+                    $out .= 'a';
+                }
+                continue;
+            }
+            if ($ch === 'জ' && $nxt === '্' && ($chars[$i + 2] ?? '') === 'ঞ') {
+                $out .= ($i === 0) ? 'g' : 'gg';
+                $i += 2;
+                $nxt = $chars[$i + 1] ?? '';
+                if (isset($matras[$nxt])) {
+                    $out .= $matras[$nxt];
+                    $i++;
+                } elseif ($nxt !== '্' && $i + 1 < $n) {
+                    $out .= 'a';
+                }
+                continue;
+            }
+
+            $out .= $cons[$ch];
+            if (isset($matras[$nxt])) {
+                $out .= $matras[$nxt];
+                $i++;
+            } elseif ($nxt === '্') {
+                $i++;
+                if (($chars[$i + 1] ?? '') === 'য' && isset($cons[$chars[$i + 2] ?? '']) === false) {
+                    // C + ্য handled naturally via 'y'
+                }
+            } elseif (isset($signs[$nxt])) {
+                $out .= ($nxt === 'ং' || $nxt === 'ঃ') ? 'a' : '';
+            } elseif ($ch !== 'ৎ' && $i + 1 < $n && isset($cons[$nxt])) {
+                $out .= 'a';
+            }
+        }
+        return ucfirst($out);
+    }
+}
+
+if (!function_exists('ac_address_to_english')) {
+    /**
+     * Ensures Bengali script addresses (school or student) render cleanly in English on Admit Cards.
+     */
+    function ac_address_to_english(?string $text): string
+    {
+        $s = trim((string) ($text ?? ''));
+        if ($s === '' || !preg_match('/[\x{0980}-\x{09FF}]/u', $s)) {
+            return $s;
+        }
+
+        // Normalize decomposed nukta characters & numerals/punctuation
+        $s = strtr($s, [
+            "ড\u{09BC}" => 'ড়',
+            "ঢ\u{09BC}" => 'ঢ়',
+            "য\u{09BC}" => 'য়',
+            '০' => '0', '১' => '1', '২' => '2', '৩' => '3', '৪' => '4',
+            '৫' => '5', '৬' => '6', '৭' => '7', '৮' => '8', '৯' => '9',
+            '।' => ', ', '—' => '-', '–' => '-',
+        ]);
+
+        // Postposition: "<Place> সংলগ্ন" -> "Adjacent to <Place>"
+        $s = preg_replace('/([^(,;\n]+?)\s+সংলগ্ন(?![\x{0980}-\x{09FF}])/u', 'Adjacent to $1', $s) ?? $s;
+
+        // Longest-first Bangladesh administrative & address phrase dictionary
+        $dict = [
+            'পলিটেকনিক ইনস্টিটিউট' => 'Polytechnic Institute',
+            'সিটি কর্পোরেশন'       => 'City Corporation',
+            'সিটি করপোরেশন'        => 'City Corporation',
+            'জাতীয় বিশ্ববিদ্যালয়'   => 'National University',
+            'জাতীয় বিশ্ববিদ্যালয়'   => 'National University',
+            'মেডিকেল কলেজ'         => 'Medical College',
+            'উচ্চ বিদ্যালয়'        => 'High School',
+            'উচ্চ বিদ্যালয়'        => 'High School',
+            'মডেল হাই স্কুল'       => 'Model High School',
+            'রংপুর সদর'            => 'Rangpur Sadar',
+            'পোস্ট অফিস'           => 'Post Office',
+            'ডাকঘর'                => 'Post Office',
+            'আবাসিক এলাকা'         => 'Residential Area',
+            'বাস স্ট্যান্ড'        => 'Bus Stand',
+            'বাসস্ট্যান্ড'         => 'Bus Stand',
+            'রেলওয়ে স্টেশন'        => 'Railway Station',
+            'রেলওয়ে স্টেশন'        => 'Railway Station',
+            'ময়মনসিংহ'             => 'Mymensingh',
+            'ময়মনসিংহ'             => 'Mymensingh',
+            'কক্সবাজার'            => "Cox's Bazar",
+            'চট্টগ্রাম'            => 'Chattogram',
+            'নারায়ণগঞ্জ'           => 'Narayanganj',
+            'নারায়ণগঞ্জ'           => 'Narayanganj',
+            'ব্রাহ্মণবাড়িয়া'       => 'Brahmanbaria',
+            'ব্রাহ্মণবাড়িয়া'       => 'Brahmanbaria',
+            'চাঁপাইনবাবগঞ্জ'       => 'Chapainawabganj',
+            'মৌলভীবাজার'           => 'Moulvibazar',
+            'কিশোরগঞ্জ'            => 'Kishoreganj',
+            'সাতক্ষীরা'            => 'Satkhira',
+            'ঠাকুরগাঁও'            => 'Thakurgaon',
+            'পঞ্চগড়'               => 'Panchagarh',
+            'পঞ্চগড়'               => 'Panchagarh',
+            'লালমনিরহাট'           => 'Lalmonirhat',
+            'নীলফামারী'            => 'Nilphamari',
+            'কুড়িগ্রাম'            => 'Kurigram',
+            'কুড়িগ্রাম'            => 'Kurigram',
+            'গাইবান্ধা'            => 'Gaibandha',
+            'দিনাজপুর'             => 'Dinajpur',
+            'জয়পুরহাট'             => 'Joypurhat',
+            'জয়পুরহাট'             => 'Joypurhat',
+            'সিরাজগঞ্জ'            => 'Sirajganj',
+            'রাজশাহী'              => 'Rajshahi',
+            'নওগাঁ'                => 'Naogaon',
+            'নাটোর'                => 'Natore',
+            'পাবনা'                => 'Pabna',
+            'বগুড়া'                => 'Bogura',
+            'বগুড়া'                => 'Bogura',
+            'রংপুর'                => 'Rangpur',
+            'খুলনা'                => 'Khulna',
+            'যশোর'                 => 'Jashore',
+            'কুষ্টিয়া'             => 'Kushtia',
+            'কুষ্টিয়া'             => 'Kushtia',
+            'ঝিনাইদহ'              => 'Jhenaidah',
+            'মাগুরা'               => 'Magura',
+            'নড়াইল'                => 'Narail',
+            'নড়াইল'                => 'Narail',
+            'বাগেরহাট'             => 'Bagerhat',
+            'চুয়াডাঙ্গা'           => 'Chuadanga',
+            'চুয়াডাঙ্গা'           => 'Chuadanga',
+            'মেহেরপুর'             => 'Meherpur',
+            'বরিশাল'               => 'Barishal',
+            'পটুয়াখালী'            => 'Patuakhali',
+            'পটুয়াখালী'            => 'Patuakhali',
+            'ভোলা'                 => 'Bhola',
+            'পিরোজপুর'             => 'Pirojpur',
+            'ঝালকাঠি'              => 'Jhalokati',
+            'বরগুনা'               => 'Barguna',
+            'সিলেট'                => 'Sylhet',
+            'হবিগঞ্জ'              => 'Habiganj',
+            'সুনামগঞ্জ'            => 'Sunamganj',
+            'কুমিল্লা'             => 'Cumilla',
+            'চাঁদপুর'              => 'Chandpur',
+            'নোয়াখালী'             => 'Noakhali',
+            'নোয়াখালী'             => 'Noakhali',
+            'লক্ষ্মীপুর'           => 'Lakshmipur',
+            'ফেনী'                 => 'Feni',
+            'রাঙ্গামাটি'           => 'Rangamati',
+            'বান্দরবান'            => 'Bandarban',
+            'খাগড়াছড়ি'             => 'Khagrachhari',
+            'খাগড়াছড়ি'             => 'Khagrachhari',
+            'ঢাকা'                 => 'Dhaka',
+            'গাজীপুর'              => 'Gazipur',
+            'টাঙ্গাইল'             => 'Tangail',
+            'মানিকগঞ্জ'            => 'Manikganj',
+            'মুন্সিগঞ্জ'           => 'Munshiganj',
+            'নরসিংদী'              => 'Narsingdi',
+            'ফরিদপুর'              => 'Faridpur',
+            'মাদারীপুর'            => 'Madaripur',
+            'গোপালগঞ্জ'            => 'Gopalganj',
+            'শরীয়তপুর'             => 'Shariatpur',
+            'শরীয়তপুর'             => 'Shariatpur',
+            'রাজবাড়ী'              => 'Rajbari',
+            'রাজবাড়ি'              => 'Rajbari',
+            'জামালপুর'             => 'Jamalpur',
+            'শেরপুর'               => 'Sherpur',
+            'নেত্রকোণা'            => 'Netrokona',
+            'নেত্রকোনা'            => 'Netrokona',
+            'সদর'                  => 'Sadar',
+            'উপজেলা'               => 'Upazila',
+            'থানা'                 => 'Thana',
+            'জেলা'                 => 'District',
+            'বিভাগ'                => 'Division',
+            'পৌরসভা'               => 'Pourashava',
+            'ইউনিয়ন'               => 'Union',
+            'ইউনিয়ন'               => 'Union',
+            'ওয়ার্ড'               => 'Ward',
+            'ওয়ার্ড'               => 'Ward',
+            'গ্রাম'                => 'Village',
+            'মহল্লা'               => 'Mahalla',
+            'সেক্টর'               => 'Sector',
+            'ব্লক'                 => 'Block',
+            'লেন'                  => 'Lane',
+            'সড়ক'                  => 'Road',
+            'সড়ক'                  => 'Road',
+            'রোড'                  => 'Road',
+            'বাড়ি'                 => 'House',
+            'বাড়ি'                 => 'House',
+            'বাসা'                 => 'House',
+            'প্লট'                 => 'Plot',
+            'ফ্ল্যাট'              => 'Flat',
+            'বাজার'                => 'Bazar',
+            'মোড়'                  => 'More',
+            'মোড়'                  => 'More',
+            'চত্বর'                => 'Chattar',
+            'পাড়া'                 => 'Para',
+            'পাড়া'                 => 'Para',
+            'স্কুল'                => 'School',
+            'কলেজ'                 => 'College',
+            'মাদ্রাসা'             => 'Madrasah',
+            'বিশ্ববিদ্যালয়'        => 'University',
+            'বিশ্ববিদ্যালয়'        => 'University',
+            'ইনস্টিটিউট'           => 'Institute',
+            'পলিটেকনিক'            => 'Polytechnic',
+            'হাসপাতাল'             => 'Hospital',
+            'মসজিদ'                => 'Mosque',
+            'মন্দির'               => 'Temple',
+            'পার্ক'                => 'Park',
+            'স্টেশন'               => 'Station',
+            'মার্কেট'              => 'Market',
+            'উত্তর'                => 'North',
+            'দক্ষিণ'               => 'South',
+            'পূর্ব'                => 'East',
+            'পশ্চিম'               => 'West',
+            'সংলগ্ন'               => 'Adjacent',
+            'নিকট'                 => 'Near',
+            'পাশে'                 => 'Beside',
+            'সামনে'                => 'Opposite',
+            'বাংলাদেশ'             => 'Bangladesh',
+        ];
+        uksort($dict, static fn(string $a, string $b): int => mb_strlen($b, 'UTF-8') <=> mb_strlen($a, 'UTF-8'));
+        foreach ($dict as $bn => $en) {
+            $s = preg_replace('/(?<![\x{0980}-\x{09FF}])' . preg_quote($bn, '/') . '(?![\x{0980}-\x{09FF}])/u', $en, $s) ?? $s;
+        }
+
+        // Phonetic transliteration fallback for any remaining Bengali tokens (e.g. local neighborhood names)
+        if (preg_match('/[\x{0980}-\x{09FF}]/u', $s)) {
+            $s = preg_replace_callback('/[\x{0980}-\x{09FF}]+/u', static fn(array $m): string => ac_bn_word_to_latin($m[0]), $s) ?? $s;
+        }
+
+        // Cleanup punctuation & collapse duplicate "City, City-ZIP"
+        $s = preg_replace('/\s*,\s*(?:,\s*)+/', ', ', $s) ?? $s;
+        $s = preg_replace('/\s+([,)])/', '$1', $s) ?? $s;
+        $s = preg_replace('/\(\s+/', '(', $s) ?? $s;
+        $s = preg_replace('/\s{2,}/', ' ', $s) ?? $s;
+        $s = preg_replace('/\b([A-Za-z][A-Za-z\s\'\-]{1,30}),\s*\1(?=-\d{4}\b)/i', '$1', $s) ?? $s;
+        return trim($s, " ,\t\n\r\0\x0B");
+    }
+}
+
 if (!function_exists('ac_normalize_type')) {
     function ac_normalize_type(?string $type): string
     {
@@ -484,9 +776,11 @@ if (!function_exists('ac_default_settings')) {
             'custom_institute_name' => '',
             'show_slogan'           => 1,
             'custom_slogan'         => '',
+            'slogan_position'       => 'below',
             'show_address'          => 1,
             'show_address_half'     => 0,
             'custom_address'        => '',
+            'address_english_only'  => 1,
             'show_phone'            => 1,
             'custom_phone'          => '',
             'show_email'            => 1,
@@ -639,6 +933,7 @@ if (!function_exists('ac_load_settings')) {
                 $cfg['default_gap']        = max(0.0, min(30.0, (float) ($cfg['default_gap'] ?? $def['default_gap'])));
                 $cfg['full_template']      = $norm_layout === '1full_classic' ? 'classic' : ($norm_layout === '1full_modern' ? 'modern' : ($raw_ft === 'classic' ? 'classic' : 'modern'));
                 $cfg['default_color_mode'] = (($cfg['default_color_mode'] ?? 'color') === 'grayscale') ? 'grayscale' : 'color';
+                $cfg['slogan_position']    = (($cfg['slogan_position'] ?? 'below') === 'above') ? 'above' : 'below';
                 $cfg['logo_path']          = (string) ($row['logo_path'] ?? '');
                 $cfg['sig_principal_path'] = (string) ($row['sig_principal_path'] ?? '');
                 $cfg['sig_secondary_path'] = (string) ($row['sig_secondary_path'] ?? '');
@@ -653,7 +948,7 @@ if (!function_exists('ac_load_settings')) {
                     'default_layout', 'default_ori', 'default_w', 'default_h', 'default_gap',
                     'full_template', 'default_color_mode',
                     'show_logo', 'logo_path', 'show_institute_name', 'custom_institute_name',
-                    'show_slogan', 'custom_slogan', 'show_address', 'show_address_half', 'custom_address',
+                    'show_slogan', 'custom_slogan', 'slogan_position', 'show_address', 'show_address_half', 'custom_address', 'address_english_only',
                     'show_phone', 'custom_phone', 'show_email', 'custom_email', 'show_website', 'custom_website',
                     'show_eiin', 'custom_eiin', 'show_issue_date',
                     'show_sig_principal', 'sig_principal_path', 'sig_principal_name', 'sig_principal_label',
@@ -700,6 +995,8 @@ if (!function_exists('ac_save_settings')) {
             }
             if ($k === 'default_color_mode') {
                 $payload[$k] = (($in[$k] ?? 'color') === 'grayscale') ? 'grayscale' : 'color';
+            } elseif ($k === 'slogan_position') {
+                $payload[$k] = (($in[$k] ?? 'below') === 'above') ? 'above' : 'below';
             } elseif ($k === 'default_gap') {
                 $payload[$k] = max(0.0, min(30.0, (float) ($in[$k] ?? 4.0)));
             } elseif ($k === 'routine_mode') {
@@ -805,6 +1102,9 @@ if (!function_exists('ac_resolve_header')) {
 
         $custom_addr = trim((string) ($S['custom_address'] ?? ''));
         $address = $custom_addr !== '' ? $custom_addr : trim((string) ($d['address'] ?? ''));
+        if (!isset($S['address_english_only']) || !empty($S['address_english_only'])) {
+            $address = ac_address_to_english($address);
+        }
 
         $custom_phone = trim((string) ($S['custom_phone'] ?? ''));
         $phone_raw = $custom_phone !== '' ? $custom_phone : trim((string) ($d['phone'] ?? ''));
@@ -1041,6 +1341,7 @@ if (!function_exists('ac_css')) {
     font-size: 12px; color: #334155; font-style: italic; font-family: Georgia, 'Times New Roman', serif;
     margin-top: 2px; line-height: 1.2; overflow-wrap: break-word;
 }
+.admit-half .ah-inst-sub.ah-sub-top { margin-top: 0; margin-bottom: 2px; }
 .admit-half .ah-inst-addr {
     font-size: 10px; color: #475569; margin-top: 1px; line-height: 1.2; overflow-wrap: break-word;
 }
@@ -1116,6 +1417,7 @@ if (!function_exists('ac_css')) {
 }
 .admit-full .af-sub { font-size: 10px; color: #475569; margin-top: 1px; }
 .admit-full .af-slogan { font-size: 10px; font-style: italic; color: #334155; margin-top: 1px; }
+.admit-full .af-slogan.af-slogan-top { margin-top: 0; margin-bottom: 2px; }
 .admit-full .af-upper {
     display: grid; grid-template-columns: 40% 36% 24%; border-bottom: 1px solid #6b7280;
 }
@@ -1220,6 +1522,7 @@ if (!function_exists('ac_css')) {
 .admit-modern .am-inst { flex: 1; min-width: 0; }
 .admit-modern .am-inst-name { font-size: 20px; font-weight: 600; color: #111827; line-height: 1.2; margin-bottom: 3px; }
 .admit-modern .am-inst-slogan { font-size: 11px; font-style: italic; color: #374151; line-height: 1.25; }
+.admit-modern .am-inst-slogan.am-slogan-top { margin-bottom: 2px; }
 .admit-modern .am-inst-addr { font-size: 10.5px; color: #374151; line-height: 1.3; }
 .admit-modern .am-inst-contact { font-size: 10.5px; color: #1f2937; line-height: 1.3; margin-top: 1px; }
 .admit-modern .am-qr-box { flex: 0 0 74px; text-align: center; }
@@ -1390,8 +1693,10 @@ if (!function_exists('ac_card_half')) {
                 </div>
                 <?php endif; ?>
                 <div class="ah-inst">
+                    <?php $slogan_above = (($S['slogan_position'] ?? 'below') === 'above'); ?>
+                    <?php if ($show_head_sub && $slogan_above): ?><div class="ah-inst-sub ah-sub-top"><?php echo sc_e($H['slogan']); ?></div><?php endif; ?>
                     <?php if ($show_head_name): ?><div class="ah-inst-name" style="font-size:<?php echo $inst_fs; ?>;"><?php echo sc_e($inst); ?></div><?php endif; ?>
-                    <?php if ($show_head_sub): ?><div class="ah-inst-sub"><?php echo sc_e($H['slogan']); ?></div><?php endif; ?>
+                    <?php if ($show_head_sub && !$slogan_above): ?><div class="ah-inst-sub"><?php echo sc_e($H['slogan']); ?></div><?php endif; ?>
                     <?php if ($show_head_addr): ?><div class="ah-inst-addr"><?php echo sc_e($H['address']); ?></div><?php endif; ?>
                     <?php if ($contact_parts): ?><div class="ah-inst-contact"><?php echo sc_e(implode('  |  ', $contact_parts)); ?></div><?php endif; ?>
                 </div>
@@ -1518,8 +1823,15 @@ if (!function_exists('ac_card_full_modern')) {
         $breg_val = trim((string) ($d['birth_reg_no'] ?? '')) ?: '—';
         $gender_val = trim((string) ($d['gender'] ?? '')) ?: '—';
         $mob_val = ac_format_phone($d['student_mobile'] ?? '') ?: '—';
-        $pres_addr = trim((string) ($d['present_address'] ?? '')) ?: '—';
-        $perm_addr = trim((string) ($d['permanent_address'] ?? '')) ?: '—';
+        $addr_en_only = !isset($S['address_english_only']) || !empty($S['address_english_only']);
+        $pres_raw = trim((string) ($d['present_address'] ?? ''));
+        $perm_raw = trim((string) ($d['permanent_address'] ?? ''));
+        if ($addr_en_only) {
+            if ($pres_raw !== '') { $pres_raw = ac_address_to_english($pres_raw); }
+            if ($perm_raw !== '') { $perm_raw = ac_address_to_english($perm_raw); }
+        }
+        $pres_addr = $pres_raw !== '' ? $pres_raw : '—';
+        $perm_addr = $perm_raw !== '' ? $perm_raw : '—';
 
         $adm_exam_date = trim((string) ($d['admission_exam_date'] ?? ''));
         $adm_venue = trim((string) ($d['admission_venue'] ?? ''));
@@ -1559,8 +1871,10 @@ if (!function_exists('ac_card_full_modern')) {
                 </div>
                 <?php endif; ?>
                 <div class="am-inst">
+                    <?php $slogan_above = (($S['slogan_position'] ?? 'below') === 'above'); ?>
+                    <?php if ($show_head_slogan && $slogan_above): ?><div class="am-inst-slogan am-slogan-top"><?php echo sc_e($H['slogan']); ?></div><?php endif; ?>
                     <?php if ($show_head_name): ?><div class="am-inst-name"><?php echo sc_e($inst); ?></div><?php endif; ?>
-                    <?php if ($show_head_slogan): ?><div class="am-inst-slogan"><?php echo sc_e($H['slogan']); ?></div><?php endif; ?>
+                    <?php if ($show_head_slogan && !$slogan_above): ?><div class="am-inst-slogan"><?php echo sc_e($H['slogan']); ?></div><?php endif; ?>
                     <?php if ($show_head_addr): ?><div class="am-inst-addr"><?php echo sc_e($H['address']); ?></div><?php endif; ?>
                     <?php if ($contact_spans): ?><div class="am-inst-contact"><?php echo implode(', ', $contact_spans); ?></div><?php endif; ?>
                 </div>
@@ -1794,8 +2108,16 @@ if (!function_exists('ac_card_full')) {
 
         $eiin = $H['eiin'] !== '' ? $H['eiin'] : (trim((string) ($d['branch_short'] ?? '')) ?: '—');
         $centre_name = trim((string) ($d['branch_name'] ?? '')) ?: ($inst ?: '—');
-        $centre_addr = trim((string) ($d['branch_address'] ?? '')) ?: $H['address'];
-        $cand_addr = trim((string) ($d['present_address'] ?? '')) ?: (trim((string) ($d['permanent_address'] ?? '')) ?: '—');
+        $addr_en_only = !isset($S['address_english_only']) || !empty($S['address_english_only']);
+        $centre_addr_raw = trim((string) ($d['branch_address'] ?? ''));
+        $centre_addr = $centre_addr_raw !== ''
+            ? ($addr_en_only ? ac_address_to_english($centre_addr_raw) : $centre_addr_raw)
+            : $H['address'];
+        $cand_addr_raw = trim((string) ($d['present_address'] ?? '')) ?: trim((string) ($d['permanent_address'] ?? ''));
+        if ($addr_en_only && $cand_addr_raw !== '') {
+            $cand_addr_raw = ac_address_to_english($cand_addr_raw);
+        }
+        $cand_addr = $cand_addr_raw !== '' ? $cand_addr_raw : '—';
         $dob_fmt = ac_fmt_date($d['dob'] ?? '', '—');
         $exam_date = trim((string) ($d['exam_date'] ?? '')) ?: (trim((string) ($d['issue_date'] ?? '')) ?: date('d/m/Y'));
         $exam_time = trim((string) ($d['exam_time'] ?? '')) ?: (trim((string) ($d['shift'] ?? '')) ?: '—');
@@ -1874,8 +2196,10 @@ if (!function_exists('ac_card_full')) {
                 </div>
                 <?php endif; ?>
                 <div class="af-head-text">
+                    <?php $slogan_above = (($S['slogan_position'] ?? 'below') === 'above'); ?>
+                    <?php if ($show_head_slogan && $slogan_above): ?><div class="af-slogan af-slogan-top"><?php echo sc_e($H['slogan']); ?></div><?php endif; ?>
                     <?php if ($show_head_name): ?><div class="af-inst"><?php echo sc_e($inst); ?></div><?php endif; ?>
-                    <?php if ($show_head_slogan): ?><div class="af-slogan"><?php echo sc_e($H['slogan']); ?></div><?php endif; ?>
+                    <?php if ($show_head_slogan && !$slogan_above): ?><div class="af-slogan"><?php echo sc_e($H['slogan']); ?></div><?php endif; ?>
                     <div class="af-title"><?php echo sc_e(mb_strtoupper($H['card_title'])); ?><?php echo $term !== '' ? ' — ' . sc_e($term) : ''; ?><?php echo (!empty($S['show_session']) && $session !== '') ? ' (' . sc_e($session) . ')' : ''; ?></div>
                     <?php if ($subtitle_parts): ?><div class="af-sub"><?php echo sc_e(implode(' | ', $subtitle_parts)); ?></div><?php endif; ?>
                 </div>
@@ -2065,8 +2389,10 @@ if (!function_exists('ac_card')) {
                 </div>
                 <?php endif; ?>
                 <div class="ad-inst">
+                    <?php $slogan_above = (($S['slogan_position'] ?? 'below') === 'above'); ?>
+                    <?php if (!empty($S['show_slogan']) && $H['slogan'] !== '' && $slogan_above): ?><small><?php echo sc_e($H['slogan']); ?></small><?php endif; ?>
                     <?php if (!empty($S['show_institute_name']) && $H['inst'] !== ''): ?><b><?php echo sc_e($H['inst']); ?></b><?php endif; ?>
-                    <?php if (!empty($S['show_slogan']) && $H['slogan'] !== ''): ?><small><?php echo sc_e($H['slogan']); ?></small><?php endif; ?>
+                    <?php if (!empty($S['show_slogan']) && $H['slogan'] !== '' && !$slogan_above): ?><small><?php echo sc_e($H['slogan']); ?></small><?php endif; ?>
                     <?php if (!empty($S['show_address']) && $H['address'] !== ''): ?><small><?php echo sc_e($H['address']); ?></small><?php endif; ?>
                     <?php if (!empty($S['show_website']) && $H['website'] !== ''): ?><small class="web"><?php echo sc_e($H['website']); ?></small><?php endif; ?>
                 </div>
