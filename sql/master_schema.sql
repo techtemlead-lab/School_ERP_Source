@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS tenants (
     contact_name    VARCHAR(150) NULL,
     contact_phone   VARCHAR(30) NULL,
     contact_email   VARCHAR(150) NULL,
+    branding_policy_json TEXT NULL DEFAULT NULL,
 
     -- Trash (soft-delete) — deleted_at সেট থাকলে এটা Trash-এ আছে ধরা হয়,
     -- client_list.php এ দেখাবে না, master/trash.php থেকে Restore করা যাবে

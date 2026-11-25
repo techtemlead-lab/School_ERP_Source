@@ -25,6 +25,19 @@ function ensureTenantTrashColumns($pdo) {
     $done = true;
 }
 
+/** Ensures per-tenant branding_policy_json column exists on tenants table. */
+function ensureTenantBrandingPolicyColumn($pdo) {
+    static $done = false;
+    if ($done) return;
+    try {
+        $stmt = $pdo->query("SHOW COLUMNS FROM `tenants` LIKE 'branding_policy_json'");
+        if (!$stmt->fetch()) {
+            $pdo->exec("ALTER TABLE `tenants` ADD COLUMN `branding_policy_json` TEXT NULL DEFAULT NULL AFTER `contact_email`");
+        }
+    } catch (Exception $e) { /* নিরাপদে উপেক্ষা */ }
+    $done = true;
+}
+
 // tenants.status এনামে 'Blocked' যোগ করে। পুরনো ভ্যালু (Active/Suspended/
 // Cancelled) এবং পুরনো ডেটা কিছুই বদলায় না/মুছে না — শুধু নতুন একটা
 // অপশন এলাউড লিস্টে যুক্ত হয়, তাই এটা সম্পূর্ণ নিরাপদ/non-destructive।
