@@ -56,9 +56,23 @@ $sp_inst_name = trim((string) ($sp_ac_settings['custom_institute_name'] ?? ''))
 $sp_logo_path = trim((string) ($sp_ac_settings['logo_path'] ?? ''))
     ?: trim((string) ($institute['logo_path'] ?? ''));
 
+$sp_can_edit = !function_exists('perm_action_allowed') || perm_action_allowed($pdo, 'result_exam_seat_plan', 'edit');
+$sp_brand_pol = erp_branding_surface_policy('seat_plan');
+$sp_brand_can_toggle = ($sp_brand_pol === 'allow');
+
 // -----------------------------------------------------------
 // POST: ফর্ম সাবমিট -> ফিল্টার সেশনে রেখে output ভিউতে রিডাইরেক্ট
 // -----------------------------------------------------------
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_sp_branding'])) {
+    if (!csrf_verify($_POST['csrf_token'] ?? null)) {
+        $_SESSION['sp_err'] = 'ফর্মের মেয়াদ শেষ হয়ে গেছে, পেজ রিলোড করে আবার চেষ্টা করুন।';
+    } elseif ($sp_brand_can_toggle && $sp_can_edit) {
+        ac_save_seat_branding($pdo, $sp_bid, !empty($_POST['show_powered_by']));
+    }
+    header('Location: index.php?page=result_exam_seat_plan&view=output');
+    exit();
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_seat_plan'])) {
     if (!csrf_verify($_POST['csrf_token'] ?? null)) {
         $_SESSION['sp_err'] = 'ফর্মের মেয়াদ শেষ হয়ে গেছে, পেজ রিলোড করে আবার চেষ্টা করুন।';
@@ -87,6 +101,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_seat_plan'])
         'color_mode' => (($_POST['color_mode'] ?? 'color') === 'grayscale') ? 'grayscale' : 'color',
         'show_photo' => !empty($_POST['show_photo']) ? 1 : 0,
     ];
+    if ($sp_brand_can_toggle && $sp_can_edit && array_key_exists('show_powered_by', $_POST)) {
+        ac_save_seat_branding($pdo, $sp_bid, !empty($_POST['show_powered_by']));
+    }
 
     // Room তথ্য সেভ করা হচ্ছে (থাকলে) — যাতে Student পোর্টাল থেকে পরে ঠিক একই Room দেখা যায়
     if ($_SESSION['sp_generate']['room'] !== '') {
@@ -131,6 +148,9 @@ $sp_photo = isset($_GET['show_photo'])
     ? (!empty($_GET['show_photo']) ? 1 : 0)
     : (!empty($sp_opts['show_photo']) ? 1 : 0);
 $_SESSION['sp_opts'] = ['color_mode' => $sp_color, 'show_photo' => $sp_photo];
+
+$sp_brand_saved = !isset($sp_ac_settings['show_powered_by_seat']) || !empty($sp_ac_settings['show_powered_by_seat']);
+$sp_show_powered = erp_branding_resolve_show('seat_plan', $sp_brand_saved);
 
 $view = $_GET['view'] ?? 'config';
 ?>
@@ -182,20 +202,35 @@ $view = $_GET['view'] ?? 'config';
 
     <div class="no-print d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
         <a href="index.php?page=result_exam_seat_plan" class="btn btn-secondary"><i class="fa-solid fa-arrow-left"></i> Back</a>
-        <form method="GET" class="d-flex align-items-center gap-2 flex-wrap">
-            <input type="hidden" name="page" value="result_exam_seat_plan">
-            <input type="hidden" name="view" value="output">
-            <select name="color_mode" data-ss="off" class="form-select form-select-sm" style="width:auto;" onchange="this.form.submit()" title="Print Color Mode">
-                <option value="color"<?php echo $sp_color === 'color' ? ' selected' : ''; ?>>Color</option>
-                <option value="grayscale"<?php echo $sp_color === 'grayscale' ? ' selected' : ''; ?>>Grayscale (B&amp;W)</option>
-            </select>
-            <select name="show_photo" data-ss="off" class="form-select form-select-sm" style="width:auto;" onchange="this.form.submit()" title="Student Photo">
-                <option value="0"<?php echo $sp_photo === 0 ? ' selected' : ''; ?>>Without Photo</option>
-                <option value="1"<?php echo $sp_photo === 1 ? ' selected' : ''; ?>>With Photo</option>
-            </select>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <form method="GET" class="d-flex align-items-center gap-2 flex-wrap">
+                <input type="hidden" name="page" value="result_exam_seat_plan">
+                <input type="hidden" name="view" value="output">
+                <select name="color_mode" data-ss="off" class="form-select form-select-sm" style="width:auto;" onchange="this.form.submit()" title="Print Color Mode">
+                    <option value="color"<?php echo $sp_color === 'color' ? ' selected' : ''; ?>>Color</option>
+                    <option value="grayscale"<?php echo $sp_color === 'grayscale' ? ' selected' : ''; ?>>Grayscale (B&amp;W)</option>
+                </select>
+                <select name="show_photo" data-ss="off" class="form-select form-select-sm" style="width:auto;" onchange="this.form.submit()" title="Student Photo">
+                    <option value="0"<?php echo $sp_photo === 0 ? ' selected' : ''; ?>>Without Photo</option>
+                    <option value="1"<?php echo $sp_photo === 1 ? ' selected' : ''; ?>>With Photo</option>
+                </select>
+            </form>
+            <?php if ($sp_brand_can_toggle && $sp_can_edit): ?>
+            <form method="POST" action="index.php?page=result_exam_seat_plan&view=output" class="d-inline-flex align-items-center">
+                <?php echo csrf_field(); ?>
+                <input type="hidden" name="update_sp_branding" value="1">
+                <select name="show_powered_by" data-ss="off" class="form-select form-select-sm" style="width:auto;" onchange="this.form.submit()" title="Powered by TechTeam">
+                    <option value="1"<?php echo $sp_show_powered ? ' selected' : ''; ?>>Powered by: ON</option>
+                    <option value="0"<?php echo !$sp_show_powered ? ' selected' : ''; ?>>Powered by: OFF</option>
+                </select>
+            </form>
+            <?php elseif ($sp_brand_pol === 'force_on'): ?>
+            <span class="badge bg-light text-secondary border"><i class="fa-solid fa-lock me-1"></i>Powered by: Locked ON</span>
+            <?php endif; ?>
             <button type="button" class="btn btn-primary fw-bold" onclick="window.print()"><i class="fa-solid fa-print"></i> Print</button>
-        </form>
+        </div>
     </div>
+    <?php if ($sp_err): ?><div class="alert alert-danger py-2 no-print"><?php echo spv($sp_err); ?></div><?php endif; ?>
 
     <?php if (!$students): ?>
         <div class="card-custom"><p class="text-muted mb-0">নির্বাচিত ফিল্টারে কোনো শিক্ষার্থী পাওয়া যায়নি।</p></div>
@@ -207,7 +242,7 @@ $view = $_GET['view'] ?? 'config';
                     'room' => $room, 'term' => $term_name, 'part' => $part_name, 'year' => $seat_year,
                     'name' => $st['name_en'], 'class' => $st['class_name'] ?? '', 'shift' => $st['shift_name'] ?? '',
                     'section' => $st['section_name'] ?? '', 'roll' => $st['roll_no'], 'student_id' => $st['student_id'],
-                    'photo' => $st['photo_path'] ?? '', 'show_photo' => ($sp_photo === 1),
+                    'photo' => $st['photo_path'] ?? '', 'show_photo' => ($sp_photo === 1), 'show_powered_by' => $sp_show_powered,
                 ]); ?>
             <?php endforeach; ?>
         </div>
@@ -299,6 +334,19 @@ $view = $_GET['view'] ?? 'config';
                             <option value="1"<?php echo $sp_photo === 1 ? ' selected' : ''; ?>>With Photo</option>
                         </select>
                     </div>
+                    <?php if ($sp_brand_can_toggle && $sp_can_edit): ?>
+                    <div class="d-flex align-items-center gap-2">
+                        <label class="fw-bold mb-0 small">Powered by TechTeam:</label>
+                        <select name="show_powered_by" data-ss="off" class="form-select form-select-sm" style="width:auto;">
+                            <option value="1"<?php echo $sp_show_powered ? ' selected' : ''; ?>>দেখাবে (ON)</option>
+                            <option value="0"<?php echo !$sp_show_powered ? ' selected' : ''; ?>>লুকাবে (OFF)</option>
+                        </select>
+                    </div>
+                    <?php elseif ($sp_brand_pol === 'force_on'): ?>
+                    <span class="badge bg-light text-secondary border"><i class="fa-solid fa-lock me-1"></i>Powered by TechTeam: Locked ON</span>
+                    <?php elseif ($sp_brand_pol === 'force_off'): ?>
+                    <span class="badge bg-light text-secondary border">White-label (Branding OFF)</span>
+                    <?php endif; ?>
                 </div>
                 <button type="submit" name="generate_seat_plan" class="btn btn-primary px-5 fw-bold" style="background-color:#1e3a8a;">Submit</button>
             </div>

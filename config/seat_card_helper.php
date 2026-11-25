@@ -1,5 +1,6 @@
 <?php
 // config/seat_card_helper.php - Exam Seat Plan কার্ডের ডিজাইন (Admin + Student পোর্টাল দুই জায়গায় একই)
+require_once __DIR__ . '/branding_policy.php';
 if (!function_exists('sc_e')) {
     function sc_e($v): string { return htmlspecialchars((string) ($v ?? ''), ENT_QUOTES, 'UTF-8'); }
 }
@@ -105,6 +106,8 @@ if (!function_exists('sc_card')) {
         $room = trim((string) ($d['room'] ?? ''));
         $part = trim((string) ($d['part'] ?? ''));
         $show_photo = !empty($d['show_photo']);
+        $school_pow = !array_key_exists('show_powered_by', $d) || !empty($d['show_powered_by']);
+        $show_powered = erp_branding_resolve_show('seat_plan', $school_pow);
         ob_start(); ?>
         <div class="seatcard">
             <div class="sc-head">
@@ -141,10 +144,12 @@ if (!function_exists('sc_card')) {
             </div>
             <div class="sc-foot">
                 <div class="sc-sid"><span>Student ID</span><b><?php echo sc_e($d['student_id'] ?? ''); ?></b></div>
+                <?php if ($show_powered): ?>
                 <div class="sc-brand">
                     <span class="sc-pow-lbl">Powered by</span>
                     <img class="sc-pow-logo" src="../assets/techteam-logo.svg" alt="TechTeam">
                 </div>
+                <?php endif; ?>
             </div>
         </div>
         <?php
@@ -469,6 +474,9 @@ if (!function_exists('ac_default_settings')) {
             'nb_note_text'          => 'N.B: This Admit Card must be carried in the exam hall. Without this card no one will be allowed to sit for the exam.',
             'show_compact_note'     => 1,
             'compact_note_text'     => 'পরীক্ষার হলে এই কার্ডটি অবশ্যই সঙ্গে আনতে হবে।',
+            'show_powered_by_modern'  => 1,
+            'show_powered_by_classic' => 1,
+            'show_powered_by_seat'    => 1,
 
             'show_logo'             => 1,
             'logo_path'             => '',
@@ -651,6 +659,7 @@ if (!function_exists('ac_load_settings')) {
                     'show_sig_principal', 'sig_principal_path', 'sig_principal_name', 'sig_principal_label',
                     'show_sig_secondary', 'sig_secondary_path', 'sig_secondary_name', 'sig_secondary_label',
                     'show_sig_candidate', 'sig_candidate_label',
+                    'show_powered_by_modern', 'show_powered_by_classic', 'show_powered_by_seat',
                 ];
                 foreach ($shared_keys as $sk) {
                     if (array_key_exists($sk, $gen)) {
@@ -734,6 +743,18 @@ if (!function_exists('ac_save_settings')) {
                 config_json = VALUES(config_json)"
         );
         $stmt->execute([$bid, $type, $dl, $ori, $dw, $dh, $ft, $logo ?: null, $sig_p ?: null, $sig_s ?: null, $json]);
+    }
+}
+
+if (!function_exists('ac_save_seat_branding')) {
+    /**
+     * Exam Seat Plan কার্ডের "Powered by TechTeam" প্রদর্শনের স্কুল-স্তরের পছন্দ সংরক্ষণ করে।
+     */
+    function ac_save_seat_branding(PDO $pdo, ?int $branch_id, bool $show): void
+    {
+        $cfg = ac_load_settings($pdo, $branch_id, 'general');
+        $cfg['show_powered_by_seat'] = $show ? 1 : 0;
+        ac_save_settings($pdo, $branch_id, $cfg, 'general');
     }
 }
 
@@ -1731,11 +1752,16 @@ if (!function_exists('ac_card_full_modern')) {
                     <div>Printing Date: <strong><?php echo sc_e($print_date); ?></strong></div>
                     <?php if ($inst !== ''): ?><div style="font-style:italic;">This admit card is the official property of <?php echo sc_e($inst); ?></div><?php endif; ?>
                 </div>
+                <?php
+                $school_pow_mod = !isset($S['show_powered_by_modern']) || !empty($S['show_powered_by_modern']);
+                if (erp_branding_resolve_show('admit_1full_modern', $school_pow_mod)):
+                ?>
                 <div class="am-foot-right">
                     <div class="am-pow-lbl">Powered by</div>
                     <img class="am-pow-logo" src="../assets/techteam-logo.svg" alt="TechTeam">
                     <div class="am-pow-url">techteamlead.com</div>
                 </div>
+                <?php endif; ?>
             </div>
         </div></div>
         <?php
@@ -1975,11 +2001,16 @@ if (!function_exists('ac_card_full')) {
                     <div>Printing Date: <strong><?php echo sc_e($print_date); ?></strong></div>
                     <?php if ($inst !== ''): ?><div style="font-style:italic;">This admit card is the official property of <?php echo sc_e($inst); ?></div><?php endif; ?>
                 </div>
+                <?php
+                $school_pow_cls = !isset($S['show_powered_by_classic']) || !empty($S['show_powered_by_classic']);
+                if (erp_branding_resolve_show('admit_1full_classic', $school_pow_cls)):
+                ?>
                 <div class="af-foot-right">
                     <div class="af-pow-lbl">Powered by</div>
                     <img class="af-pow-logo" src="../assets/techteam-logo.svg" alt="TechTeam">
                     <div class="af-pow-url">techteamlead.com</div>
                 </div>
+                <?php endif; ?>
             </div>
         </div></div>
         <?php

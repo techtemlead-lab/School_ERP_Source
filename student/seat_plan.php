@@ -95,6 +95,7 @@ $sp_inst_name = trim((string) ($sp_ac_settings['custom_institute_name'] ?? ''))
     ?: (trim((string) ($st_branch['branch_name'] ?? '')) ?: trim((string) ($institute['institute_name'] ?? '')));
 $sp_logo_path = trim((string) ($sp_ac_settings['logo_path'] ?? ''))
     ?: trim((string) ($institute['logo_path'] ?? ''));
+$st_show_powered = erp_branding_resolve_show('seat_plan', !isset($sp_ac_settings['show_powered_by_seat']) || !empty($sp_ac_settings['show_powered_by_seat']));
 ?>
 <?php if (!$terms): ?>
     <div class="card-custom text-center py-5">
@@ -159,7 +160,7 @@ $sp_logo_path = trim((string) ($sp_ac_settings['logo_path'] ?? ''))
             'room' => $room, 'term' => $term_name, 'part' => $part_name, 'year' => date('Y'),
             'name' => $student['name_en'], 'class' => $class_name, 'shift' => $shift_name,
             'section' => $section_name, 'roll' => $student['roll_no'], 'student_id' => $student['student_id'],
-            'photo' => $student['photo_path'] ?? '', 'show_photo' => ($sel_photo === 1),
+            'photo' => $student['photo_path'] ?? '', 'show_photo' => ($sel_photo === 1), 'show_powered_by' => $st_show_powered,
         ]); ?>
     </div>
 

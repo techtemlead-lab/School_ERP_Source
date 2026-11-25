@@ -144,6 +144,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['update_admit_card_se
     $dl_in = ac_normalize_layout_key((string) ($_POST['default_layout'] ?? '1full_modern'));
     $ft_in = ($dl_in === '1full_classic') ? 'classic' : 'modern';
 
+    $can_pow_mod = erp_branding_can_school_toggle('admit_1full_modern');
+    $can_pow_cls = erp_branding_can_school_toggle('admit_1full_classic');
+
     $new_cfg = [
         'default_layout'         => $dl_in,
         'default_ori'            => (string) ($_POST['default_ori'] ?? 'portrait'),
@@ -158,6 +161,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['update_admit_card_se
         'nb_note_text'           => (string) ($_POST['nb_note_text'] ?? ''),
         'show_compact_note'      => isset($_POST['show_compact_note']) ? 1 : 0,
         'compact_note_text'      => (string) ($_POST['compact_note_text'] ?? ''),
+        'show_powered_by_modern' => $can_pow_mod
+            ? (isset($_POST['show_powered_by_modern']) ? 1 : 0)
+            : ((!isset($prev_cfg['show_powered_by_modern']) || !empty($prev_cfg['show_powered_by_modern'])) ? 1 : 0),
+        'show_powered_by_classic' => $can_pow_cls
+            ? (isset($_POST['show_powered_by_classic']) ? 1 : 0)
+            : ((!isset($prev_cfg['show_powered_by_classic']) || !empty($prev_cfg['show_powered_by_classic'])) ? 1 : 0),
+        'show_powered_by_seat'   => (!isset($prev_cfg['show_powered_by_seat']) || !empty($prev_cfg['show_powered_by_seat'])) ? 1 : 0,
 
         'show_logo'              => isset($_POST['show_logo']) ? 1 : 0,
         'logo_path'              => $r_logo['path'],
@@ -271,6 +281,10 @@ $instr = ac_load_instructions($pdo, $fr_bid, $admit_type);
 $govt_defaults = ac_default_instructions($admit_type);
 $has_own_settings = !empty($S['is_custom']) && ((int) ($S['scope_branch_id'] ?? -1) === $scope_bid);
 $has_own_instr = !empty($instr['is_custom']) && ((int) ($instr['scope_branch_id'] ?? -1) === $scope_bid);
+$pol_pow_mod = erp_branding_surface_policy('admit_1full_modern');
+$pol_pow_cls = erp_branding_surface_policy('admit_1full_classic');
+$eff_pow_mod = erp_branding_resolve_show('admit_1full_modern', !isset($S['show_powered_by_modern']) || !empty($S['show_powered_by_modern']));
+$eff_pow_cls = erp_branding_resolve_show('admit_1full_classic', !isset($S['show_powered_by_classic']) || !empty($S['show_powered_by_classic']));
 
 $db_inst_name = trim((string) (($branch['branch_name'] ?? '') ?: ($institute['institute_name'] ?? '')));
 $db_slogan    = trim((string) ($institute['slogan'] ?? ''));
@@ -492,6 +506,32 @@ $student_toggles = [
                         <label class="form-check-label fw-bold small" for="sw_compact_note">৩/৪-পেজ ও কাস্টম কার্ডে নিচের ফুটনোট দেখাবে</label>
                     </div>
                     <input type="text" name="compact_note_text" maxlength="255" class="form-control form-control-sm" value="<?php echo accv($S['compact_note_text']); ?>">
+                </div>
+                <div class="col-12" data-layouts="1full_modern">
+                    <div class="border rounded p-2 px-3 bg-light d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch" id="sw_show_powered_by_modern" name="show_powered_by_modern"<?php echo $eff_pow_mod ? ' checked' : ''; ?><?php echo $pol_pow_mod !== 'allow' ? ' disabled' : ''; ?>>
+                            <label class="form-check-label fw-bold small" for="sw_show_powered_by_modern">টেম্পলেট ২ (Modern ১-পেজ) কার্ডে নিচে "Powered by TechTeam" দেখাবে</label>
+                        </div>
+                        <?php if ($pol_pow_mod === 'force_on'): ?>
+                            <span class="badge bg-warning text-dark"><i class="fa-solid fa-lock me-1"></i>সুপার অ্যাডমিন কর্তৃক লকড (ON)</span>
+                        <?php elseif ($pol_pow_mod === 'force_off'): ?>
+                            <span class="badge bg-secondary"><i class="fa-solid fa-ban me-1"></i>সুপার অ্যাডমিন কর্তৃক বন্ধ (White-label)</span>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                <div class="col-12" data-layouts="1full_classic">
+                    <div class="border rounded p-2 px-3 bg-light d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch" id="sw_show_powered_by_classic" name="show_powered_by_classic"<?php echo $eff_pow_cls ? ' checked' : ''; ?><?php echo $pol_pow_cls !== 'allow' ? ' disabled' : ''; ?>>
+                            <label class="form-check-label fw-bold small" for="sw_show_powered_by_classic">টেম্পলেট ১ (Classic ১-পেজ) কার্ডে নিচে "Powered by TechTeam" দেখাবে</label>
+                        </div>
+                        <?php if ($pol_pow_cls === 'force_on'): ?>
+                            <span class="badge bg-warning text-dark"><i class="fa-solid fa-lock me-1"></i>সুপার অ্যাডমিন কর্তৃক লকড (ON)</span>
+                        <?php elseif ($pol_pow_cls === 'force_off'): ?>
+                            <span class="badge bg-secondary"><i class="fa-solid fa-ban me-1"></i>সুপার অ্যাডমিন কর্তৃক বন্ধ (White-label)</span>
+                        <?php endif; ?>
+                    </div>
                 </div>
             </div>
         </div>
