@@ -229,6 +229,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['update_admit_card_se
         'show_birth_reg'         => isset($_POST['show_birth_reg']) ? 1 : 0,
         'show_student_mobile'    => isset($_POST['show_student_mobile']) ? 1 : 0,
         'show_permanent_address' => isset($_POST['show_permanent_address']) ? 1 : 0,
+        'student_info_cols'      => ((int) ($_POST['student_info_cols'] ?? 1) === 2) ? 2 : 1,
+        'student_info_col_map'   => is_array($_POST['student_info_col_map'] ?? null) ? $_POST['student_info_col_map'] : [],
         'show_routine'           => ($admit_type === 'general' && isset($_POST['show_routine'])) ? 1 : 0,
     ];
 
@@ -769,12 +771,59 @@ $student_toggles = [
             </div>
         </div>
         <div class="acc-panel-bd">
+            <?php
+            $cur_stu_cols = ((int) ($S['student_info_cols'] ?? 1) === 2) ? 2 : 1;
+            $cur_col_map = is_array($S['student_info_col_map'] ?? null) ? $S['student_info_col_map'] : [];
+            $toggle_to_col_key = [
+                'show_father_name'       => 'father_name',
+                'show_mother_name'       => 'mother_name',
+                'show_dob'               => 'dob',
+                'show_age'               => 'age',
+                'show_birth_reg'         => 'birth_reg',
+                'show_gender'            => 'gender',
+                'show_student_mobile'    => 'mobile',
+                'show_student_address'   => 'present_address',
+                'show_permanent_address' => 'permanent_address',
+            ];
+            $stu_fields_meta = ac_student_info_fields();
+            ?>
+            <div class="border rounded p-2 px-3 mb-3 bg-light d-flex justify-content-between align-items-center flex-wrap gap-2" data-layouts="1full_modern">
+                <div>
+                    <div class="fw-bold small">শিক্ষার্থীর তথ্যের কলাম লেআউট (টেম্পলেট ২)</div>
+                    <div class="text-muted" style="font-size:11.5px;">২ কলাম বেছে নিলে প্রতিটি ফিল্ড কোন কলামে (বামে/ডানে) বসবে তা নিচে থেকে নির্বাচন করতে পারবেন।</div>
+                </div>
+                <div class="btn-group btn-group-sm" role="group" aria-label="Student Info Columns">
+                    <input type="radio" class="btn-check" name="student_info_cols" id="stu_cols_1" value="1"<?php echo $cur_stu_cols === 1 ? ' checked' : ''; ?> onchange="accStuColsToggle()">
+                    <label class="btn btn-outline-primary" for="stu_cols_1">1 Column (১ কলাম)</label>
+                    <input type="radio" class="btn-check" name="student_info_cols" id="stu_cols_2" value="2"<?php echo $cur_stu_cols === 2 ? ' checked' : ''; ?> onchange="accStuColsToggle()">
+                    <label class="btn btn-outline-primary" for="stu_cols_2">2 Columns (২ কলাম)</label>
+                </div>
+            </div>
             <div class="row g-2">
+                <div class="col-md-4 col-sm-6 acc-col-only" data-layouts="1full_modern">
+                    <div class="border rounded px-3 py-2 d-flex justify-content-between align-items-center gap-2 bg-light">
+                        <span class="small fw-semibold">Student Name <span class="text-muted">(সবসময় অন)</span></span>
+                        <select name="student_info_col_map[name]" data-ss="off" class="form-select form-select-sm acc-col-sel" style="width:auto;" title="Column">
+                            <option value="1"<?php echo ((int) ($cur_col_map['name'] ?? 1) === 1) ? ' selected' : ''; ?>>Col 1</option>
+                            <option value="2"<?php echo ((int) ($cur_col_map['name'] ?? 1) === 2) ? ' selected' : ''; ?>>Col 2</option>
+                        </select>
+                    </div>
+                </div>
                 <?php foreach ($student_toggles as [$t_key, $t_lbl, $t_layouts]): ?>
+                <?php $ck = $toggle_to_col_key[$t_key] ?? null; ?>
                 <div class="col-md-4 col-sm-6" data-layouts="<?php echo accv($t_layouts); ?>">
-                    <div class="form-check form-switch border rounded px-3 py-2 ps-5">
-                        <input class="form-check-input" type="checkbox" role="switch" id="sw_<?php echo $t_key; ?>" name="<?php echo $t_key; ?>"<?php echo !empty($S[$t_key]) ? ' checked' : ''; ?>>
-                        <label class="form-check-label small fw-semibold" for="sw_<?php echo $t_key; ?>"><?php echo accv($t_lbl); ?></label>
+                    <div class="border rounded px-3 py-2 d-flex justify-content-between align-items-center gap-2">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch" id="sw_<?php echo $t_key; ?>" name="<?php echo $t_key; ?>"<?php echo !empty($S[$t_key]) ? ' checked' : ''; ?>>
+                            <label class="form-check-label small fw-semibold" for="sw_<?php echo $t_key; ?>"><?php echo accv($t_lbl); ?></label>
+                        </div>
+                        <?php if ($ck !== null): ?>
+                        <?php $def_c = $stu_fields_meta[$ck]['default_col'] ?? 1; $cur_c = ((int) ($cur_col_map[$ck] ?? $def_c) === 2) ? 2 : 1; ?>
+                        <select name="student_info_col_map[<?php echo accv($ck); ?>]" data-ss="off" class="form-select form-select-sm acc-col-sel acc-col-only" style="width:auto;" title="Column">
+                            <option value="1"<?php echo $cur_c === 1 ? ' selected' : ''; ?>>Col 1</option>
+                            <option value="2"<?php echo $cur_c === 2 ? ' selected' : ''; ?>>Col 2</option>
+                        </select>
+                        <?php endif; ?>
                     </div>
                 </div>
                 <?php endforeach; ?>
@@ -940,8 +989,21 @@ function accLayoutToggle() {
     if (fb) {
         fb.textContent = visibleFieldCount + ' টি ফিল্ড প্রযোজ্য';
     }
+    if (typeof accStuColsToggle === 'function') {
+        accStuColsToggle();
+    }
+}
+function accStuColsToggle() {
+    var l = document.getElementById('accLayout');
+    var layoutVal = l ? l.value : '1full_modern';
+    var c2 = document.getElementById('stu_cols_2');
+    var isTwo = (layoutVal === '1full_modern') && c2 && c2.checked;
+    document.querySelectorAll('.acc-col-only').forEach(function (el) {
+        el.style.display = isTwo ? '' : 'none';
+    });
 }
 accLayoutToggle();
+accStuColsToggle();
 
 (function () {
     var hash = window.location.hash;

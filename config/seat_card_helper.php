@@ -165,7 +165,11 @@ if (!function_exists('sc_qr_script')) {
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 document.querySelectorAll('.sc-qr[data-qr], .ad-qr[data-qr]').forEach(function (el) {
-    if (window.QRCode) { new QRCode(el, { text: el.getAttribute('data-qr'), width: 120, height: 120, correctLevel: QRCode.CorrectLevel.M }); }
+    if (window.QRCode) {
+        var txt = el.getAttribute('data-qr') || '';
+        var lvl = txt.length > 80 ? QRCode.CorrectLevel.L : QRCode.CorrectLevel.M;
+        new QRCode(el, { text: txt, width: 120, height: 120, correctLevel: lvl });
+    }
 });
 </script>
 JS;
@@ -555,6 +559,44 @@ if (!function_exists('ac_address_to_english')) {
     }
 }
 
+if (!function_exists('ac_format_website')) {
+    /**
+     * Normalizes a school website URL so it always displays with an explicit https:// scheme.
+     */
+    function ac_format_website(?string $url): string
+    {
+        $u = trim((string) ($url ?? ''));
+        if ($u === '') {
+            return '';
+        }
+        if (!preg_match('#^https?://#i', $u)) {
+            $u = 'https://' . ltrim($u, '/');
+        }
+        return $u;
+    }
+}
+
+if (!function_exists('ac_student_info_fields')) {
+    /**
+     * Ordered registry of candidate info fields for 1-column / 2-column Admit Card layout.
+     */
+    function ac_student_info_fields(): array
+    {
+        return [
+            'name'              => ['label' => 'Student Name',    'toggle' => null,                     'default_col' => 1],
+            'father_name'       => ['label' => "Father's Name",   'toggle' => 'show_father_name',       'default_col' => 1],
+            'mother_name'       => ['label' => "Mother's Name",   'toggle' => 'show_mother_name',       'default_col' => 1],
+            'dob'               => ['label' => 'Date of Birth',   'toggle' => 'show_dob',               'default_col' => 1],
+            'age'               => ['label' => 'Age / বয়স',       'toggle' => 'show_age',               'default_col' => 2],
+            'birth_reg'         => ['label' => 'Birth Reg. No.',  'toggle' => 'show_birth_reg',         'default_col' => 1],
+            'gender'            => ['label' => 'Gender',          'toggle' => 'show_gender',            'default_col' => 2],
+            'mobile'            => ['label' => 'Mobile',          'toggle' => 'show_student_mobile',    'default_col' => 1],
+            'present_address'   => ['label' => 'Present Address', 'toggle' => 'show_student_address',   'default_col' => 1],
+            'permanent_address' => ['label' => 'Permanent Address','toggle' => 'show_permanent_address','default_col' => 2],
+        ];
+    }
+}
+
 if (!function_exists('ac_normalize_type')) {
     function ac_normalize_type(?string $type): string
     {
@@ -830,6 +872,19 @@ if (!function_exists('ac_default_settings')) {
             'show_birth_reg'         => 1,
             'show_student_mobile'    => 1,
             'show_permanent_address' => 1,
+            'student_info_cols'      => 1,
+            'student_info_col_map'   => [
+                'name'              => 1,
+                'father_name'       => 1,
+                'mother_name'       => 1,
+                'dob'               => 1,
+                'age'               => 2,
+                'birth_reg'         => 1,
+                'gender'            => 2,
+                'mobile'            => 1,
+                'present_address'   => 1,
+                'permanent_address' => 2,
+            ],
             'show_routine'           => $type === 'admission' ? 0 : 1,
             'routine_mode'           => 'auto_db',
             'custom_routine_rows'    => [],
@@ -934,6 +989,13 @@ if (!function_exists('ac_load_settings')) {
                 $cfg['full_template']      = $norm_layout === '1full_classic' ? 'classic' : ($norm_layout === '1full_modern' ? 'modern' : ($raw_ft === 'classic' ? 'classic' : 'modern'));
                 $cfg['default_color_mode'] = (($cfg['default_color_mode'] ?? 'color') === 'grayscale') ? 'grayscale' : 'color';
                 $cfg['slogan_position']    = (($cfg['slogan_position'] ?? 'below') === 'above') ? 'above' : 'below';
+                $cfg['student_info_cols']  = ((int) ($cfg['student_info_cols'] ?? 1) === 2) ? 2 : 1;
+                $raw_cmap = is_array($cfg['student_info_col_map'] ?? null) ? $cfg['student_info_col_map'] : [];
+                $norm_cmap = [];
+                foreach (ac_student_info_fields() as $fk => $fm) {
+                    $norm_cmap[$fk] = ((int) ($raw_cmap[$fk] ?? $fm['default_col']) === 2) ? 2 : 1;
+                }
+                $cfg['student_info_col_map'] = $norm_cmap;
                 $cfg['logo_path']          = (string) ($row['logo_path'] ?? '');
                 $cfg['sig_principal_path'] = (string) ($row['sig_principal_path'] ?? '');
                 $cfg['sig_secondary_path'] = (string) ($row['sig_secondary_path'] ?? '');
@@ -997,6 +1059,15 @@ if (!function_exists('ac_save_settings')) {
                 $payload[$k] = (($in[$k] ?? 'color') === 'grayscale') ? 'grayscale' : 'color';
             } elseif ($k === 'slogan_position') {
                 $payload[$k] = (($in[$k] ?? 'below') === 'above') ? 'above' : 'below';
+            } elseif ($k === 'student_info_cols') {
+                $payload[$k] = ((int) ($in[$k] ?? 1) === 2) ? 2 : 1;
+            } elseif ($k === 'student_info_col_map') {
+                $cmap_in = is_array($in[$k] ?? null) ? $in[$k] : [];
+                $cmap_out = [];
+                foreach (ac_student_info_fields() as $fk => $fm) {
+                    $cmap_out[$fk] = ((int) ($cmap_in[$fk] ?? $fm['default_col']) === 2) ? 2 : 1;
+                }
+                $payload[$k] = $cmap_out;
             } elseif ($k === 'default_gap') {
                 $payload[$k] = max(0.0, min(30.0, (float) ($in[$k] ?? 4.0)));
             } elseif ($k === 'routine_mode') {
@@ -1114,7 +1185,7 @@ if (!function_exists('ac_resolve_header')) {
         $email = $custom_email !== '' ? $custom_email : trim((string) ($d['email'] ?? ''));
 
         $custom_web = trim((string) ($S['custom_website'] ?? ''));
-        $website = $custom_web !== '' ? $custom_web : trim((string) ($d['website'] ?? ''));
+        $website = ac_format_website($custom_web !== '' ? $custom_web : trim((string) ($d['website'] ?? '')));
 
         $custom_eiin = trim((string) ($S['custom_eiin'] ?? ''));
         $eiin = $custom_eiin !== '' ? $custom_eiin : trim((string) ($d['eiin'] ?? ''));
@@ -1544,6 +1615,9 @@ if (!function_exists('ac_css')) {
 }
 .admit-modern .am-cand-tbl { flex: 1; width: 100%; border-collapse: collapse; font-size: 11.2px; }
 .admit-modern .am-cand-tbl td { padding: 2.8px 4px; vertical-align: top; line-height: 1.32; }
+.admit-modern .am-cand-grid2 { flex: 1; min-width: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; align-items: start; }
+.admit-modern .am-cand-grid2 .am-cand-tbl { width: 100%; }
+.admit-modern .am-cand-grid2 .am-ck { width: 104px; }
 .admit-modern .am-ck { font-weight: 700; color: #1f2937; width: 116px; white-space: nowrap; }
 .admit-modern .am-ck2 { font-weight: 700; color: #1f2937; width: 58px; white-space: nowrap; padding-left: 10px; }
 .admit-modern .am-photo {
@@ -1659,6 +1733,19 @@ if (!function_exists('ac_card_half')) {
 
         $admit_type = ac_normalize_type($d['admit_type'] ?? ($S['admit_type'] ?? 'general'));
         $is_admission = ($admit_type === 'admission');
+
+        $qr_lines = ['[VERIFIED]'];
+        if ($inst !== '') { $qr_lines[] = 'School: ' . $inst; }
+        if ($exam_banner !== '') { $qr_lines[] = 'Exam: ' . $exam_banner; }
+        $qr_lines[] = 'Type: ' . ($is_admission ? 'Admission' : 'General');
+        if (trim((string) ($d['name'] ?? '')) !== '') { $qr_lines[] = 'Name: ' . trim((string) ($d['name'] ?? '')); }
+        if (trim((string) ($d['student_id'] ?? '')) !== '') { $qr_lines[] = 'ID: ' . trim((string) ($d['student_id'] ?? '')); }
+        if (trim((string) ($d['class'] ?? '')) !== '') { $qr_lines[] = 'Class: ' . trim((string) ($d['class'] ?? '')); }
+        if (trim((string) ($d['roll'] ?? '')) !== '') { $qr_lines[] = 'Roll: ' . trim((string) ($d['roll'] ?? '')); }
+        if (trim((string) ($d['shift'] ?? '')) !== '') { $qr_lines[] = 'Shift: ' . trim((string) ($d['shift'] ?? '')); }
+        if (trim((string) ($d['section'] ?? '')) !== '') { $qr_lines[] = 'Section: ' . trim((string) ($d['section'] ?? '')); }
+        if ($session !== '') { $qr_lines[] = 'Session: ' . $session; }
+        $qr_payload = implode("\n", $qr_lines);
         $roll_lbl = $is_admission ? 'Admission Roll' : 'Roll No';
 
         $left_rows = [['Name', trim((string) ($d['name'] ?? '')) ?: '—']];
@@ -1787,11 +1874,11 @@ if (!function_exists('ac_card_full_modern')) {
         if (!empty($S['show_phone']) && $H['phone'] !== '') {
             $contact_spans[] = 'Phone <strong>' . sc_e($H['phone']) . '</strong>';
         }
-        if (!empty($S['show_website']) && $H['website'] !== '') {
-            $contact_spans[] = 'Website <strong>' . sc_e($H['website']) . '</strong>';
-        }
         if (!empty($S['show_email']) && $H['email'] !== '') {
             $contact_spans[] = 'Email <strong>' . sc_e($H['email']) . '</strong>';
+        }
+        if (!empty($S['show_website']) && $H['website'] !== '') {
+            $contact_spans[] = 'Website <strong>' . sc_e($H['website']) . '</strong>';
         }
 
         $exam_banner_parts = [];
@@ -1817,6 +1904,19 @@ if (!function_exists('ac_card_full_modern')) {
 
         $admit_type = ac_normalize_type($d['admit_type'] ?? ($S['admit_type'] ?? 'general'));
         $is_admission = ($admit_type === 'admission');
+
+        $qr_lines = ['[VERIFIED]'];
+        if ($inst !== '') { $qr_lines[] = 'School: ' . $inst; }
+        if ($exam_banner !== '') { $qr_lines[] = 'Exam: ' . $exam_banner; }
+        $qr_lines[] = 'Type: ' . ($is_admission ? 'Admission' : 'General');
+        if (trim((string) ($d['name'] ?? '')) !== '') { $qr_lines[] = 'Name: ' . trim((string) ($d['name'] ?? '')); }
+        if (trim((string) ($d['student_id'] ?? '')) !== '') { $qr_lines[] = 'ID: ' . trim((string) ($d['student_id'] ?? '')); }
+        if (trim((string) ($d['class'] ?? '')) !== '') { $qr_lines[] = 'Class: ' . trim((string) ($d['class'] ?? '')); }
+        if (trim((string) ($d['roll'] ?? '')) !== '') { $qr_lines[] = 'Roll: ' . trim((string) ($d['roll'] ?? '')); }
+        if (trim((string) ($d['shift'] ?? '')) !== '') { $qr_lines[] = 'Shift: ' . trim((string) ($d['shift'] ?? '')); }
+        if (trim((string) ($d['section'] ?? '')) !== '') { $qr_lines[] = 'Section: ' . trim((string) ($d['section'] ?? '')); }
+        if ($session !== '') { $qr_lines[] = 'Session: ' . $session; }
+        $qr_payload = implode("\n", $qr_lines);
 
         $dob_fmt = ac_fmt_date($d['dob'] ?? '', '—', 'F j, Y');
         $age_str = ac_calc_age($d['dob'] ?? '');
@@ -1880,8 +1980,8 @@ if (!function_exists('ac_card_full_modern')) {
                 </div>
                 <?php if ($show_qr && $qr_val !== ''): ?>
                 <div class="am-qr-box">
-                    <div class="ad-qr" id="<?php echo sc_e($qr_id); ?>" data-qr="<?php echo sc_e($qr_val); ?>"></div>
-                    <div class="am-qr-cap">Scan to verify</div>
+                    <div class="ad-qr" id="<?php echo sc_e($qr_id); ?>" data-qr="<?php echo sc_e($qr_payload); ?>"></div>
+                    <div class="am-qr-cap">[VERIFIED] Scan to verify</div>
                 </div>
                 <?php endif; ?>
             </div>
@@ -1919,67 +2019,76 @@ if (!function_exists('ac_card_full_modern')) {
                 </table>
             </div>
 
+            <?php
+            $stu_cols = ((int) ($S['student_info_cols'] ?? 1) === 2) ? 2 : 1;
+            $col_map = is_array($S['student_info_col_map'] ?? null) ? $S['student_info_col_map'] : [];
+            $cand_items = [
+                'name'              => ['Name',              trim((string) ($d['name'] ?? '')) ?: '—',        true,  1],
+                'father_name'       => ["Father's Name",     trim((string) ($d['father_name'] ?? '')) ?: '—', false, 1],
+                'mother_name'       => ["Mother's Name",     trim((string) ($d['mother_name'] ?? '')) ?: '—', false, 1],
+                'dob'               => ['Date of Birth',     $dob_fmt,                                        false, 1],
+                'age'               => ['Age',               $age_str,                                        false, 2],
+                'birth_reg'         => ['Birth Reg. No.',    $breg_val,                                       false, 1],
+                'gender'            => ['Gender',            $gender_val,                                     false, 2],
+                'mobile'            => ['Mobile',            $mob_val,                                        false, 1],
+                'present_address'   => ['Present Address',   $pres_addr,                                      false, 1],
+                'permanent_address' => ['Permanent Address', $perm_addr,                                      false, 2],
+            ];
+            $toggle_map = [
+                'father_name'       => 'show_father_name',
+                'mother_name'       => 'show_mother_name',
+                'dob'               => 'show_dob',
+                'age'               => 'show_age',
+                'birth_reg'         => 'show_birth_reg',
+                'gender'            => 'show_gender',
+                'mobile'            => 'show_student_mobile',
+                'present_address'   => 'show_student_address',
+                'permanent_address' => 'show_permanent_address',
+            ];
+            $col1_rows = [];
+            $col2_rows = [];
+            foreach ($cand_items as $fk => [$flbl, $fval, $fbold, $fdef_col]) {
+                if (isset($toggle_map[$fk]) && empty($S[$toggle_map[$fk]])) {
+                    continue;
+                }
+                $assigned_col = ($stu_cols === 2) ? (((int) ($col_map[$fk] ?? $fdef_col) === 2) ? 2 : 1) : 1;
+                if ($assigned_col === 2) {
+                    $col2_rows[] = [$flbl, $fval, $fbold];
+                } else {
+                    $col1_rows[] = [$flbl, $fval, $fbold];
+                }
+            }
+            ?>
             <div class="am-cand-wrap">
+                <?php if ($stu_cols === 2 && $col1_rows && $col2_rows): ?>
+                <div class="am-cand-grid2">
+                    <table class="am-cand-tbl">
+                        <?php foreach ($col1_rows as [$rlbl, $rval, $rbold]): ?>
+                        <tr>
+                            <td class="am-ck"><?php echo sc_e($rlbl); ?></td>
+                            <td><?php echo $rbold ? '<strong>' . sc_e($rval) . '</strong>' : sc_e($rval); ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </table>
+                    <table class="am-cand-tbl">
+                        <?php foreach ($col2_rows as [$rlbl, $rval, $rbold]): ?>
+                        <tr>
+                            <td class="am-ck"><?php echo sc_e($rlbl); ?></td>
+                            <td><?php echo $rbold ? '<strong>' . sc_e($rval) . '</strong>' : sc_e($rval); ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </table>
+                </div>
+                <?php else: ?>
                 <table class="am-cand-tbl">
+                    <?php foreach (array_merge($col1_rows, $col2_rows) as [$rlbl, $rval, $rbold]): ?>
                     <tr>
-                        <td class="am-ck">Name</td>
-                        <td colspan="3"><strong><?php echo sc_e(trim((string) ($d['name'] ?? '')) ?: '—'); ?></strong></td>
+                        <td class="am-ck"><?php echo sc_e($rlbl); ?></td>
+                        <td><?php echo $rbold ? '<strong>' . sc_e($rval) . '</strong>' : sc_e($rval); ?></td>
                     </tr>
-                    <?php if (!empty($S['show_father_name'])): ?>
-                    <tr>
-                        <td class="am-ck">Father's Name</td>
-                        <td colspan="3"><?php echo sc_e(trim((string) ($d['father_name'] ?? '')) ?: '—'); ?></td>
-                    </tr>
-                    <?php endif; ?>
-                    <?php if (!empty($S['show_mother_name'])): ?>
-                    <tr>
-                        <td class="am-ck">Mother's Name</td>
-                        <td colspan="3"><?php echo sc_e(trim((string) ($d['mother_name'] ?? '')) ?: '—'); ?></td>
-                    </tr>
-                    <?php endif; ?>
-                    <?php if (!empty($S['show_dob']) || !empty($S['show_age'])): ?>
-                    <tr>
-                        <?php if (!empty($S['show_dob'])): ?>
-                            <td class="am-ck">Date of Birth</td>
-                            <td<?php echo empty($S['show_age']) ? ' colspan="3"' : ''; ?>><?php echo sc_e($dob_fmt); ?></td>
-                        <?php endif; ?>
-                        <?php if (!empty($S['show_age'])): ?>
-                            <td class="<?php echo !empty($S['show_dob']) ? 'am-ck2' : 'am-ck'; ?>">Age</td>
-                            <td<?php echo empty($S['show_dob']) ? ' colspan="3"' : ''; ?>><?php echo sc_e($age_str); ?></td>
-                        <?php endif; ?>
-                    </tr>
-                    <?php endif; ?>
-                    <?php if (!empty($S['show_birth_reg']) || !empty($S['show_gender'])): ?>
-                    <tr>
-                        <?php if (!empty($S['show_birth_reg'])): ?>
-                            <td class="am-ck">Birth Reg. No.</td>
-                            <td<?php echo empty($S['show_gender']) ? ' colspan="3"' : ''; ?>><?php echo sc_e($breg_val); ?></td>
-                        <?php endif; ?>
-                        <?php if (!empty($S['show_gender'])): ?>
-                            <td class="<?php echo !empty($S['show_birth_reg']) ? 'am-ck2' : 'am-ck'; ?>">Gender</td>
-                            <td<?php echo empty($S['show_birth_reg']) ? ' colspan="3"' : ''; ?>><?php echo sc_e($gender_val); ?></td>
-                        <?php endif; ?>
-                    </tr>
-                    <?php endif; ?>
-                    <?php if (!empty($S['show_student_mobile'])): ?>
-                    <tr>
-                        <td class="am-ck">Mobile</td>
-                        <td colspan="3"><?php echo sc_e($mob_val); ?></td>
-                    </tr>
-                    <?php endif; ?>
-                    <?php if (!empty($S['show_student_address'])): ?>
-                    <tr>
-                        <td class="am-ck">Present Address</td>
-                        <td colspan="3"><?php echo sc_e($pres_addr); ?></td>
-                    </tr>
-                    <?php endif; ?>
-                    <?php if (!empty($S['show_permanent_address'])): ?>
-                    <tr>
-                        <td class="am-ck">Permanent Address</td>
-                        <td colspan="3"><?php echo sc_e($perm_addr); ?></td>
-                    </tr>
-                    <?php endif; ?>
+                    <?php endforeach; ?>
                 </table>
+                <?php endif; ?>
                 <?php if (!empty($S['show_photo'])): ?>
                 <div class="am-photo">
                     <?php if ($photo !== ''): ?><img src="<?php echo sc_e($photo); ?>" alt="Photo">
@@ -2093,6 +2202,19 @@ if (!function_exists('ac_card_full')) {
         }
         $admit_type = ac_normalize_type($d['admit_type'] ?? ($S['admit_type'] ?? 'general'));
         $is_admission = ($admit_type === 'admission');
+
+        $qr_lines = ['[VERIFIED]'];
+        if ($inst !== '') { $qr_lines[] = 'School: ' . $inst; }
+        if ($exam_banner !== '') { $qr_lines[] = 'Exam: ' . $exam_banner; }
+        $qr_lines[] = 'Type: ' . ($is_admission ? 'Admission' : 'General');
+        if (trim((string) ($d['name'] ?? '')) !== '') { $qr_lines[] = 'Name: ' . trim((string) ($d['name'] ?? '')); }
+        if (trim((string) ($d['student_id'] ?? '')) !== '') { $qr_lines[] = 'ID: ' . trim((string) ($d['student_id'] ?? '')); }
+        if (trim((string) ($d['class'] ?? '')) !== '') { $qr_lines[] = 'Class: ' . trim((string) ($d['class'] ?? '')); }
+        if (trim((string) ($d['roll'] ?? '')) !== '') { $qr_lines[] = 'Roll: ' . trim((string) ($d['roll'] ?? '')); }
+        if (trim((string) ($d['shift'] ?? '')) !== '') { $qr_lines[] = 'Shift: ' . trim((string) ($d['shift'] ?? '')); }
+        if (trim((string) ($d['section'] ?? '')) !== '') { $qr_lines[] = 'Section: ' . trim((string) ($d['section'] ?? '')); }
+        if ($session !== '') { $qr_lines[] = 'Session: ' . $session; }
+        $qr_payload = implode("\n", $qr_lines);
         $H = ac_resolve_header($d, $S);
         $photo = !empty($S['show_photo']) ? ac_asset_url($d['photo'] ?? '') : '';
         $inst = $H['inst'];
@@ -2363,6 +2485,19 @@ if (!function_exists('ac_card')) {
 
         $admit_type = ac_normalize_type($d['admit_type'] ?? ($S['admit_type'] ?? 'general'));
         $is_admission = ($admit_type === 'admission');
+
+        $qr_lines = ['[VERIFIED]'];
+        if ($inst !== '') { $qr_lines[] = 'School: ' . $inst; }
+        if ($exam_banner !== '') { $qr_lines[] = 'Exam: ' . $exam_banner; }
+        $qr_lines[] = 'Type: ' . ($is_admission ? 'Admission' : 'General');
+        if (trim((string) ($d['name'] ?? '')) !== '') { $qr_lines[] = 'Name: ' . trim((string) ($d['name'] ?? '')); }
+        if (trim((string) ($d['student_id'] ?? '')) !== '') { $qr_lines[] = 'ID: ' . trim((string) ($d['student_id'] ?? '')); }
+        if (trim((string) ($d['class'] ?? '')) !== '') { $qr_lines[] = 'Class: ' . trim((string) ($d['class'] ?? '')); }
+        if (trim((string) ($d['roll'] ?? '')) !== '') { $qr_lines[] = 'Roll: ' . trim((string) ($d['roll'] ?? '')); }
+        if (trim((string) ($d['shift'] ?? '')) !== '') { $qr_lines[] = 'Shift: ' . trim((string) ($d['shift'] ?? '')); }
+        if (trim((string) ($d['section'] ?? '')) !== '') { $qr_lines[] = 'Section: ' . trim((string) ($d['section'] ?? '')); }
+        if ($session !== '') { $qr_lines[] = 'Session: ' . $session; }
+        $qr_payload = implode("\n", $qr_lines);
         $H = ac_resolve_header($d, $S);
         $logo = !empty($S['show_logo']) ? $H['logo'] : '';
         $wm = $logo !== '' ? "--ad-wm:url('" . sc_e($logo) . "');" : '';
